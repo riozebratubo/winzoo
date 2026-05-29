@@ -1,8 +1,16 @@
 #pragma once
 #include <windows.h>
 #include <vector>
+#include <string>
 #include "Theme.h"
 #include "TaskButton.h"
+
+struct ClockInfo {
+    bool         visible  = false;
+    RECT         rect     = {};
+    std::wstring timeLine;
+    std::wstring dateLine;
+};
 
 class Renderer {
 public:
@@ -11,7 +19,8 @@ public:
                const std::vector<TaskButton>& buttons,
                int hoveredIdx, int pressedIdx,
                int dragIdx, POINT ghostPt,
-               const ThemeColors& colors, int dpi);
+               const ThemeColors& colors, int dpi,
+               const ClockInfo& clock);
 
     ~Renderer();
 
@@ -19,9 +28,10 @@ private:
     HDC     hdcMem_  = nullptr;
     HBITMAP hBitmap_ = nullptr;
     HFONT   hFont_   = nullptr;
+    HFONT   hFontSm_ = nullptr;  // slightly smaller font for the date line
     int     width_   = 0;
     int     height_  = 0;
 
-    void CreateFont(int dpi);
+    void CreateFonts(int dpi);
     void DestroyResources();
 };

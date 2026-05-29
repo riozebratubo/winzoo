@@ -14,6 +14,14 @@ struct DlgData {
     Settings* settings;
 };
 
+static void SetClockControlsEnabled(HWND hwnd, bool enabled)
+{
+    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_TIMEFMT), enabled);
+    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_DATEFMT), enabled);
+    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_CLOCKW),  enabled);
+    EnableWindow(GetDlgItem(hwnd, IDC_SPIN_CLOCKW),  enabled);
+}
+
 INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     DlgData* data = reinterpret_cast<DlgData*>(GetWindowLongPtrW(hwnd, DWLP_USER));
@@ -41,10 +49,33 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         CheckDlgButton(hwnd, IDC_CHECK_MIDDLECLICK,
                        data->settings->middleClickClose ? BST_CHECKED : BST_UNCHECKED);
 
+        CheckDlgButton(hwnd, IDC_CHECK_RIGHTCLICKGAP,
+                       data->settings->showRightClickGap ? BST_CHECKED : BST_UNCHECKED);
+
+        // Clock group
+        CheckDlgButton(hwnd, IDC_CHECK_SHOWCLOCK,
+                       data->settings->showClock ? BST_CHECKED : BST_UNCHECKED);
+
+        SetDlgItemTextW(hwnd, IDC_EDIT_TIMEFMT, data->settings->clockTimeFormat.c_str());
+        SetDlgItemTextW(hwnd, IDC_EDIT_DATEFMT, data->settings->clockDateFormat.c_str());
+
+        HWND hClockSpin = GetDlgItem(hwnd, IDC_SPIN_CLOCKW);
+        HWND hClockEdit = GetDlgItem(hwnd, IDC_EDIT_CLOCKW);
+        SendMessageW(hClockSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hClockEdit), 0);
+        SendMessageW(hClockSpin, UDM_SETRANGE32, 40, 400);
+        SendMessageW(hClockSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(data->settings->clockWidth));
+
+        SetClockControlsEnabled(hwnd, data->settings->showClock);
+
         return TRUE;
     }
 
     case WM_COMMAND:
+        if (LOWORD(wParam) == IDC_CHECK_SHOWCLOCK) {
+            bool checked = IsDlgButtonChecked(hwnd, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;
+            SetClockControlsEnabled(hwnd, checked);
+            return TRUE;
+        }
         if (LOWORD(wParam) == IDOK && data) {
             HWND hPos   = GetDlgItem(hwnd, IDC_COMBO_POSITION);
             HWND hTheme = GetDlgItem(hwnd, IDC_COMBO_THEME);
@@ -57,8 +88,26 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             if (posIdx >= 0)   data->settings->position  = static_cast<TaskbarPosition>(posIdx);
             if (themeIdx >= 0) data->settings->theme      = static_cast<ThemePreset>(themeIdx);
             if (thick >= 28 && thick <= 120) data->settings->thickness = thick;
+
             data->settings->middleClickClose =
                 IsDlgButtonChecked(hwnd, IDC_CHECK_MIDDLECLICK) == BST_CHECKED;
+
+            data->settings->showRightClickGap =
+                IsDlgButtonChecked(hwnd, IDC_CHECK_RIGHTCLICKGAP) == BST_CHECKED;
+
+            data->settings->showClock =
+                IsDlgButtonChecked(hwnd, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;
+
+            wchar_t buf[128];
+            GetDlgItemTextW(hwnd, IDC_EDIT_TIMEFMT, buf, 128);
+            data->settings->clockTimeFormat = buf;
+
+            GetDlgItemTextW(hwnd, IDC_EDIT_DATEFMT, buf, 128);
+            data->settings->clockDateFormat = buf;
+
+            int cw = static_cast<int>(
+                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_CLOCKW), UDM_GETPOS32, 0, 0));
+            if (cw >= 40 && cw <= 400) data->settings->clockWidth = cw;
 
             EndDialog(hwnd, IDOK);
             return TRUE;

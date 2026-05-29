@@ -4,6 +4,34 @@
 #include <algorithm>
 #include <windowsx.h>
 
+static std::wstring ApplyClockPattern(const std::wstring& pattern, const SYSTEMTIME& st, bool isTime)
+{
+    std::wstring result = pattern;
+
+    auto sub = [&](const wchar_t* token, int value, int digits) {
+        wchar_t buf[8];
+        swprintf_s(buf, digits == 4 ? L"%04d" : L"%02d", value);
+        size_t pos = 0;
+        while ((pos = result.find(token, pos)) != std::wstring::npos) {
+            result.replace(pos, wcslen(token), buf);
+            pos += static_cast<size_t>(digits);
+        }
+    };
+
+    if (isTime) {
+        sub(L"$hh", st.wHour,   2);
+        sub(L"$mm", st.wMinute, 2);
+        sub(L"$ss", st.wSecond, 2);
+    } else {
+        sub(L"$yyyy", st.wYear,        4);  // before $yy to avoid partial match
+        sub(L"$yy",   st.wYear % 100,  2);
+        sub(L"$dd",   st.wDay,         2);
+        sub(L"$mm",   st.wMonth,       2);
+    }
+
+    return result;
+}
+
 static constexpr wchar_t kClassName[] = L"WinzooTaskbar";
 
 bool TaskbarWindow::RegisterWndClass(HINSTANCE hInst)
@@ -155,31 +183,65 @@ void TaskbarWindow::LayoutButtons()
 
     int count   = static_cast<int>(buttons.size());
     int pad     = Scale(2, dpi_);
-    int tail    = Scale(20, dpi_);   // always-empty right-click zone at the trailing edge
+    int minTail = Scale(20, dpi_);   // right-click zone when no clock
     int maxBtnW = Scale(200, dpi_);
     int minBtnW = Scale(48, dpi_);
 
     bool isHoriz = (settings_.position != TaskbarPosition::Left &&
                     settings_.position != TaskbarPosition::Right);
 
-    if (isHoriz) {
-        int available = w - 2 * pad - tail;
-        int btnW = std::min(maxBtnW,
-                            std::max(minBtnW,
-                                     (available - (count - 1) * pad) / count));
-        int x = pad;
-        for (auto& btn : buttons) {
-            btn.rect = { x, pad, x + btnW, h - pad };
-            x += btnW + pad;
+    // Compute clock rect and trailing reservation
+    clockRect_ = {};
+    if (settings_.showClock) {
+        int cw = Scale(settings_.clockWidth, dpi_);
+        if (isHoriz) {
+            clockRect_ = { w - cw, pad, w - pad, h - pad };
+        } else {
+            clockRect_ = { pad, h - cw, w - pad, h - pad };
+        }
+        int tail = cw;  // clock itself is the right-click zone — no extra gap needed
+
+        if (isHoriz) {
+            int available = w - 2 * pad - tail;
+            int btnW = std::min(maxBtnW,
+                                std::max(minBtnW,
+                                         count > 0 ? (available - (count - 1) * pad) / count : minBtnW));
+            int x = pad;
+            for (auto& btn : buttons) {
+                btn.rect = { x, pad, x + btnW, h - pad };
+                x += btnW + pad;
+            }
+        } else {
+            int btnH = Scale(36, dpi_);
+            int maxY = h - tail;
+            int y    = pad;
+            for (auto& btn : buttons) {
+                if (y + btnH > maxY) break;
+                btn.rect = { pad, y, w - pad, y + btnH };
+                y += btnH + pad;
+            }
         }
     } else {
-        int btnH    = Scale(36, dpi_);
-        int maxY    = h - tail;   // stop before the trailing reserved zone
-        int y       = pad;
-        for (auto& btn : buttons) {
-            if (y + btnH > maxY) break;
-            btn.rect = { pad, y, w - pad, y + btnH };
-            y += btnH + pad;
+        int tail = settings_.showRightClickGap ? minTail : 0;
+        if (isHoriz) {
+            int available = w - 2 * pad - tail;
+            int btnW = std::min(maxBtnW,
+                                std::max(minBtnW,
+                                         count > 0 ? (available - (count - 1) * pad) / count : minBtnW));
+            int x = pad;
+            for (auto& btn : buttons) {
+                btn.rect = { x, pad, x + btnW, h - pad };
+                x += btnW + pad;
+            }
+        } else {
+            int btnH = Scale(36, dpi_);
+            int maxY = h - tail;
+            int y    = pad;
+            for (auto& btn : buttons) {
+                if (y + btnH > maxY) break;
+                btn.rect = { pad, y, w - pad, y + btnH };
+                y += btnH + pad;
+            }
         }
     }
 }
@@ -368,13 +430,23 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         POINT ghostPt = drag_.CurrentPoint();
         ScreenToClient(hwnd, &ghostPt);
 
+        ClockInfo clock;
+        if (settings_.showClock) {
+            SYSTEMTIME st;
+            GetLocalTime(&st);
+            clock.visible  = true;
+            clock.rect     = clockRect_;
+            clock.timeLine = ApplyClockPattern(settings_.clockTimeFormat, st, true);
+            clock.dateLine = ApplyClockPattern(settings_.clockDateFormat, st, false);
+        }
+
         renderer_.Paint(hdc, client.right, client.bottom,
                         tracker_.Buttons(),
                         hoveredIdx_,
-                        drag_.State() == DragState::Pressed ? drag_.DragIndex() : -1,
+                        drag_.State() == DragState::Pressed  ? drag_.DragIndex() : -1,
                         drag_.State() == DragState::Dragging ? drag_.DragIndex() : -1,
                         ghostPt,
-                        colors_, dpi_);
+                        colors_, dpi_, clock);
         EndPaint(hwnd, &ps);
         return 0;
     }

@@ -11,6 +11,11 @@ struct Settings {
     int             thickness = 48;
     int             floatX           = 100;
     int             floatY           = 100;
-    bool            middleClickClose = true;
+    bool            middleClickClose  = true;
+    bool            showRightClickGap = true;
+    bool            showClock         = true;
+    int             clockWidth        = 80;
+    std::wstring    clockTimeFormat   = L"$hh:$mm";
+    std::wstring    clockDateFormat   = L"$dd/$mm/$yyyy";
     std::vector<std::wstring> pinnedExePaths;
 };

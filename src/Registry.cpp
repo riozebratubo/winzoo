@@ -38,6 +38,31 @@ bool RegistryKey::ReadDword(std::wstring_view name, DWORD& out) const
            && type == REG_DWORD;
 }
 
+bool RegistryKey::ReadString(std::wstring_view name, std::wstring& out) const
+{
+    if (!hKey_) return false;
+    DWORD size = 0, type;
+    if (RegQueryValueExW(hKey_, name.data(), nullptr, &type, nullptr, &size) != ERROR_SUCCESS)
+        return false;
+    if (type != REG_SZ) return false;
+
+    std::wstring buf(size / sizeof(wchar_t), L'\0');
+    if (RegQueryValueExW(hKey_, name.data(), nullptr, &type,
+                         reinterpret_cast<BYTE*>(buf.data()), &size) != ERROR_SUCCESS)
+        return false;
+    while (!buf.empty() && buf.back() == L'\0') buf.pop_back();
+    out = std::move(buf);
+    return true;
+}
+
+bool RegistryKey::WriteString(std::wstring_view name, std::wstring_view val)
+{
+    if (!hKey_) return false;
+    return RegSetValueExW(hKey_, name.data(), 0, REG_SZ,
+                          reinterpret_cast<const BYTE*>(val.data()),
+                          static_cast<DWORD>((val.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+}
+
 bool RegistryKey::ReadMultiString(std::wstring_view name, std::vector<std::wstring>& out) const
 {
     if (!hKey_) return false;
@@ -95,7 +120,15 @@ Settings LoadSettings()
     if (s.thickness < 28) s.thickness = 28;
     if (s.thickness > 120) s.thickness = 120;
 
-    if (key.ReadDword(L"MiddleClickClose", val)) s.middleClickClose = val != 0;
+    if (key.ReadDword(L"MiddleClickClose",  val)) s.middleClickClose  = val != 0;
+    if (key.ReadDword(L"ShowRightClickGap", val)) s.showRightClickGap = val != 0;
+    if (key.ReadDword(L"ShowClock",         val)) s.showClock         = val != 0;
+    if (key.ReadDword(L"ClockWidth",       val)) s.clockWidth       = static_cast<int>(val);
+    key.ReadString(L"ClockTimeFormat", s.clockTimeFormat);
+    key.ReadString(L"ClockDateFormat", s.clockDateFormat);
+
+    if (s.clockWidth < 40)  s.clockWidth = 40;
+    if (s.clockWidth > 400) s.clockWidth = 400;
 
     key.ReadMultiString(L"PinnedPaths", s.pinnedExePaths);
     return s;
@@ -111,6 +144,11 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"Thickness", static_cast<DWORD>(s.thickness));
     key.WriteDword(L"FloatX",    static_cast<DWORD>(s.floatX));
     key.WriteDword(L"FloatY",          static_cast<DWORD>(s.floatY));
-    key.WriteDword(L"MiddleClickClose", s.middleClickClose ? 1u : 0u);
+    key.WriteDword(L"MiddleClickClose",  s.middleClickClose  ? 1u : 0u);
+    key.WriteDword(L"ShowRightClickGap", s.showRightClickGap ? 1u : 0u);
+    key.WriteDword(L"ShowClock",         s.showClock         ? 1u : 0u);
+    key.WriteDword(L"ClockWidth",       static_cast<DWORD>(s.clockWidth));
+    key.WriteString(L"ClockTimeFormat", s.clockTimeFormat);
+    key.WriteString(L"ClockDateFormat", s.clockDateFormat);
     key.WriteMultiString(L"PinnedPaths", s.pinnedExePaths);
 }

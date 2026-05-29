@@ -10,11 +10,13 @@ void Renderer::DestroyResources()
     if (hBitmap_) { DeleteObject(hBitmap_); hBitmap_ = nullptr; }
     if (hdcMem_)  { DeleteDC(hdcMem_);      hdcMem_  = nullptr; }
     if (hFont_)   { DeleteObject(hFont_);   hFont_   = nullptr; }
+    if (hFontSm_) { DeleteObject(hFontSm_); hFontSm_ = nullptr; }
 }
 
-void Renderer::CreateFont(int dpi)
+void Renderer::CreateFonts(int dpi)
 {
-    if (hFont_) { DeleteObject(hFont_); hFont_ = nullptr; }
+    if (hFont_)   { DeleteObject(hFont_);   hFont_   = nullptr; }
+    if (hFontSm_) { DeleteObject(hFontSm_); hFontSm_ = nullptr; }
 
     LOGFONTW lf = {};
     lf.lfHeight  = -MulDiv(9, dpi, 72);
@@ -22,6 +24,9 @@ void Renderer::CreateFont(int dpi)
     lf.lfQuality = CLEARTYPE_QUALITY;
     wcscpy_s(lf.lfFaceName, L"Segoe UI");
     hFont_ = CreateFontIndirectW(&lf);
+
+    lf.lfHeight = -MulDiv(8, dpi, 72);
+    hFontSm_ = CreateFontIndirectW(&lf);
 }
 
 void Renderer::Resize(int w, int h, HDC hdcRef)
@@ -43,11 +48,12 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
                      const std::vector<TaskButton>& buttons,
                      int hoveredIdx, int pressedIdx,
                      int dragIdx, POINT ghostPt,
-                     const ThemeColors& colors, int dpi)
+                     const ThemeColors& colors, int dpi,
+                     const ClockInfo& clock)
 {
     if (!hdcMem_) return;
 
-    if (!hFont_) CreateFont(dpi);
+    if (!hFont_) CreateFonts(dpi);
     HFONT oldFont = static_cast<HFONT>(SelectObject(hdcMem_, hFont_));
 
     // Background
@@ -56,16 +62,15 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
     FillRect(hdcMem_, &rc, bgBrush);
     DeleteObject(bgBrush);
 
-    // Draw all buttons except the one being dragged
+    // Task buttons (skip the one being dragged)
     for (int i = 0; i < static_cast<int>(buttons.size()); ++i) {
         if (i == dragIdx) continue;
-        const auto& btn = buttons[i];
-        btn.Draw(hdcMem_, colors,
-                 i == hoveredIdx, i == pressedIdx,
-                 false, dpi);
+        buttons[i].Draw(hdcMem_, colors,
+                        i == hoveredIdx, i == pressedIdx,
+                        false, dpi);
     }
 
-    // Draw drag ghost at cursor position
+    // Drag ghost
     if (dragIdx >= 0 && dragIdx < static_cast<int>(buttons.size())) {
         const auto& btn = buttons[dragIdx];
         int bw = btn.rect.right  - btn.rect.left;
@@ -77,7 +82,7 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
         };
         ghost.Draw(hdcMem_, colors, false, false, true, dpi);
 
-        // Drop indicator line between buttons
+        // Drop indicator line
         for (int i = 0; i <= static_cast<int>(buttons.size()); ++i) {
             int cx = (i < static_cast<int>(buttons.size()))
                      ? buttons[i].rect.left
@@ -92,6 +97,38 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
                 break;
             }
         }
+    }
+
+    // Clock
+    if (clock.visible && (clock.rect.right > clock.rect.left)) {
+        int clkH  = clock.rect.bottom - clock.rect.top;
+        int halfH = clkH / 2;
+
+        // Divider line on the leading edge of the clock area
+        HPEN divPen = CreatePen(PS_SOLID, 1, colors.separator);
+        HPEN oldPen = static_cast<HPEN>(SelectObject(hdcMem_, divPen));
+        MoveToEx(hdcMem_, clock.rect.left - MulDiv(3, dpi, 96), clock.rect.top,    nullptr);
+        LineTo(  hdcMem_, clock.rect.left - MulDiv(3, dpi, 96), clock.rect.bottom);
+        SelectObject(hdcMem_, oldPen);
+        DeleteObject(divPen);
+
+        SetBkMode(hdcMem_, TRANSPARENT);
+
+        // Time (upper half) — normal font, full brightness
+        RECT timeRect = { clock.rect.left, clock.rect.top,
+                          clock.rect.right, clock.rect.top + halfH };
+        SelectObject(hdcMem_, hFont_);
+        SetTextColor(hdcMem_, colors.text);
+        DrawTextW(hdcMem_, clock.timeLine.c_str(), -1, &timeRect,
+                  DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+
+        // Date (lower half) — small font, dimmed
+        RECT dateRect = { clock.rect.left, clock.rect.top + halfH,
+                          clock.rect.right, clock.rect.bottom };
+        SelectObject(hdcMem_, hFontSm_);
+        SetTextColor(hdcMem_, colors.textDimmed);
+        DrawTextW(hdcMem_, clock.dateLine.c_str(), -1, &dateRect,
+                  DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     }
 
     SelectObject(hdcMem_, oldFont);

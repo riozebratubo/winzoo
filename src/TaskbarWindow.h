@@ -39,6 +39,7 @@ private:
     ThemeColors     colors_         = {};
     int             dpi_            = 96;
     int             hoveredIdx_     = -1;
+    RECT            clockRect_      = {};
 
     AppBar          appBar_;
     WindowTracker   tracker_;

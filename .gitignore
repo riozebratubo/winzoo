@@ -1,48 +1,9 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-*.so.*
-
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# Build directories
+# Build output
 build/
 Build/
 build-*/
+x64/
+x86/
 
 # CMake generated files
 CMakeFiles/
@@ -52,18 +13,27 @@ Makefile
 install_manifest.txt
 compile_commands.json
 
-# Temporary files
+# MSVC compiler artifacts
+*.obj
+*.pch
+*.gch
+*.ilk
+*.pdb
+*.lib
+*.exp
+
+# Visual Studio IDE
+.vs/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+
+# Resource compiler temp file (created by the RC editor in VS)
+*.aps
+
+# Temporary and editor files
 *.tmp
 *.log
 *.bak
 *.swp
-
-# vcpkg
-vcpkg_installed/
-
-# debug information files
-*.dwo
-
-# test output & cache
-Testing/
-.cache/

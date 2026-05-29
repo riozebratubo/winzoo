@@ -1,5 +1,6 @@
 #include "SettingsDialog.h"
 #include <commctrl.h>
+#include <commdlg.h>
 #include <uxtheme.h>
 #include "resource.h"
 
@@ -30,9 +31,14 @@ static const int kAppBtnControls[] = {
 };
 static const int kClockControls[] = {
     IDC_CHECK_SHOWCLOCK,
-    IDC_LBL_TIMEFMT, IDC_EDIT_TIMEFMT,
-    IDC_LBL_DATEFMT, IDC_EDIT_DATEFMT,
-    IDC_LBL_CLOCKW,  IDC_EDIT_CLOCKW, IDC_SPIN_CLOCKW,
+    IDC_LBL_TIMEFMT,  IDC_EDIT_TIMEFMT,
+    IDC_LBL_DATEFMT,  IDC_EDIT_DATEFMT,
+    IDC_LBL_CLOCKW,   IDC_EDIT_CLOCKW,  IDC_SPIN_CLOCKW,
+    IDC_LBL_LINESPACING, IDC_EDIT_LINESPACING, IDC_SPIN_LINESPACING,
+    IDC_LBL_TIMEFONTSIZE, IDC_EDIT_TIMEFONTSIZE, IDC_SPIN_TIMEFONTSIZE,
+    IDC_LBL_DATEFONTSIZE, IDC_EDIT_DATEFONTSIZE, IDC_SPIN_DATEFONTSIZE,
+    IDC_LBL_TIMECOLOR, IDC_BTN_TIMECOLOR,
+    IDC_LBL_DATECOLOR, IDC_BTN_DATECOLOR,
     IDC_LBL_TOKENS,
     0
 };
@@ -51,9 +57,14 @@ static void ShowTab(HWND hwnd, int tab)
 static void SetClockControlsEnabled(HWND hwnd, bool enabled)
 {
     static const int kIds[] = {
-        IDC_LBL_TIMEFMT, IDC_EDIT_TIMEFMT,
-        IDC_LBL_DATEFMT, IDC_EDIT_DATEFMT,
-        IDC_LBL_CLOCKW,  IDC_EDIT_CLOCKW, IDC_SPIN_CLOCKW,
+        IDC_LBL_TIMEFMT,  IDC_EDIT_TIMEFMT,
+        IDC_LBL_DATEFMT,  IDC_EDIT_DATEFMT,
+        IDC_LBL_CLOCKW,   IDC_EDIT_CLOCKW,  IDC_SPIN_CLOCKW,
+        IDC_LBL_LINESPACING, IDC_EDIT_LINESPACING, IDC_SPIN_LINESPACING,
+        IDC_LBL_TIMEFONTSIZE, IDC_EDIT_TIMEFONTSIZE, IDC_SPIN_TIMEFONTSIZE,
+        IDC_LBL_DATEFONTSIZE, IDC_EDIT_DATEFONTSIZE, IDC_SPIN_DATEFONTSIZE,
+        IDC_LBL_TIMECOLOR, IDC_BTN_TIMECOLOR,
+        IDC_LBL_DATECOLOR, IDC_BTN_DATECOLOR,
         IDC_LBL_TOKENS,
         0
     };
@@ -114,6 +125,24 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         SendMessageW(hClockSpin, UDM_SETRANGE32, 40, 400);
         SendMessageW(hClockSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(data->settings->clockWidth));
 
+        HWND hSpacingSpin = GetDlgItem(hwnd, IDC_SPIN_LINESPACING);
+        HWND hSpacingEdit = GetDlgItem(hwnd, IDC_EDIT_LINESPACING);
+        SendMessageW(hSpacingSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hSpacingEdit), 0);
+        SendMessageW(hSpacingSpin, UDM_SETRANGE32, 0, 20);
+        SendMessageW(hSpacingSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(data->settings->clockLineSpacing));
+
+        HWND hTimeSzSpin = GetDlgItem(hwnd, IDC_SPIN_TIMEFONTSIZE);
+        HWND hTimeSzEdit = GetDlgItem(hwnd, IDC_EDIT_TIMEFONTSIZE);
+        SendMessageW(hTimeSzSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hTimeSzEdit), 0);
+        SendMessageW(hTimeSzSpin, UDM_SETRANGE32, 6, 36);
+        SendMessageW(hTimeSzSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(data->settings->clockTimeFontSize));
+
+        HWND hDateSzSpin = GetDlgItem(hwnd, IDC_SPIN_DATEFONTSIZE);
+        HWND hDateSzEdit = GetDlgItem(hwnd, IDC_EDIT_DATEFONTSIZE);
+        SendMessageW(hDateSzSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hDateSzEdit), 0);
+        SendMessageW(hDateSzSpin, UDM_SETRANGE32, 6, 36);
+        SendMessageW(hDateSzSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(data->settings->clockDateFontSize));
+
         SetClockControlsEnabled(hwnd, data->settings->showClock);
 
         // Tab control
@@ -159,7 +188,48 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         return reinterpret_cast<INT_PTR>(GetStockObject(NULL_BRUSH));
     }
 
+    case WM_DRAWITEM: {
+        auto* di = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
+        if (!data) break;
+        if (di->CtlID == IDC_BTN_TIMECOLOR || di->CtlID == IDC_BTN_DATECOLOR) {
+            COLORREF color = (di->CtlID == IDC_BTN_TIMECOLOR)
+                             ? data->settings->clockTimeColor
+                             : data->settings->clockDateColor;
+            HBRUSH br = CreateSolidBrush(color);
+            FillRect(di->hDC, &di->rcItem, br);
+            DeleteObject(br);
+            HPEN pen    = CreatePen(PS_SOLID, 1, GetSysColor(COLOR_WINDOWFRAME));
+            HPEN oldPen = static_cast<HPEN>(SelectObject(di->hDC, pen));
+            SelectObject(di->hDC, GetStockObject(NULL_BRUSH));
+            Rectangle(di->hDC, di->rcItem.left, di->rcItem.top,
+                      di->rcItem.right, di->rcItem.bottom);
+            SelectObject(di->hDC, oldPen);
+            DeleteObject(pen);
+            return TRUE;
+        }
+        break;
+    }
+
     case WM_COMMAND:
+        if ((LOWORD(wParam) == IDC_BTN_TIMECOLOR || LOWORD(wParam) == IDC_BTN_DATECOLOR)
+            && data)
+        {
+            COLORREF* colorField = (LOWORD(wParam) == IDC_BTN_TIMECOLOR)
+                                   ? &data->settings->clockTimeColor
+                                   : &data->settings->clockDateColor;
+            static COLORREF customColors[16] = {};
+            CHOOSECOLORW cc    = {};
+            cc.lStructSize     = sizeof(cc);
+            cc.hwndOwner       = hwnd;
+            cc.rgbResult       = *colorField;
+            cc.lpCustColors    = customColors;
+            cc.Flags           = CC_RGBINIT | CC_FULLOPEN;
+            if (ChooseColorW(&cc)) {
+                *colorField = cc.rgbResult;
+                InvalidateRect(GetDlgItem(hwnd, LOWORD(wParam)), nullptr, FALSE);
+            }
+            return TRUE;
+        }
         if (LOWORD(wParam) == IDC_CHECK_SHOWCLOCK) {
             bool checked = IsDlgButtonChecked(hwnd, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;
             SetClockControlsEnabled(hwnd, checked);
@@ -204,6 +274,18 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             int cw = static_cast<int>(
                 SendMessageW(GetDlgItem(hwnd, IDC_SPIN_CLOCKW), UDM_GETPOS32, 0, 0));
             if (cw >= 40 && cw <= 400) data->settings->clockWidth = cw;
+
+            int spacing = static_cast<int>(
+                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_LINESPACING), UDM_GETPOS32, 0, 0));
+            if (spacing >= 0 && spacing <= 20) data->settings->clockLineSpacing = spacing;
+
+            int timeSz = static_cast<int>(
+                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_TIMEFONTSIZE), UDM_GETPOS32, 0, 0));
+            int dateSz = static_cast<int>(
+                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_DATEFONTSIZE), UDM_GETPOS32, 0, 0));
+            if (timeSz >= 6 && timeSz <= 36) data->settings->clockTimeFontSize = timeSz;
+            if (dateSz >= 6 && dateSz <= 36) data->settings->clockDateFontSize = dateSz;
+            // clockTimeColor and clockDateColor are updated immediately on pick
 
             EndDialog(hwnd, IDOK);
             return TRUE;

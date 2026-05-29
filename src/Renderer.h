@@ -16,10 +16,15 @@ struct ScrollInfo {
 };
 
 struct ClockInfo {
-    bool         visible  = false;
-    RECT         rect     = {};
+    bool         visible    = false;
+    RECT         rect       = {};
     std::wstring timeLine;
     std::wstring dateLine;
+    int          timeFontPt   = 9;
+    int          dateFontPt   = 8;
+    int          lineSpacing  = 0;
+    COLORREF     timeColor    = RGB(240, 240, 240);
+    COLORREF     dateColor    = RGB(110, 110, 110);
 };
 
 class Renderer {
@@ -36,13 +41,16 @@ public:
     ~Renderer();
 
 private:
-    HDC     hdcMem_  = nullptr;
-    HBITMAP hBitmap_ = nullptr;
-    HFONT   hFont_   = nullptr;
-    HFONT   hFontSm_ = nullptr;  // slightly smaller font for the date line
-    int     width_   = 0;
-    int     height_  = 0;
+    HDC     hdcMem_       = nullptr;
+    HBITMAP hBitmap_      = nullptr;
+    HFONT   hFont_        = nullptr;
+    HFONT   hFontSm_      = nullptr;
+    int     width_        = 0;
+    int     height_       = 0;
+    int     cachedTimePt_ = 0;
+    int     cachedDatePt_ = 0;
+    int     cachedDpi_    = 0;
 
-    void CreateFonts(int dpi);
+    void CreateFonts(int timePt, int datePt, int dpi);
     void DestroyResources();
 };

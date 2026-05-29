@@ -469,6 +469,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             clock.rect     = clockRect_;
             clock.timeLine = ApplyClockPattern(settings_.clockTimeFormat, st, true);
             clock.dateLine = ApplyClockPattern(settings_.clockDateFormat, st, false);
+            clock.timeFontPt = settings_.clockTimeFontSize;
+            clock.dateFontPt = settings_.clockDateFontSize;
+            clock.lineSpacing = settings_.clockLineSpacing;
+            clock.timeColor  = settings_.clockTimeColor;
+            clock.dateColor  = settings_.clockDateColor;
         }
 
         bool isHoriz = (settings_.position != TaskbarPosition::Left &&

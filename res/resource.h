@@ -32,6 +32,19 @@
 #define IDC_LBL_DATEFMT         1022
 #define IDC_LBL_CLOCKW          1023
 #define IDC_LBL_TOKENS          1024
+#define IDC_LBL_TIMEFONTSIZE    1025
+#define IDC_EDIT_TIMEFONTSIZE   1026
+#define IDC_SPIN_TIMEFONTSIZE   1027
+#define IDC_LBL_DATEFONTSIZE    1028
+#define IDC_EDIT_DATEFONTSIZE   1029
+#define IDC_SPIN_DATEFONTSIZE   1030
+#define IDC_LBL_TIMECOLOR       1031
+#define IDC_BTN_TIMECOLOR       1032
+#define IDC_LBL_DATECOLOR       1033
+#define IDC_BTN_DATECOLOR       1034
+#define IDC_LBL_LINESPACING     1035
+#define IDC_EDIT_LINESPACING    1036
+#define IDC_SPIN_LINESPACING    1037
 
 // Taskbar background right-click menu item IDs
 #define IDM_SETTINGS            301

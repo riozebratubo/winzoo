@@ -17,7 +17,12 @@ struct Settings {
     bool            showRightClickGap = true;
     bool            showClock         = true;
     int             clockWidth        = 80;
+    int             clockLineSpacing  = 0;
     std::wstring    clockTimeFormat   = L"$hh:$mm";
     std::wstring    clockDateFormat   = L"$dd/$mm/$yyyy";
+    int             clockTimeFontSize = 9;
+    int             clockDateFontSize = 8;
+    COLORREF        clockTimeColor    = RGB(240, 240, 240);
+    COLORREF        clockDateColor    = RGB(110, 110, 110);
     std::vector<std::wstring> pinnedExePaths;
 };

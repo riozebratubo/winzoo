@@ -131,11 +131,25 @@ Settings LoadSettings()
     if (key.ReadDword(L"ShowRightClickGap", val)) s.showRightClickGap = val != 0;
     if (key.ReadDword(L"ShowClock",         val)) s.showClock         = val != 0;
     if (key.ReadDword(L"ClockWidth",       val)) s.clockWidth       = static_cast<int>(val);
+    if (key.ReadDword(L"ClockLineSpacing", val)) s.clockLineSpacing = static_cast<int>(val);
     key.ReadString(L"ClockTimeFormat", s.clockTimeFormat);
     key.ReadString(L"ClockDateFormat", s.clockDateFormat);
 
+    if (key.ReadDword(L"ClockTimeFontSize", val)) s.clockTimeFontSize = static_cast<int>(val);
+    if (key.ReadDword(L"ClockDateFontSize", val)) s.clockDateFontSize = static_cast<int>(val);
+    if (key.ReadDword(L"ClockTimeColor",    val)) s.clockTimeColor    = static_cast<COLORREF>(val);
+    if (key.ReadDword(L"ClockDateColor",    val)) s.clockDateColor    = static_cast<COLORREF>(val);
+
     if (s.clockWidth < 40)  s.clockWidth = 40;
     if (s.clockWidth > 400) s.clockWidth = 400;
+
+    if (s.clockLineSpacing < 0)  s.clockLineSpacing = 0;
+    if (s.clockLineSpacing > 20) s.clockLineSpacing = 20;
+
+    if (s.clockTimeFontSize < 6)  s.clockTimeFontSize = 6;
+    if (s.clockTimeFontSize > 36) s.clockTimeFontSize = 36;
+    if (s.clockDateFontSize < 6)  s.clockDateFontSize = 6;
+    if (s.clockDateFontSize > 36) s.clockDateFontSize = 36;
 
     key.ReadMultiString(L"PinnedPaths", s.pinnedExePaths);
     return s;
@@ -157,7 +171,12 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"ShowRightClickGap", s.showRightClickGap ? 1u : 0u);
     key.WriteDword(L"ShowClock",         s.showClock         ? 1u : 0u);
     key.WriteDword(L"ClockWidth",       static_cast<DWORD>(s.clockWidth));
+    key.WriteDword(L"ClockLineSpacing", static_cast<DWORD>(s.clockLineSpacing));
     key.WriteString(L"ClockTimeFormat", s.clockTimeFormat);
     key.WriteString(L"ClockDateFormat", s.clockDateFormat);
+    key.WriteDword(L"ClockTimeFontSize", static_cast<DWORD>(s.clockTimeFontSize));
+    key.WriteDword(L"ClockDateFontSize", static_cast<DWORD>(s.clockDateFontSize));
+    key.WriteDword(L"ClockTimeColor",    static_cast<DWORD>(s.clockTimeColor));
+    key.WriteDword(L"ClockDateColor",    static_cast<DWORD>(s.clockDateColor));
     key.WriteMultiString(L"PinnedPaths", s.pinnedExePaths);
 }

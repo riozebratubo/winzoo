@@ -13,20 +13,25 @@ void Renderer::DestroyResources()
     if (hFontSm_) { DeleteObject(hFontSm_); hFontSm_ = nullptr; }
 }
 
-void Renderer::CreateFonts(int dpi)
+void Renderer::CreateFonts(int timePt, int datePt, int dpi)
 {
     if (hFont_)   { DeleteObject(hFont_);   hFont_   = nullptr; }
     if (hFontSm_) { DeleteObject(hFontSm_); hFontSm_ = nullptr; }
 
     LOGFONTW lf = {};
-    lf.lfHeight  = -MulDiv(9, dpi, 72);
     lf.lfWeight  = FW_NORMAL;
     lf.lfQuality = CLEARTYPE_QUALITY;
     wcscpy_s(lf.lfFaceName, L"Segoe UI");
+
+    lf.lfHeight = -MulDiv(timePt, dpi, 72);
     hFont_ = CreateFontIndirectW(&lf);
 
-    lf.lfHeight = -MulDiv(8, dpi, 72);
+    lf.lfHeight = -MulDiv(datePt, dpi, 72);
     hFontSm_ = CreateFontIndirectW(&lf);
+
+    cachedTimePt_ = timePt;
+    cachedDatePt_ = datePt;
+    cachedDpi_    = dpi;
 }
 
 void Renderer::Resize(int w, int h, HDC hdcRef)
@@ -89,7 +94,9 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
 {
     if (!hdcMem_) return;
 
-    if (!hFont_) CreateFonts(dpi);
+    if (!hFont_ || clock.timeFontPt != cachedTimePt_ ||
+        clock.dateFontPt != cachedDatePt_ || dpi != cachedDpi_)
+        CreateFonts(clock.timeFontPt, clock.dateFontPt, dpi);
     HFONT oldFont = static_cast<HFONT>(SelectObject(hdcMem_, hFont_));
 
     // Background
@@ -147,6 +154,7 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
     if (clock.visible && (clock.rect.right > clock.rect.left)) {
         int clkH  = clock.rect.bottom - clock.rect.top;
         int halfH = clkH / 2;
+        int gap   = MulDiv(clock.lineSpacing, dpi, 96) / 2; // half-gap applied to each side
 
         // Divider line on the leading edge of the clock area
         HPEN divPen = CreatePen(PS_SOLID, 1, colors.separator);
@@ -158,19 +166,19 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
 
         SetBkMode(hdcMem_, TRANSPARENT);
 
-        // Time (upper half) — normal font, full brightness
+        // Time (upper half) — normal font
         RECT timeRect = { clock.rect.left, clock.rect.top,
-                          clock.rect.right, clock.rect.top + halfH };
+                          clock.rect.right, clock.rect.top + halfH - gap };
         SelectObject(hdcMem_, hFont_);
-        SetTextColor(hdcMem_, colors.text);
+        SetTextColor(hdcMem_, clock.timeColor);
         DrawTextW(hdcMem_, clock.timeLine.c_str(), -1, &timeRect,
                   DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 
-        // Date (lower half) — small font, dimmed
-        RECT dateRect = { clock.rect.left, clock.rect.top + halfH,
+        // Date (lower half) — small font
+        RECT dateRect = { clock.rect.left, clock.rect.top + halfH + gap,
                           clock.rect.right, clock.rect.bottom };
         SelectObject(hdcMem_, hFontSm_);
-        SetTextColor(hdcMem_, colors.textDimmed);
+        SetTextColor(hdcMem_, clock.dateColor);
         DrawTextW(hdcMem_, clock.dateLine.c_str(), -1, &dateRect,
                   DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     }

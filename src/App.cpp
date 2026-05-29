@@ -54,7 +54,6 @@ bool App::Init(HINSTANCE hInst)
 void App::Shutdown()
 {
     taskbar_.Destroy();
-    SaveSettings(settings_);
 
     // Restore the native Windows taskbar
     HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);

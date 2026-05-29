@@ -39,7 +39,13 @@ private:
     ThemeColors     colors_         = {};
     int             dpi_            = 96;
     int             hoveredIdx_     = -1;
+    int             hoveredScroll_  = 0;   // 0=none 1=left/up 2=right/down
     RECT            clockRect_      = {};
+    bool            scrollNeeded_   = false;
+    int             scrollOffset_   = 0;
+    int             maxScrollOffset_= 0;
+    RECT            scrollLeftRect_ = {};
+    RECT            scrollRightRect_= {};
 
     AppBar          appBar_;
     WindowTracker   tracker_;

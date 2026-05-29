@@ -5,6 +5,16 @@
 #include "Theme.h"
 #include "TaskButton.h"
 
+struct ScrollInfo {
+    bool needed   = false;
+    bool isHoriz  = true;
+    RECT leftRect = {};
+    RECT rightRect= {};
+    bool canLeft  = false;
+    bool canRight = false;
+    int  hovered  = 0;   // 0=none 1=left/up 2=right/down
+};
+
 struct ClockInfo {
     bool         visible  = false;
     RECT         rect     = {};
@@ -20,7 +30,8 @@ public:
                int hoveredIdx, int pressedIdx,
                int dragIdx, POINT ghostPt,
                const ThemeColors& colors, int dpi,
-               const ClockInfo& clock);
+               const ClockInfo& clock,
+               const ScrollInfo& scroll);
 
     ~Renderer();
 

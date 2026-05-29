@@ -120,6 +120,13 @@ Settings LoadSettings()
     if (s.thickness < 28) s.thickness = 28;
     if (s.thickness > 120) s.thickness = 120;
 
+    if (key.ReadDword(L"MaxButtonWidth", val)) s.maxButtonWidth = static_cast<int>(val);
+    if (key.ReadDword(L"MinButtonWidth", val)) s.minButtonWidth = static_cast<int>(val);
+    if (s.maxButtonWidth < 48)  s.maxButtonWidth = 48;
+    if (s.maxButtonWidth > 400) s.maxButtonWidth = 400;
+    if (s.minButtonWidth < 24)  s.minButtonWidth = 24;
+    if (s.minButtonWidth > s.maxButtonWidth) s.minButtonWidth = s.maxButtonWidth;
+
     if (key.ReadDword(L"MiddleClickClose",  val)) s.middleClickClose  = val != 0;
     if (key.ReadDword(L"ShowRightClickGap", val)) s.showRightClickGap = val != 0;
     if (key.ReadDword(L"ShowClock",         val)) s.showClock         = val != 0;
@@ -144,6 +151,8 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"Thickness", static_cast<DWORD>(s.thickness));
     key.WriteDword(L"FloatX",    static_cast<DWORD>(s.floatX));
     key.WriteDword(L"FloatY",          static_cast<DWORD>(s.floatY));
+    key.WriteDword(L"MaxButtonWidth", static_cast<DWORD>(s.maxButtonWidth));
+    key.WriteDword(L"MinButtonWidth", static_cast<DWORD>(s.minButtonWidth));
     key.WriteDword(L"MiddleClickClose",  s.middleClickClose  ? 1u : 0u);
     key.WriteDword(L"ShowRightClickGap", s.showRightClickGap ? 1u : 0u);
     key.WriteDword(L"ShowClock",         s.showClock         ? 1u : 0u);

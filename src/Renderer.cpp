@@ -44,12 +44,48 @@ void Renderer::Resize(int w, int h, HDC hdcRef)
     SelectObject(hdcMem_, hBitmap_);
 }
 
+static void DrawScrollArrow(HDC hdc, RECT r, bool left, bool horiz,
+                             bool enabled, bool hovered,
+                             const ThemeColors& colors, int dpi)
+{
+    COLORREF bg = enabled ? (hovered ? colors.buttonHover : colors.buttonNormal)
+                          : colors.background;
+    HBRUSH br = CreateSolidBrush(bg);
+    FillRect(hdc, &r, br);
+    DeleteObject(br);
+
+    COLORREF fg = enabled ? colors.text : colors.textDimmed;
+    int cx = (r.left + r.right)  / 2;
+    int cy = (r.top  + r.bottom) / 2;
+    int sz = MulDiv(4, dpi, 96);
+
+    POINT pts[3];
+    if (horiz) {
+        if (left) { pts[0]={cx+sz,cy-sz}; pts[1]={cx-sz,cy}; pts[2]={cx+sz,cy+sz}; }
+        else      { pts[0]={cx-sz,cy-sz}; pts[1]={cx+sz,cy}; pts[2]={cx-sz,cy+sz}; }
+    } else {
+        if (left) { pts[0]={cx-sz,cy+sz}; pts[1]={cx,cy-sz}; pts[2]={cx+sz,cy+sz}; } // up
+        else      { pts[0]={cx-sz,cy-sz}; pts[1]={cx,cy+sz}; pts[2]={cx+sz,cy-sz}; } // down
+    }
+
+    HBRUSH ap = CreateSolidBrush(fg);
+    HPEN   pp = CreatePen(PS_SOLID, 1, fg);
+    auto*  ob = static_cast<HBRUSH>(SelectObject(hdc, ap));
+    auto*  op = static_cast<HPEN>(SelectObject(hdc, pp));
+    Polygon(hdc, pts, 3);
+    SelectObject(hdc, ob);
+    SelectObject(hdc, op);
+    DeleteObject(ap);
+    DeleteObject(pp);
+}
+
 void Renderer::Paint(HDC hdcTarget, int w, int h,
                      const std::vector<TaskButton>& buttons,
                      int hoveredIdx, int pressedIdx,
                      int dragIdx, POINT ghostPt,
                      const ThemeColors& colors, int dpi,
-                     const ClockInfo& clock)
+                     const ClockInfo& clock,
+                     const ScrollInfo& scroll)
 {
     if (!hdcMem_) return;
 
@@ -97,6 +133,14 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
                 break;
             }
         }
+    }
+
+    // Scroll arrows
+    if (scroll.needed) {
+        DrawScrollArrow(hdcMem_, scroll.leftRect,  true,  scroll.isHoriz,
+                        scroll.canLeft,  scroll.hovered == 1, colors, dpi);
+        DrawScrollArrow(hdcMem_, scroll.rightRect, false, scroll.isHoriz,
+                        scroll.canRight, scroll.hovered == 2, colors, dpi);
     }
 
     // Clock

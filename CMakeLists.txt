@@ -36,7 +36,7 @@ set(SOURCES
 add_executable(winzoo WIN32 ${SOURCES})
 target_include_directories(winzoo PRIVATE src res)
 target_link_libraries(winzoo PRIVATE
-    user32 gdi32 shell32 comctl32 advapi32 shlwapi dwmapi
+    user32 gdi32 shell32 comctl32 advapi32 shlwapi dwmapi uxtheme
 )
 
 set_target_properties(winzoo PROPERTIES

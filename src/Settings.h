@@ -11,6 +11,8 @@ struct Settings {
     int             thickness = 48;
     int             floatX           = 100;
     int             floatY           = 100;
+    int             maxButtonWidth    = 200;
+    int             minButtonWidth    = 48;
     bool            middleClickClose  = true;
     bool            showRightClickGap = true;
     bool            showClock         = true;

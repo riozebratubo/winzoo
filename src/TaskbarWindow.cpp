@@ -179,68 +179,96 @@ void TaskbarWindow::LayoutButtons()
     int h = client.bottom - client.top;
 
     auto& buttons = tracker_.MutableButtons();
-    if (buttons.empty()) return;
+    int count = static_cast<int>(buttons.size());
 
-    int count   = static_cast<int>(buttons.size());
+    clockRect_       = {};
+    scrollNeeded_    = false;
+    scrollLeftRect_  = scrollRightRect_ = {};
+    maxScrollOffset_ = 0;
+
+    if (count == 0) return;
+
     int pad     = Scale(2, dpi_);
-    int minTail = Scale(20, dpi_);   // right-click zone when no clock
-    int maxBtnW = Scale(200, dpi_);
-    int minBtnW = Scale(48, dpi_);
+    int arrowW  = Scale(20, dpi_);
+    int maxBtnW = Scale(settings_.maxButtonWidth, dpi_);
+    int minBtnW = Scale(settings_.minButtonWidth, dpi_);
+    if (minBtnW > maxBtnW) minBtnW = maxBtnW;
 
     bool isHoriz = (settings_.position != TaskbarPosition::Left &&
                     settings_.position != TaskbarPosition::Right);
 
-    // Compute clock rect and trailing reservation
-    clockRect_ = {};
+    // Tail reservation
+    int tail = 0;
     if (settings_.showClock) {
         int cw = Scale(settings_.clockWidth, dpi_);
-        if (isHoriz) {
-            clockRect_ = { w - cw, pad, w - pad, h - pad };
-        } else {
-            clockRect_ = { pad, h - cw, w - pad, h - pad };
-        }
-        int tail = cw;  // clock itself is the right-click zone — no extra gap needed
+        tail = cw;
+        clockRect_ = isHoriz ? RECT{ w - cw, pad, w - pad, h - pad }
+                              : RECT{ pad, h - cw, w - pad, h - pad };
+    } else {
+        tail = settings_.showRightClickGap ? Scale(20, dpi_) : 0;
+    }
 
-        if (isHoriz) {
-            int available = w - 2 * pad - tail;
+    if (isHoriz) {
+        int available = w - tail;
+        // Scroll fires only when buttons can't fit at minimum size.
+        // Before that, buttons grow to fill the space (capped at max, floored at min).
+        int totalMin = count * minBtnW + (count - 1) * pad + 2 * pad;
+
+        if (totalMin <= available) {
+            scrollOffset_ = 0;
+            int area = available - 2 * pad;
             int btnW = std::min(maxBtnW,
                                 std::max(minBtnW,
-                                         count > 0 ? (available - (count - 1) * pad) / count : minBtnW));
+                                         (area - (count - 1) * pad) / count));
             int x = pad;
             for (auto& btn : buttons) {
                 btn.rect = { x, pad, x + btnW, h - pad };
                 x += btnW + pad;
             }
         } else {
-            int btnH = Scale(36, dpi_);
-            int maxY = h - tail;
-            int y    = pad;
-            for (auto& btn : buttons) {
-                if (y + btnH > maxY) break;
-                btn.rect = { pad, y, w - pad, y + btnH };
-                y += btnH + pad;
+            scrollNeeded_   = true;
+            scrollLeftRect_  = { 0,                 0, arrowW,    h };
+            scrollRightRect_ = { available - arrowW, 0, available, h };
+
+            int inner    = available - 2 * arrowW - 2 * pad;
+            int visCount = std::max(1, (inner + pad) / (minBtnW + pad));
+            maxScrollOffset_ = std::max(0, count - visCount);
+            scrollOffset_    = std::min(scrollOffset_, maxScrollOffset_);
+
+            for (auto& btn : buttons) btn.rect = {};
+            int x = arrowW + pad;
+            for (int i = scrollOffset_; i < scrollOffset_ + visCount && i < count; ++i) {
+                buttons[i].rect = { x, pad, x + minBtnW, h - pad };
+                x += minBtnW + pad;
             }
         }
     } else {
-        int tail = settings_.showRightClickGap ? minTail : 0;
-        if (isHoriz) {
-            int available = w - 2 * pad - tail;
-            int btnW = std::min(maxBtnW,
-                                std::max(minBtnW,
-                                         count > 0 ? (available - (count - 1) * pad) / count : minBtnW));
-            int x = pad;
+        int btnH      = Scale(36, dpi_);
+        int available = h - tail;
+        int totalMin  = count * minBtnW + (count - 1) * pad + 2 * pad;
+
+        if (totalMin <= available) {
+            scrollOffset_ = 0;
+            int y = pad;
             for (auto& btn : buttons) {
-                btn.rect = { x, pad, x + btnW, h - pad };
-                x += btnW + pad;
-            }
-        } else {
-            int btnH = Scale(36, dpi_);
-            int maxY = h - tail;
-            int y    = pad;
-            for (auto& btn : buttons) {
-                if (y + btnH > maxY) break;
                 btn.rect = { pad, y, w - pad, y + btnH };
                 y += btnH + pad;
+            }
+        } else {
+            scrollNeeded_   = true;
+            scrollLeftRect_  = { 0, 0,                w, arrowW };
+            scrollRightRect_ = { 0, available - arrowW, w, available };
+
+            int inner    = available - 2 * arrowW - 2 * pad;
+            int visCount = std::max(1, (inner + pad) / (minBtnW + pad));
+            maxScrollOffset_ = std::max(0, count - visCount);
+            scrollOffset_    = std::min(scrollOffset_, maxScrollOffset_);
+
+            for (auto& btn : buttons) btn.rect = {};
+            int y = arrowW + pad;
+            for (int i = scrollOffset_; i < scrollOffset_ + visCount && i < count; ++i) {
+                buttons[i].rect = { pad, y, w - pad, y + minBtnW };
+                y += minBtnW + pad;
             }
         }
     }
@@ -269,13 +297,16 @@ void TaskbarWindow::ActivateButton(int idx)
         return;
     }
 
-    if (IsIconic(btn.hwnd))
-        ShowWindow(btn.hwnd, SW_RESTORE);
-
-    if (GetForegroundWindow() == btn.hwnd) {
+    // Minimize only if the window is already visible and in the foreground.
+    // Check this before any restore so a minimized window isn't immediately
+    // re-minimized after SW_RESTORE makes it the foreground window.
+    if (!IsIconic(btn.hwnd) && GetForegroundWindow() == btn.hwnd) {
         ShowWindow(btn.hwnd, SW_MINIMIZE);
         return;
     }
+
+    if (IsIconic(btn.hwnd))
+        ShowWindow(btn.hwnd, SW_RESTORE);
 
     DWORD ourTid    = GetCurrentThreadId();
     DWORD targetTid = GetWindowThreadProcessId(btn.hwnd, nullptr);
@@ -440,13 +471,24 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             clock.dateLine = ApplyClockPattern(settings_.clockDateFormat, st, false);
         }
 
+        bool isHoriz = (settings_.position != TaskbarPosition::Left &&
+                        settings_.position != TaskbarPosition::Right);
+        ScrollInfo scroll;
+        scroll.needed   = scrollNeeded_;
+        scroll.isHoriz  = isHoriz;
+        scroll.leftRect  = scrollLeftRect_;
+        scroll.rightRect = scrollRightRect_;
+        scroll.canLeft   = scrollOffset_ > 0;
+        scroll.canRight  = scrollOffset_ < maxScrollOffset_;
+        scroll.hovered   = hoveredScroll_;
+
         renderer_.Paint(hdc, client.right, client.bottom,
                         tracker_.Buttons(),
                         hoveredIdx_,
                         drag_.State() == DragState::Pressed  ? drag_.DragIndex() : -1,
                         drag_.State() == DragState::Dragging ? drag_.DragIndex() : -1,
                         ghostPt,
-                        colors_, dpi_, clock);
+                        colors_, dpi_, clock, scroll);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -474,6 +516,16 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             InvalidateRect(hwnd, nullptr, FALSE);
         }
 
+        int newHovScroll = 0;
+        if (scrollNeeded_) {
+            if (PtInRect(&scrollLeftRect_,  pt)) newHovScroll = 1;
+            if (PtInRect(&scrollRightRect_, pt)) newHovScroll = 2;
+        }
+        if (newHovScroll != hoveredScroll_) {
+            hoveredScroll_ = newHovScroll;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+
         TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, hwnd, 0 };
         TrackMouseEvent(&tme);
 
@@ -487,12 +539,23 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     }
 
     case WM_MOUSELEAVE:
-        hoveredIdx_ = -1;
+        hoveredIdx_    = -1;
+        hoveredScroll_ = 0;
         InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
 
     case WM_LBUTTONDOWN: {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if (scrollNeeded_) {
+            if (PtInRect(&scrollLeftRect_, pt)) {
+                if (scrollOffset_ > 0) { --scrollOffset_; LayoutButtons(); InvalidateRect(hwnd, nullptr, FALSE); }
+                return 0;
+            }
+            if (PtInRect(&scrollRightRect_, pt)) {
+                if (scrollOffset_ < maxScrollOffset_) { ++scrollOffset_; LayoutButtons(); InvalidateRect(hwnd, nullptr, FALSE); }
+                return 0;
+            }
+        }
         int idx = HitTestButton(pt);
         if (idx >= 0) {
             POINT screenPt = pt;
@@ -557,6 +620,18 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             ShowTaskButtonMenu(idx, screenPt);
         else
             ShowBackgroundMenu(screenPt);
+        return 0;
+    }
+
+    case WM_MOUSEWHEEL: {
+        if (scrollNeeded_) {
+            int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+            if (delta > 0 && scrollOffset_ > 0) {
+                --scrollOffset_; LayoutButtons(); InvalidateRect(hwnd, nullptr, FALSE);
+            } else if (delta < 0 && scrollOffset_ < maxScrollOffset_) {
+                ++scrollOffset_; LayoutButtons(); InvalidateRect(hwnd, nullptr, FALSE);
+            }
+        }
         return 0;
     }
 

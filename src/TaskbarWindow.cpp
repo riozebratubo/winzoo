@@ -4,6 +4,7 @@
 #include "SettingsFile.h"
 #include "resource.h"
 #include <algorithm>
+#include <atomic>
 #include <windowsx.h>
 #include <objbase.h>
 
@@ -526,16 +527,36 @@ void TaskbarWindow::StartIconLoadThread()
         paths.push_back(e.iconPath.empty() ? e.exePath : e.iconPath);
     }
     std::thread([hwnd, sizePx, paths = std::move(paths)]() {
-        // SHGetImageList internally calls CoCreateInstance and requires COM.
-        HRESULT hrCom = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         using Pair = std::pair<std::wstring, HICON>;
-        auto* pResults = new std::vector<Pair>();
-        pResults->reserve(paths.size());
-        for (const auto& path : paths)
-            pResults->emplace_back(path, AppIconCache::LoadStatic(path, sizePx));
-        PostMessageW(hwnd, WM_APP_ICONS_DONE, static_cast<WPARAM>(sizePx),
-                     reinterpret_cast<LPARAM>(pResults));
-        if (SUCCEEDED(hrCom)) CoUninitialize();
+        auto* pResults = new std::vector<Pair>(paths.size());
+        for (size_t i = 0; i < paths.size(); ++i)
+            (*pResults)[i].first = paths[i];
+
+        // Load icons in parallel: up to 4 workers each grab paths via an atomic counter.
+        // MTA avoids STA message-pump blocking; each worker owns its COM apartment.
+        const int kWorkers = std::min((int)paths.size(), 4);
+        if (kWorkers > 0) {
+            std::atomic<int> nextIdx{ 0 };
+            std::vector<std::thread> workers;
+            workers.reserve(kWorkers);
+            for (int w = 0; w < kWorkers; ++w) {
+                workers.emplace_back([&paths, pResults, &nextIdx, sizePx]() {
+                    HRESULT hrCom = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+                    int idx;
+                    while ((idx = nextIdx.fetch_add(1)) < (int)paths.size())
+                        (*pResults)[idx].second = AppIconCache::LoadStatic(paths[idx], sizePx);
+                    if (SUCCEEDED(hrCom)) CoUninitialize();
+                });
+            }
+            for (auto& t : workers) t.join();
+        }
+
+        if (!PostMessageW(hwnd, WM_APP_ICONS_DONE, static_cast<WPARAM>(sizePx),
+                          reinterpret_cast<LPARAM>(pResults))) {
+            for (auto& [p, icon] : *pResults)
+                if (icon) DestroyIcon(icon);
+            delete pResults;
+        }
     }).detach();
 }
 

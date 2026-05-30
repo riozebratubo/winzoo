@@ -1,4 +1,5 @@
 #include "SettingsDialog.h"
+#include <algorithm>
 #include <commctrl.h>
 #include <commdlg.h>
 #include <uxtheme.h>
@@ -18,7 +19,117 @@ static constexpr const wchar_t* kAppMenuLayouts[] = {
 
 struct DlgData {
     Settings* settings;
+    HWND      hScrollHost = nullptr;
 };
+
+// Scroll host for the App Menu tab — scrolls its children vertically
+static constexpr wchar_t kScrollHostClass[] = L"WinzooAppMenuScrollHost";
+
+// Reposition every child by -delta px (no per-child repaints), then
+// synchronously erase + repaint everything in one shot to avoid the
+// transparent-control garbling that ScrollWindowEx causes.
+static void ScrollHostBy(HWND hwnd, int delta)
+{
+    HDWP hdwp = BeginDeferWindowPos(32);
+    for (HWND hc = GetWindow(hwnd, GW_CHILD); hc; hc = GetWindow(hc, GW_HWNDNEXT)) {
+        RECT r;
+        GetWindowRect(hc, &r);
+        MapWindowPoints(HWND_DESKTOP, hwnd, reinterpret_cast<LPPOINT>(&r), 2);
+        if (hdwp)
+            hdwp = DeferWindowPos(hdwp, hc, nullptr, r.left, r.top - delta, 0, 0,
+                                  SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+    }
+    if (hdwp) EndDeferWindowPos(hdwp);
+    RedrawWindow(hwnd, nullptr, nullptr,
+                 RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+}
+
+static int ScrollHostApplyPos(HWND hwnd, SCROLLINFO& si, int newPos)
+{
+    int maxPos = si.nMax - static_cast<int>(si.nPage) + 1;
+    newPos = std::max(0, std::min(newPos, maxPos));
+    if (newPos == si.nPos) return 0;
+    int delta = newPos - si.nPos;
+    si.nPos  = newPos;
+    si.fMask = SIF_POS;
+    SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+    ScrollHostBy(hwnd, delta);
+    return delta;
+}
+
+static LRESULT CALLBACK AppMenuScrollHostProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg) {
+    case WM_ERASEBKGND: {
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        FillRect(reinterpret_cast<HDC>(wParam), &rc,
+                 reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1));
+        return 1;
+    }
+    case WM_PAINT: {
+        // Background is handled entirely in WM_ERASEBKGND.
+        // Just validate the region so the system stops sending WM_PAINT.
+        PAINTSTRUCT ps;
+        BeginPaint(hwnd, &ps);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_VSCROLL: {
+        SCROLLINFO si = {};
+        si.cbSize = sizeof(si);
+        si.fMask  = SIF_ALL;
+        GetScrollInfo(hwnd, SB_VERT, &si);
+        int newPos = si.nPos;
+        switch (LOWORD(wParam)) {
+        case SB_LINEUP:        newPos -= 15; break;
+        case SB_LINEDOWN:      newPos += 15; break;
+        case SB_PAGEUP:        newPos -= static_cast<int>(si.nPage); break;
+        case SB_PAGEDOWN:      newPos += static_cast<int>(si.nPage); break;
+        case SB_THUMBTRACK:
+        case SB_THUMBPOSITION: {
+            SCROLLINFO si2 = {};
+            si2.cbSize = sizeof(si2);
+            si2.fMask  = SIF_TRACKPOS;
+            GetScrollInfo(hwnd, SB_VERT, &si2);
+            newPos = si2.nTrackPos;
+            break;
+        }
+        }
+        ScrollHostApplyPos(hwnd, si, newPos);
+        return 0;
+    }
+    case WM_MOUSEWHEEL: {
+        SCROLLINFO si = {};
+        si.cbSize = sizeof(si);
+        si.fMask  = SIF_ALL;
+        GetScrollInfo(hwnd, SB_VERT, &si);
+        int lines  = (GET_WHEEL_DELTA_WPARAM(wParam) > 0) ? -3 : 3;
+        ScrollHostApplyPos(hwnd, si, si.nPos + lines * 15);
+        return 0;
+    }
+    case WM_COMMAND:
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORBTN:
+    case WM_DRAWITEM:
+        return SendMessageW(GetParent(hwnd), uMsg, wParam, lParam);
+    }
+    return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+}
+
+static void RegisterScrollHostClass()
+{
+    WNDCLASSEXW existing = { sizeof(existing) };
+    HINSTANCE hInst = GetModuleHandleW(nullptr);
+    if (GetClassInfoExW(hInst, kScrollHostClass, &existing)) return;
+    WNDCLASSEXW wc    = { sizeof(wc) };
+    wc.lpfnWndProc    = AppMenuScrollHostProc;
+    wc.hInstance      = hInst;
+    wc.hCursor        = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hbrBackground  = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
+    wc.lpszClassName  = kScrollHostClass;
+    RegisterClassExW(&wc);
+}
 
 // Null-terminated control ID lists per tab
 static const int kGeneralControls[] = {
@@ -58,16 +169,30 @@ static const int kAppMenuControls[] = {
     IDC_LBL_APPMENU_GRIDFS,    IDC_EDIT_APPMENU_GRIDFS,   IDC_SPIN_APPMENU_GRIDFS,
     IDC_LBL_APPMENU_MARGIN,    IDC_EDIT_APPMENU_MARGIN,   IDC_SPIN_APPMENU_MARGIN,
     IDC_LBL_APPMENU_PADDING,   IDC_EDIT_APPMENU_PADDING,  IDC_SPIN_APPMENU_PADDING,
+    IDC_CHECK_APPMENU_SIDEBAR,
+    IDC_LBL_APPMENU_SIDEBARW,  IDC_EDIT_APPMENU_SIDEBARW, IDC_SPIN_APPMENU_SIDEBARW,
+    IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
+    IDC_CHECK_APPMENU_SIDEBAR_SETTINGS,
+    IDC_CHECK_APPMENU_SIDEBAR_POWER,
     0
 };
 
 static const int* kTabGroups[] = { kGeneralControls, kAppBtnControls, kClockControls, kAppMenuControls };
 
-static void ShowTab(HWND hwnd, int tab)
+static void ShowTab(HWND hwnd, int tab, DlgData* data)
 {
-    for (int g = 0; g < 4; ++g) {
+    // Tabs 0–2 are managed directly; tab 3 (App Menu) uses the scroll host
+    for (int g = 0; g < 3; ++g) {
         int cmd = (g == tab) ? SW_SHOW : SW_HIDE;
         for (const int* id = kTabGroups[g]; *id; ++id)
+            ShowWindow(GetDlgItem(hwnd, *id), cmd);
+    }
+    if (data && data->hScrollHost) {
+        ShowWindow(data->hScrollHost, tab == 3 ? SW_SHOW : SW_HIDE);
+    } else {
+        // Fallback: scroll host not yet created
+        int cmd = (tab == 3) ? SW_SHOW : SW_HIDE;
+        for (const int* id = kAppMenuControls; *id; ++id)
             ShowWindow(GetDlgItem(hwnd, *id), cmd);
     }
 }
@@ -84,6 +209,19 @@ static void SetClockControlsEnabled(HWND hwnd, bool enabled)
         IDC_LBL_TIMECOLOR, IDC_BTN_TIMECOLOR,
         IDC_LBL_DATECOLOR, IDC_BTN_DATECOLOR,
         IDC_LBL_TOKENS,
+        0
+    };
+    for (const int* id = kIds; *id; ++id)
+        EnableWindow(GetDlgItem(hwnd, *id), enabled ? TRUE : FALSE);
+}
+
+static void SetSidebarControlsEnabled(HWND hwnd, bool enabled)
+{
+    static const int kIds[] = {
+        IDC_LBL_APPMENU_SIDEBARW, IDC_EDIT_APPMENU_SIDEBARW, IDC_SPIN_APPMENU_SIDEBARW,
+        IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
+        IDC_CHECK_APPMENU_SIDEBAR_SETTINGS,
+        IDC_CHECK_APPMENU_SIDEBAR_POWER,
         0
     };
     for (const int* id = kIds; *id; ++id)
@@ -176,7 +314,12 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         // Disable visual styles on checkboxes so they respect the transparent
         // background brush from WM_CTLCOLORBTN instead of painting their own.
         static const int kCheckIds[] = {
-            IDC_CHECK_MIDDLECLICK, IDC_CHECK_RIGHTCLICKGAP, IDC_CHECK_SHOWCLOCK, 0
+            IDC_CHECK_MIDDLECLICK, IDC_CHECK_RIGHTCLICKGAP, IDC_CHECK_SHOWCLOCK,
+            IDC_CHECK_APPMENU_SIDEBAR,
+            IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
+            IDC_CHECK_APPMENU_SIDEBAR_SETTINGS,
+            IDC_CHECK_APPMENU_SIDEBAR_POWER,
+            0
         };
         for (const int* id = kCheckIds; *id; ++id)
             SetWindowTheme(GetDlgItem(hwnd, *id), L"", L"");
@@ -205,11 +348,75 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             initSpin(IDC_SPIN_APPMENU_GRIDFS,    IDC_EDIT_APPMENU_GRIDFS,      6,   36, data->settings->appMenuGridFontSize);
             initSpin(IDC_SPIN_APPMENU_MARGIN,    IDC_EDIT_APPMENU_MARGIN,      0,   40, data->settings->appMenuMargin);
             initSpin(IDC_SPIN_APPMENU_PADDING,   IDC_EDIT_APPMENU_PADDING,     0,   40, data->settings->appMenuPadding);
+
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_SIDEBAR,
+                           data->settings->appMenuSidebarEnabled ? BST_CHECKED : BST_UNCHECKED);
+            initSpin(IDC_SPIN_APPMENU_SIDEBARW,  IDC_EDIT_APPMENU_SIDEBARW,    4,  120, data->settings->appMenuSidebarWidth);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
+                           data->settings->appMenuSidebarShowExplorer ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_SIDEBAR_SETTINGS,
+                           data->settings->appMenuSidebarShowSettings ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_SIDEBAR_POWER,
+                           data->settings->appMenuSidebarShowPower ? BST_CHECKED : BST_UNCHECKED);
+            SetSidebarControlsEnabled(hwnd, data->settings->appMenuSidebarEnabled);
+        }
+
+        // Build scrollable host for the App Menu tab
+        {
+            RegisterScrollHostClass();
+
+            // Compute the tab's content area in dialog client coordinates
+            HWND hTabCtrl = GetDlgItem(hwnd, IDC_TAB_SETTINGS);
+            RECT tabWndRect;
+            GetWindowRect(hTabCtrl, &tabWndRect);
+            RECT content = tabWndRect;
+            TabCtrl_AdjustRect(hTabCtrl, FALSE, &content);
+            MapWindowPoints(HWND_DESKTOP, hwnd, reinterpret_cast<LPPOINT>(&content), 2);
+
+            int panelW = content.right  - content.left;
+            int panelH = content.bottom - content.top;
+
+            HWND hPanel = CreateWindowExW(
+                WS_EX_CONTROLPARENT,
+                kScrollHostClass, nullptr,
+                WS_CHILD | WS_VSCROLL,
+                content.left, content.top, panelW, panelH,
+                hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+
+            data->hScrollHost = hPanel;
+
+            if (hPanel) {
+                // Reparent every App Menu control into the scroll host and
+                // convert its position to be relative to the scroll host.
+                int contentH = 0;
+                for (const int* id = kAppMenuControls; *id; ++id) {
+                    HWND hCtrl = GetDlgItem(hwnd, *id);
+                    if (!hCtrl) continue;
+                    RECT r;
+                    GetWindowRect(hCtrl, &r);
+                    SetParent(hCtrl, hPanel);
+                    MapWindowPoints(HWND_DESKTOP, hPanel,
+                                    reinterpret_cast<LPPOINT>(&r), 2);
+                    SetWindowPos(hCtrl, nullptr, r.left, r.top, 0, 0,
+                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                    contentH = std::max(contentH, static_cast<int>(r.bottom));
+                }
+                contentH += 4; // small bottom padding
+
+                SCROLLINFO si = {};
+                si.cbSize = sizeof(si);
+                si.fMask  = SIF_ALL;
+                si.nMin   = 0;
+                si.nMax   = contentH;
+                si.nPage  = static_cast<UINT>(panelH);
+                si.nPos   = 0;
+                SetScrollInfo(hPanel, SB_VERT, &si, TRUE);
+            }
         }
 
         // ShowTab must run last so that UDM_SETBUDDY calls (which make edit buddies
         // visible) are all done before we hide controls belonging to inactive tabs.
-        ShowTab(hwnd, 0);
+        ShowTab(hwnd, 0, data);
 
         return TRUE;
     }
@@ -218,7 +425,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         auto* nm = reinterpret_cast<NMHDR*>(lParam);
         if (data && nm->idFrom == IDC_TAB_SETTINGS && nm->code == TCN_SELCHANGE) {
             int tab = TabCtrl_GetCurSel(GetDlgItem(hwnd, IDC_TAB_SETTINGS));
-            ShowTab(hwnd, tab);
+            ShowTab(hwnd, tab, data);
             if (tab == 2) {
                 bool on = IsDlgButtonChecked(hwnd, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;
                 SetClockControlsEnabled(hwnd, on);
@@ -227,6 +434,13 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         }
         break;
     }
+
+    case WM_MOUSEWHEEL:
+        if (data && data->hScrollHost && IsWindowVisible(data->hScrollHost)) {
+            SendMessageW(data->hScrollHost, WM_MOUSEWHEEL, wParam, lParam);
+            return TRUE;
+        }
+        break;
 
     case WM_CTLCOLORSTATIC:
     case WM_CTLCOLORBTN: {
@@ -282,6 +496,12 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             SetClockControlsEnabled(hwnd, checked);
             return TRUE;
         }
+        if (LOWORD(wParam) == IDC_CHECK_APPMENU_SIDEBAR) {
+            HWND hAm = (data && data->hScrollHost) ? data->hScrollHost : hwnd;
+            bool checked = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SIDEBAR) == BST_CHECKED;
+            SetSidebarControlsEnabled(hAm, checked);
+            return TRUE;
+        }
         if (LOWORD(wParam) == IDOK && data) {
             HWND hPos   = GetDlgItem(hwnd, IDC_COMBO_POSITION);
             HWND hTheme = GetDlgItem(hwnd, IDC_COMBO_THEME);
@@ -334,16 +554,17 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             if (dateSz >= 6 && dateSz <= 36) data->settings->clockDateFontSize = dateSz;
             // clockTimeColor and clockDateColor are updated immediately on pick
 
-            // App Menu tab
+            // App Menu tab — controls are reparented into hScrollHost, so look up from there
             {
-                HWND hLayout = GetDlgItem(hwnd, IDC_COMBO_APPMENU_LAYOUT);
+                HWND hAm = data->hScrollHost ? data->hScrollHost : hwnd;
+                HWND hLayout = GetDlgItem(hAm, IDC_COMBO_APPMENU_LAYOUT);
                 int layoutIdx = static_cast<int>(SendMessageW(hLayout, CB_GETCURSEL, 0, 0));
                 if (layoutIdx >= 0)
                     data->settings->appMenuLayout = static_cast<AppMenuLayout>(layoutIdx);
 
                 auto readSpin = [&](int spinId, int /*lo*/, int /*hi*/) -> int {
                     return static_cast<int>(
-                        SendMessageW(GetDlgItem(hwnd, spinId), UDM_GETPOS32, 0, 0));
+                        SendMessageW(GetDlgItem(hAm, spinId), UDM_GETPOS32, 0, 0));
                 };
 
                 int amW  = readSpin(IDC_SPIN_APPMENU_WIDTH, 120, 800);
@@ -365,6 +586,17 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 if (amGF >= 6    && amGF <= 36)   data->settings->appMenuGridFontSize = amGF;
                 if (amMgn >= 0   && amMgn <= 40)  data->settings->appMenuMargin       = amMgn;
                 if (amPad >= 0   && amPad <= 40)  data->settings->appMenuPadding      = amPad;
+
+                data->settings->appMenuSidebarEnabled =
+                    IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SIDEBAR) == BST_CHECKED;
+                int amSW = readSpin(IDC_SPIN_APPMENU_SIDEBARW, 4, 120);
+                if (amSW >= 4 && amSW <= 120) data->settings->appMenuSidebarWidth = amSW;
+                data->settings->appMenuSidebarShowExplorer =
+                    IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SIDEBAR_EXPLORER) == BST_CHECKED;
+                data->settings->appMenuSidebarShowSettings =
+                    IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SIDEBAR_SETTINGS) == BST_CHECKED;
+                data->settings->appMenuSidebarShowPower =
+                    IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SIDEBAR_POWER) == BST_CHECKED;
             }
 
             EndDialog(hwnd, IDOK);

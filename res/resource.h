@@ -51,6 +51,7 @@
 #define IDM_ABOUT               302
 #define IDM_CLOSE_TASKBAR       303
 #define IDM_REBUILD_ICON_CACHE  304
+#define IDM_RESTART             305
 
 // Task button right-click menu item IDs
 #define IDM_OPEN_NEW_WINDOW     401
@@ -87,3 +88,12 @@
 #define IDC_LBL_APPMENU_PADDING     1126
 #define IDC_EDIT_APPMENU_PADDING    1127
 #define IDC_SPIN_APPMENU_PADDING    1128
+
+// App Menu Sidebar controls
+#define IDC_CHECK_APPMENU_SIDEBAR           1129
+#define IDC_LBL_APPMENU_SIDEBARW           1130
+#define IDC_EDIT_APPMENU_SIDEBARW          1131
+#define IDC_SPIN_APPMENU_SIDEBARW          1132
+#define IDC_CHECK_APPMENU_SIDEBAR_EXPLORER 1133
+#define IDC_CHECK_APPMENU_SIDEBAR_SETTINGS 1134
+#define IDC_CHECK_APPMENU_SIDEBAR_POWER    1135

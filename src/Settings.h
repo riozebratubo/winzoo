@@ -38,4 +38,11 @@ struct Settings {
     int           appMenuGridFontSize = 8;
     int           appMenuMargin       = 0;
     int           appMenuPadding      = 6;
+
+    // App Menu Sidebar
+    bool appMenuSidebarEnabled         = true;
+    int  appMenuSidebarWidth           = 40;
+    bool appMenuSidebarShowExplorer    = true;
+    bool appMenuSidebarShowSettings    = true;
+    bool appMenuSidebarShowPower       = true;
 };

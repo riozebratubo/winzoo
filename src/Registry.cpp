@@ -165,6 +165,13 @@ Settings LoadSettings()
     if (key.ReadDword(L"AppMenuMargin",       amVal)) s.appMenuMargin       = static_cast<int>(amVal);
     if (key.ReadDword(L"AppMenuPadding",      amVal)) s.appMenuPadding      = static_cast<int>(amVal);
 
+    // App Menu Sidebar
+    if (key.ReadDword(L"AppMenuSidebarEnabled",         amVal)) s.appMenuSidebarEnabled         = amVal != 0;
+    if (key.ReadDword(L"AppMenuSidebarWidth",           amVal)) s.appMenuSidebarWidth           = static_cast<int>(amVal);
+    if (key.ReadDword(L"AppMenuSidebarShowExplorer",    amVal)) s.appMenuSidebarShowExplorer    = amVal != 0;
+    if (key.ReadDword(L"AppMenuSidebarShowSettings",    amVal)) s.appMenuSidebarShowSettings    = amVal != 0;
+    if (key.ReadDword(L"AppMenuSidebarShowPower",       amVal)) s.appMenuSidebarShowPower       = amVal != 0;
+
     // Clamp App Menu values
     if (s.appMenuWidth        < 120)  s.appMenuWidth        = 120;
     if (s.appMenuWidth        > 800)  s.appMenuWidth        = 800;
@@ -184,6 +191,8 @@ Settings LoadSettings()
     if (s.appMenuMargin > 40) s.appMenuMargin = 40;
     if (s.appMenuPadding < 0)  s.appMenuPadding = 0;
     if (s.appMenuPadding > 40) s.appMenuPadding = 40;
+    if (s.appMenuSidebarWidth < 4)   s.appMenuSidebarWidth = 4;
+    if (s.appMenuSidebarWidth > 120) s.appMenuSidebarWidth = 120;
 
     return s;
 }
@@ -222,4 +231,9 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"AppMenuGridFontSize", static_cast<DWORD>(s.appMenuGridFontSize));
     key.WriteDword(L"AppMenuMargin",       static_cast<DWORD>(s.appMenuMargin));
     key.WriteDword(L"AppMenuPadding",      static_cast<DWORD>(s.appMenuPadding));
+    key.WriteDword(L"AppMenuSidebarEnabled",         s.appMenuSidebarEnabled         ? 1u : 0u);
+    key.WriteDword(L"AppMenuSidebarWidth",           static_cast<DWORD>(s.appMenuSidebarWidth));
+    key.WriteDword(L"AppMenuSidebarShowExplorer",    s.appMenuSidebarShowExplorer    ? 1u : 0u);
+    key.WriteDword(L"AppMenuSidebarShowSettings",    s.appMenuSidebarShowSettings    ? 1u : 0u);
+    key.WriteDword(L"AppMenuSidebarShowPower",       s.appMenuSidebarShowPower       ? 1u : 0u);
 }

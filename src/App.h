@@ -9,6 +9,7 @@ public:
 
     int  Run(HINSTANCE hInst, int nCmdShow);
     void Quit();
+    void RequestRestart();
 
 private:
     App()  = default;
@@ -19,8 +20,9 @@ private:
     bool Init(HINSTANCE hInst);
     void Shutdown();
 
-    HINSTANCE     hInst_   = nullptr;
-    HANDLE        mutex_   = nullptr;
+    HINSTANCE     hInst_    = nullptr;
+    HANDLE        mutex_    = nullptr;
     TaskbarWindow taskbar_;
     Settings      settings_;
+    bool          restart_  = false;
 };

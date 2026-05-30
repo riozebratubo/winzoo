@@ -1,5 +1,6 @@
 #include "App.h"
 #include "Registry.h"
+#include "AppMenuWindow.h"
 
 App& App::Instance()
 {
@@ -19,6 +20,13 @@ int App::Run(HINSTANCE hInst, int /*nCmdShow*/)
     }
 
     Shutdown();
+
+    if (restart_) {
+        wchar_t exePath[MAX_PATH] = {};
+        GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+        ShellExecuteW(nullptr, L"open", exePath, nullptr, nullptr, SW_SHOWNORMAL);
+    }
+
     return static_cast<int>(msg.wParam);
 }
 
@@ -34,6 +42,8 @@ bool App::Init(HINSTANCE hInst)
     }
 
     settings_ = LoadSettings();
+
+    AppMenuWindow::CachePowerOptions();
 
     // Hide the native Windows taskbar
     HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
@@ -72,5 +82,11 @@ void App::Shutdown()
 
 void App::Quit()
 {
+    PostQuitMessage(0);
+}
+
+void App::RequestRestart()
+{
+    restart_ = true;
     PostQuitMessage(0);
 }

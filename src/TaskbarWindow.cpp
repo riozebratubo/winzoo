@@ -1,4 +1,5 @@
 #include "TaskbarWindow.h"
+#include "App.h"
 #include "Registry.h"
 #include "resource.h"
 #include <algorithm>
@@ -190,15 +191,14 @@ void TaskbarWindow::LayoutButtons()
     int startSz  = Scale(settings_.thickness, dpi_);
     bool isHoriz = (settings_.position != TaskbarPosition::Left &&
                     settings_.position != TaskbarPosition::Right);
+    int pad      = Scale(2, dpi_);
 
     if (isHoriz)
-        startBtnRect_ = { 0, 0, startSz, h };
+        startBtnRect_ = { 0, pad, startSz, h - pad };
     else
-        startBtnRect_ = { 0, 0, w, startSz };
+        startBtnRect_ = { pad, 0, w - pad, startSz };
 
     if (count == 0) return;
-
-    int pad     = Scale(2, dpi_);
     int arrowW  = Scale(20, dpi_);
     int maxBtnW = Scale(settings_.maxButtonWidth, dpi_);
     int minBtnW = Scale(settings_.minButtonWidth, dpi_);
@@ -387,6 +387,7 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
         { L"",                    0,                     true,  false, false },
         { L"Rebuild icon cache",  IDM_REBUILD_ICON_CACHE, false, false, false },
         { L"",                    0,                     true,  false, false },
+        { L"Restart Winzoo",      IDM_RESTART,           false, false, false },
         { L"Close Taskbar",       IDM_CLOSE_TASKBAR,     false, false, false },
     };
 
@@ -408,6 +409,10 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
     case IDM_REBUILD_ICON_CACHE:
         appIconCache_.Clear();
         StartIconLoadThread();
+        break;
+
+    case IDM_RESTART:
+        App::Instance().RequestRestart();
         break;
 
     case IDM_CLOSE_TASKBAR:

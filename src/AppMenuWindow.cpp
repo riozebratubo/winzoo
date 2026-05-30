@@ -3,9 +3,34 @@
 #include <windowsx.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <powrprof.h>
 #include <algorithm>
 
+#pragma comment(lib, "PowrProf.lib")
+
 static constexpr wchar_t kAppMenuClass[] = L"WinzooAppMenu";
+
+// ---------- cached power options ----------
+
+static std::vector<PowerOption> s_powerOptions;
+
+void AppMenuWindow::CachePowerOptions()
+{
+    s_powerOptions.clear();
+    s_powerOptions.push_back({ L"Lock",      PowerOption::Lock });
+    s_powerOptions.push_back({ L"Sign out",  PowerOption::SignOut });
+
+    SYSTEM_POWER_CAPABILITIES caps = {};
+    if (GetPwrCapabilities(&caps)) {
+        if (caps.SystemS1 || caps.SystemS2 || caps.SystemS3)
+            s_powerOptions.push_back({ L"Sleep",     PowerOption::Sleep });
+        if (caps.HiberFilePresent && caps.SystemS4)
+            s_powerOptions.push_back({ L"Hibernate", PowerOption::Hibernate });
+    }
+
+    s_powerOptions.push_back({ L"Restart",   PowerOption::Restart });
+    s_powerOptions.push_back({ L"Shut down", PowerOption::Shutdown });
+}
 
 // ---------- tree building ----------
 
@@ -256,15 +281,77 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
         }
     }
 
-    // Scroll indicator
+    // Scroll indicator (only in content area)
     if (maxScrollOffset_ > 0) {
         double ratio = static_cast<double>(scrollOffset_) / maxScrollOffset_;
         int barH = std::max(Scale(20, dpi_), h * h / (h + maxScrollOffset_));
         int barY = static_cast<int>(ratio * (h - barH));
-        RECT barR = { w - Scale(3, dpi_), barY, w, barY + barH };
+        RECT barR = { menuW_ - Scale(3, dpi_), barY, menuW_, barY + barH };
         HBRUSH barBr = CreateSolidBrush(colors_.separator);
         FillRect(hdc, &barR, barBr);
         DeleteObject(barBr);
+    }
+
+    // Sidebar strip
+    if (sidebarW_ > 0 && settings_) {
+        // Background: slightly lighter/darker than main menu
+        COLORREF sidebarBg = RGB(
+            std::min(255, GetRValue(colors_.menuBg) + 12),
+            std::min(255, GetGValue(colors_.menuBg) + 12),
+            std::min(255, GetBValue(colors_.menuBg) + 12));
+        RECT sidebarR = { menuW_, 0, w, h };
+        HBRUSH sbBrush = CreateSolidBrush(sidebarBg);
+        FillRect(hdc, &sidebarR, sbBrush);
+        DeleteObject(sbBrush);
+
+        // Separator line
+        RECT sepR = { menuW_, 0, menuW_ + Scale(1, dpi_), h };
+        HBRUSH sepBrush = CreateSolidBrush(colors_.separator);
+        FillRect(hdc, &sepR, sepBrush);
+        DeleteObject(sepBrush);
+
+        // Collect visible buttons (bottom-aligned order: Explorer, Settings, Power)
+        struct BtnDef { int idx; const wchar_t* glyph; };
+        BtnDef btns[3];
+        int btnCount = 0;
+        if (settings_->appMenuSidebarShowExplorer) btns[btnCount++] = { 0, L"\uE8B7" };
+        if (settings_->appMenuSidebarShowSettings) btns[btnCount++] = { 1, L"\uE713" };
+        if (settings_->appMenuSidebarShowPower)    btns[btnCount++] = { 2, L"\uE7E8" };
+
+        int btnH = Scale(settings_->appMenuEntryHeight, dpi_);
+        int btnX = menuW_;
+        int btnW = sidebarW_;
+
+        // Draw buttons bottom-up
+        LOGFONTW lf2 = {};
+        // Size the glyph to ~2/3 of the smaller button dimension, in pixels.
+        // lfHeight is negative → character height in pixels (no extra DPI scaling).
+        int dim     = std::min(sidebarW_, btnH);
+        lf2.lfHeight  = -std::max(10, dim * 2 / 3);
+        lf2.lfQuality = CLEARTYPE_QUALITY;
+        wcscpy_s(lf2.lfFaceName, L"Segoe MDL2 Assets");
+        HFONT iconFont    = CreateFontIndirectW(&lf2);
+        HFONT prevFont    = static_cast<HFONT>(SelectObject(hdc, iconFont));
+
+        for (int bi = 0; bi < btnCount; ++bi) {
+            int btnY = h - (btnCount - bi) * btnH;
+            if (btnY < 0) continue;  // clip if menu is shorter than button stack
+            RECT btnR = { btnX, btnY, btnX + btnW, btnY + btnH };
+
+            // Hover highlight
+            if (btns[bi].idx == sidebarHoveredBtn_) {
+                HBRUSH hb = CreateSolidBrush(colors_.menuHover);
+                FillRect(hdc, &btnR, hb);
+                DeleteObject(hb);
+            }
+
+            SetTextColor(hdc, colors_.menuText);
+            DrawTextW(hdc, btns[bi].glyph, 1, &btnR,
+                      DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX);
+        }
+
+        SelectObject(hdc, prevFont);
+        DeleteObject(iconFont);
     }
 
     SelectObject(hdc, oldFont);
@@ -275,10 +362,35 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
 
 int AppMenuWindow::HitTestEntry(POINT ptClient) const
 {
+    if (ptClient.x >= menuW_) return -1;  // in sidebar
     int contentY = ptClient.y + scrollOffset_;
     for (int i = 0; i < static_cast<int>(entryRects_.size()); ++i) {
         POINT cp = { ptClient.x, contentY };
         if (PtInRect(&entryRects_[i], cp)) return i;
+    }
+    return -1;
+}
+
+int AppMenuWindow::HitTestSidebarBtn(POINT ptClient) const
+{
+    if (sidebarW_ <= 0 || !settings_) return -1;
+    if (ptClient.x < menuW_) return -1;
+
+    // Collect enabled buttons in display order (Explorer=0, Settings=1, Power=2)
+    int enabled[3];
+    int enabledCount = 0;
+    if (settings_->appMenuSidebarShowExplorer) enabled[enabledCount++] = 0;
+    if (settings_->appMenuSidebarShowSettings) enabled[enabledCount++] = 1;
+    if (settings_->appMenuSidebarShowPower)    enabled[enabledCount++] = 2;
+
+    if (enabledCount == 0) return -1;
+
+    int btnH = Scale(settings_->appMenuEntryHeight, dpi_);
+    for (int bi = 0; bi < enabledCount; ++bi) {
+        int btnY = menuH_ - (enabledCount - bi) * btnH;
+        if (btnY < 0) continue;  // off-screen
+        if (ptClient.y >= btnY && ptClient.y < btnY + btnH)
+            return enabled[bi];
     }
     return -1;
 }
@@ -331,6 +443,85 @@ void AppMenuWindow::Scroll(int pixelDelta)
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
+// ---------- sidebar button activation ----------
+
+static void ExecutePowerAction(PowerOption::Action action)
+{
+    switch (action) {
+    case PowerOption::Lock:
+        LockWorkStation();
+        break;
+    case PowerOption::SignOut:
+        ExitWindowsEx(EWX_LOGOFF | EWX_FORCEIFHUNG, 0);
+        break;
+    case PowerOption::Sleep:
+        SetSuspendState(FALSE, FALSE, FALSE);
+        break;
+    case PowerOption::Hibernate:
+        SetSuspendState(TRUE, FALSE, FALSE);
+        break;
+    case PowerOption::Restart:
+        ShellExecuteW(nullptr, L"open", L"shutdown.exe", L"/r /t 0", nullptr, SW_HIDE);
+        break;
+    case PowerOption::Shutdown:
+        ShellExecuteW(nullptr, L"open", L"shutdown.exe", L"/s /t 0", nullptr, SW_HIDE);
+        break;
+    }
+}
+
+void AppMenuWindow::ActivateSidebarBtn(int idx)
+{
+    if (idx == 0) {
+        // Open Windows Explorer
+        ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL);
+        closeReason_ = AppMenuCloseReason::Selection;
+        done_ = true;
+        DestroyWindow(hwnd_);
+    } else if (idx == 1) {
+        // Open Windows Settings
+        ShellExecuteW(nullptr, L"open", L"ms-settings:", nullptr, nullptr, SW_SHOWNORMAL);
+        closeReason_ = AppMenuCloseReason::Selection;
+        done_ = true;
+        DestroyWindow(hwnd_);
+    } else if (idx == 2) {
+        // Show power menu
+        if (s_powerOptions.empty()) return;
+
+        HMENU hMenu = CreatePopupMenu();
+        for (int i = 0; i < static_cast<int>(s_powerOptions.size()); ++i)
+            AppendMenuW(hMenu, MF_STRING, i + 1, s_powerOptions[i].label.c_str());
+
+        // Position popup at the top-right of the power button
+        int btnH = settings_ ? Scale(settings_->appMenuEntryHeight, dpi_) : Scale(36, dpi_);
+        int enabledCount = 0;
+        if (settings_) {
+            if (settings_->appMenuSidebarShowExplorer) ++enabledCount;
+            if (settings_->appMenuSidebarShowSettings) ++enabledCount;
+            if (settings_->appMenuSidebarShowPower)    ++enabledCount;
+        }
+        // Power button is the last button; find its top-left screen coordinate
+        POINT btnPt = { menuW_, menuH_ - btnH };
+        ClientToScreen(hwnd_, &btnPt);
+
+        suppressKillFocus_ = true;
+        int cmd = static_cast<int>(TrackPopupMenu(hMenu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_RIGHTALIGN | TPM_BOTTOMALIGN,
+            btnPt.x, btnPt.y, 0, hwnd_, nullptr));
+        suppressKillFocus_ = false;
+        DestroyMenu(hMenu);
+
+        if (cmd > 0) {
+            ExecutePowerAction(s_powerOptions[cmd - 1].action);
+            closeReason_ = AppMenuCloseReason::Selection;
+            done_ = true;
+            if (IsWindow(hwnd_)) DestroyWindow(hwnd_);
+        } else {
+            // User dismissed without selecting — restore focus so the menu stays active.
+            if (IsWindow(hwnd_)) SetForegroundWindow(hwnd_);
+        }
+    }
+}
+
 // ---------- message handler ----------
 
 LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -351,9 +542,11 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_MOUSEMOVE: {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-        int idx = HitTestEntry(pt);
-        if (idx != hoveredIdx_) {
-            hoveredIdx_ = idx;
+        int newIdx = HitTestEntry(pt);
+        int newSidebarBtn = HitTestSidebarBtn(pt);
+        if (newIdx != hoveredIdx_ || newSidebarBtn != sidebarHoveredBtn_) {
+            hoveredIdx_      = newIdx;
+            sidebarHoveredBtn_ = newSidebarBtn;
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
@@ -361,9 +554,14 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_LBUTTONUP: {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-        int idx = HitTestEntry(pt);
-        if (idx >= 0)
-            ActivateNode(idx);
+        int sidebarBtn = HitTestSidebarBtn(pt);
+        if (sidebarBtn >= 0) {
+            ActivateSidebarBtn(sidebarBtn);
+        } else {
+            int idx = HitTestEntry(pt);
+            if (idx >= 0)
+                ActivateNode(idx);
+        }
         return 0;
     }
 
@@ -438,6 +636,8 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     case WM_KILLFOCUS:
         // Suppress if focus moved to our active child submenu.
         if (subMenuHwnd_ && (HWND)wParam == subMenuHwnd_) return 0;
+        // Suppress while power popup is open.
+        if (suppressKillFocus_) return 0;
         done_ = true;
         DestroyWindow(hwnd);
         return 0;
@@ -479,6 +679,12 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
 
     int menuW = Scale(settings.appMenuWidth, dpi);
     menu.menuW_ = menuW;
+
+    // Sidebar: only on root menu (not submenus), and only when enabled
+    int sidebarW = (!isSubmenu && settings.appMenuSidebarEnabled)
+                       ? Scale(settings.appMenuSidebarWidth, dpi) : 0;
+    menu.sidebarW_ = sidebarW;
+    int totalW = menuW + sidebarW;
 
     menu.BuildEntryRects(menuW);
     int padPx    = Scale(settings.appMenuPadding, dpi);
@@ -522,18 +728,18 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
             y = anchorRect.top;
             x = (position == TaskbarPosition::Left)
                     ? anchorRect.right + margin
-                    : anchorRect.left - menuW - margin;
+                    : anchorRect.left - totalW - margin;
         }
     } else {
         // Submenu: open to the right of the folder item; flip left if needed.
         x = anchorRect.right + margin;
         y = anchorRect.top;
-        if (x + menuW > workArea.right)
-            x = anchorRect.left - menuW - margin;
+        if (x + totalW > workArea.right)
+            x = anchorRect.left - totalW - margin;
     }
 
     // Clamp to work area.
-    if (x + menuW > workArea.right)  x = workArea.right  - menuW;
+    if (x + totalW > workArea.right)  x = workArea.right  - totalW;
     if (y + menuH > workArea.bottom) y = workArea.bottom - menuH;
     if (x < workArea.left) x = workArea.left;
     if (y < workArea.top)  y = workArea.top;
@@ -542,7 +748,7 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
         WS_EX_TOPMOST,
         kAppMenuClass, nullptr,
         WS_POPUP | WS_BORDER,
-        x, y, menuW, menuH,
+        x, y, totalW, menuH,
         hwndOwner, nullptr, hInst, &menu);
 
     if (!hwnd) return AppMenuCloseReason::ClickedOutside;

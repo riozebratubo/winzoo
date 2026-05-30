@@ -8,8 +8,18 @@
 
 enum class AppMenuCloseReason { Selection, Escape, ClickedOutside };
 
+struct PowerOption {
+    enum Action { Lock, SignOut, Sleep, Hibernate, Restart, Shutdown };
+    std::wstring label;
+    Action       action;
+};
+
 class AppMenuWindow {
 public:
+    // Query Windows for available power options and cache them for the run.
+    // Call once at app startup.
+    static void CachePowerOptions();
+
     // Shows the app menu anchored to the start button rect.
     // Blocks until the menu (and any submenus) are dismissed.
     // Takes entries by value so the menu owns a stable snapshot.
@@ -39,7 +49,9 @@ private:
 
     void Paint(HDC hdc, int w, int h);
     int  HitTestEntry(POINT ptClient) const;
+    int  HitTestSidebarBtn(POINT ptClient) const;
     void ActivateNode(int idx);
+    void ActivateSidebarBtn(int idx);
     void Scroll(int delta);
     void UpdateMaxScroll(int contentH, int clientH);
     void BuildEntryRects(int menuW);
@@ -68,8 +80,13 @@ private:
     HWND subMenuHwnd_ = nullptr;
 
     HWND hwnd_  = nullptr;
-    int  menuW_ = 0;
+    int  menuW_ = 0;  // content width (excludes sidebar)
     int  menuH_ = 0;
+
+    // Sidebar
+    int  sidebarW_          = 0;  // 0 if disabled
+    int  sidebarHoveredBtn_ = -1; // 0=Explorer, 1=Settings, 2=Power
+    bool suppressKillFocus_ = false;
 
     // Cached folder icons (loaded lazily in Paint, destroyed in WM_DESTROY).
     HICON folderIconList_ = nullptr;

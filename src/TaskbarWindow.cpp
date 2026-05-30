@@ -186,6 +186,16 @@ void TaskbarWindow::LayoutButtons()
     scrollLeftRect_  = scrollRightRect_ = {};
     maxScrollOffset_ = 0;
 
+    // Start button: a square on the leading edge
+    int startSz  = Scale(settings_.thickness, dpi_);
+    bool isHoriz = (settings_.position != TaskbarPosition::Left &&
+                    settings_.position != TaskbarPosition::Right);
+
+    if (isHoriz)
+        startBtnRect_ = { 0, 0, startSz, h };
+    else
+        startBtnRect_ = { 0, 0, w, startSz };
+
     if (count == 0) return;
 
     int pad     = Scale(2, dpi_);
@@ -193,9 +203,6 @@ void TaskbarWindow::LayoutButtons()
     int maxBtnW = Scale(settings_.maxButtonWidth, dpi_);
     int minBtnW = Scale(settings_.minButtonWidth, dpi_);
     if (minBtnW > maxBtnW) minBtnW = maxBtnW;
-
-    bool isHoriz = (settings_.position != TaskbarPosition::Left &&
-                    settings_.position != TaskbarPosition::Right);
 
     // Tail reservation
     int tail = 0;
@@ -209,9 +216,10 @@ void TaskbarWindow::LayoutButtons()
     }
 
     if (isHoriz) {
-        int available = w - tail;
-        // Scroll fires only when buttons can't fit at minimum size.
-        // Before that, buttons grow to fill the space (capped at max, floored at min).
+        // Available area starts after start button
+        int start     = startSz;
+        int available = w - start - tail;
+
         int totalMin = count * minBtnW + (count - 1) * pad + 2 * pad;
 
         if (totalMin <= available) {
@@ -220,15 +228,15 @@ void TaskbarWindow::LayoutButtons()
             int btnW = std::min(maxBtnW,
                                 std::max(minBtnW,
                                          (area - (count - 1) * pad) / count));
-            int x = pad;
+            int x = start + pad;
             for (auto& btn : buttons) {
                 btn.rect = { x, pad, x + btnW, h - pad };
                 x += btnW + pad;
             }
         } else {
-            scrollNeeded_   = true;
-            scrollLeftRect_  = { 0,                 0, arrowW,    h };
-            scrollRightRect_ = { available - arrowW, 0, available, h };
+            scrollNeeded_    = true;
+            scrollLeftRect_  = { start,                      0, start + arrowW,    h };
+            scrollRightRect_ = { start + available - arrowW, 0, start + available, h };
 
             int inner    = available - 2 * arrowW - 2 * pad;
             int visCount = std::max(1, (inner + pad) / (minBtnW + pad));
@@ -236,28 +244,29 @@ void TaskbarWindow::LayoutButtons()
             scrollOffset_    = std::min(scrollOffset_, maxScrollOffset_);
 
             for (auto& btn : buttons) btn.rect = {};
-            int x = arrowW + pad;
+            int x = start + arrowW + pad;
             for (int i = scrollOffset_; i < scrollOffset_ + visCount && i < count; ++i) {
                 buttons[i].rect = { x, pad, x + minBtnW, h - pad };
                 x += minBtnW + pad;
             }
         }
     } else {
+        int start     = startSz;
         int btnH      = Scale(36, dpi_);
-        int available = h - tail;
+        int available = h - start - tail;
         int totalMin  = count * minBtnW + (count - 1) * pad + 2 * pad;
 
         if (totalMin <= available) {
             scrollOffset_ = 0;
-            int y = pad;
+            int y = start + pad;
             for (auto& btn : buttons) {
                 btn.rect = { pad, y, w - pad, y + btnH };
                 y += btnH + pad;
             }
         } else {
-            scrollNeeded_   = true;
-            scrollLeftRect_  = { 0, 0,                w, arrowW };
-            scrollRightRect_ = { 0, available - arrowW, w, available };
+            scrollNeeded_    = true;
+            scrollLeftRect_  = { 0, start,                      w, start + arrowW };
+            scrollRightRect_ = { 0, start + available - arrowW, w, start + available };
 
             int inner    = available - 2 * arrowW - 2 * pad;
             int visCount = std::max(1, (inner + pad) / (minBtnW + pad));
@@ -265,7 +274,7 @@ void TaskbarWindow::LayoutButtons()
             scrollOffset_    = std::min(scrollOffset_, maxScrollOffset_);
 
             for (auto& btn : buttons) btn.rect = {};
-            int y = arrowW + pad;
+            int y = start + arrowW + pad;
             for (int i = scrollOffset_; i < scrollOffset_ + visCount && i < count; ++i) {
                 buttons[i].rect = { pad, y, w - pad, y + minBtnW };
                 y += minBtnW + pad;
@@ -373,10 +382,12 @@ void TaskbarWindow::ShowTaskButtonMenu(int idx, POINT ptScreen)
 void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
 {
     std::vector<MenuItem> items = {
-        { L"Settings",       IDM_SETTINGS,      false, false, false },
-        { L"About Winzoo",   IDM_ABOUT,         false, false, false },
-        { L"",               0,                 true,  false, false },
-        { L"Close Taskbar",  IDM_CLOSE_TASKBAR, false, false, false },
+        { L"Settings",            IDM_SETTINGS,          false, false, false },
+        { L"About Winzoo",        IDM_ABOUT,             false, false, false },
+        { L"",                    0,                     true,  false, false },
+        { L"Rebuild icon cache",  IDM_REBUILD_ICON_CACHE, false, false, false },
+        { L"",                    0,                     true,  false, false },
+        { L"Close Taskbar",       IDM_CLOSE_TASKBAR,     false, false, false },
     };
 
     UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
@@ -394,10 +405,69 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
                     MB_OK | MB_ICONINFORMATION);
         break;
 
+    case IDM_REBUILD_ICON_CACHE:
+        appIconCache_.Clear();
+        StartIconLoadThread();
+        break;
+
     case IDM_CLOSE_TASKBAR:
         PostQuitMessage(0);
         break;
     }
+}
+
+RECT TaskbarWindow::GetStartBtnScreenRect() const
+{
+    RECT r = startBtnRect_;
+    POINT tl = { r.left, r.top };
+    POINT br = { r.right, r.bottom };
+    ClientToScreen(hwnd_, &tl);
+    ClientToScreen(hwnd_, &br);
+    return { tl.x, tl.y, br.x, br.y };
+}
+
+void TaskbarWindow::ShowAppMenu()
+{
+    if (appEntries_.empty()) return;
+    if (menuOpen_) return;   // Guard against re-entrant calls from within the nested loop
+    menuOpen_ = true;
+    RECT btnScreen = GetStartBtnScreenRect();
+    AppMenuWindow::Show(hwnd_, btnScreen, settings_.position,
+                        appEntries_,    // copied by value into menu
+                        settings_, colors_, dpi_);
+    menuOpen_ = false;
+    menuLastClosedTick_ = GetTickCount();
+}
+
+void TaskbarWindow::StartScanThread(bool isFirstScan)
+{
+    HWND hwnd = hwnd_;
+    WPARAM wp = isFirstScan ? 0 : 1;
+    std::thread([hwnd, wp]() {
+        auto* pEntries = new std::vector<AppEntry>(AppScanner::Scan());
+        PostMessageW(hwnd, WM_APP_SCAN_DONE, wp,
+                     reinterpret_cast<LPARAM>(pEntries));
+    }).detach();
+}
+
+void TaskbarWindow::StartIconLoadThread()
+{
+    HWND hwnd = hwnd_;
+    int  sizePx = Scale(20, dpi_);
+    std::vector<std::wstring> paths;
+    paths.reserve(appEntries_.size());
+    for (const auto& e : appEntries_) {
+        paths.push_back(e.iconPath.empty() ? e.exePath : e.iconPath);
+    }
+    std::thread([hwnd, sizePx, paths = std::move(paths)]() {
+        using Pair = std::pair<std::wstring, HICON>;
+        auto* pResults = new std::vector<Pair>();
+        pResults->reserve(paths.size());
+        for (const auto& path : paths)
+            pResults->emplace_back(path, AppIconCache::LoadStatic(path, sizePx));
+        PostMessageW(hwnd, WM_APP_ICONS_DONE, static_cast<WPARAM>(sizePx),
+                     reinterpret_cast<LPARAM>(pResults));
+    }).detach();
 }
 
 LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -449,6 +519,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
         LayoutButtons();
         SetTimer(hwnd, kTimerActiveWindow, kTimerIntervalMs, nullptr);
+        SetTimer(hwnd, kTimerAppScanFirst, 500, nullptr);
         return 0;
     }
 
@@ -493,7 +564,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                         drag_.State() == DragState::Pressed  ? drag_.DragIndex() : -1,
                         drag_.State() == DragState::Dragging ? drag_.DragIndex() : -1,
                         ghostPt,
-                        colors_, dpi_, clock, scroll);
+                        colors_, dpi_, clock, scroll,
+                        StartButtonInfo{ true, startBtnRect_, hoveredStart_ });
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -518,6 +590,12 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         int idx = HitTestButton(pt);
         if (idx != hoveredIdx_) {
             hoveredIdx_ = idx;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+
+        bool newHovStart = (PtInRect(&startBtnRect_, pt) != FALSE);
+        if (newHovStart != hoveredStart_) {
+            hoveredStart_ = newHovStart;
             InvalidateRect(hwnd, nullptr, FALSE);
         }
 
@@ -546,11 +624,20 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     case WM_MOUSELEAVE:
         hoveredIdx_    = -1;
         hoveredScroll_ = 0;
+        hoveredStart_  = false;
         InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
 
     case WM_LBUTTONDOWN: {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+
+        // Start button takes priority
+        if (PtInRect(&startBtnRect_, pt)) {
+            if (!menuOpen_ && GetTickCount() - menuLastClosedTick_ > 200)
+                ShowAppMenu();
+            return 0;
+        }
+
         if (scrollNeeded_) {
             if (PtInRect(&scrollLeftRect_, pt)) {
                 if (scrollOffset_ > 0) { --scrollOffset_; LayoutButtons(); InvalidateRect(hwnd, nullptr, FALSE); }
@@ -644,8 +731,57 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (wParam == kTimerActiveWindow) {
             tracker_.UpdateActiveWindow();
             InvalidateRect(hwnd, nullptr, FALSE);
+        } else if (wParam == kTimerAppScanFirst) {
+            KillTimer(hwnd, kTimerAppScanFirst);
+            StartScanThread(true);
+        } else if (wParam == kTimerAppScan) {
+            StartScanThread(false);
         }
         return 0;
+
+    case WM_APP_SCAN_DONE: {
+        auto* pEntries = reinterpret_cast<std::vector<AppEntry>*>(lParam);
+        if (!shutdownPending_) {
+            int iconSz = Scale(20, dpi_);
+            if (wParam == 0) {
+                // First scan: icons not yet cached; leave them null until icon thread finishes.
+                appEntries_ = std::move(*pEntries);
+                SetTimer(hwnd_, kTimerAppScan, kTimerAppScanMs, nullptr);
+                StartIconLoadThread();
+            } else {
+                // Periodic re-scan: assign whatever is already in cache (no I/O).
+                for (auto& e : *pEntries) {
+                    const std::wstring& p = e.iconPath.empty() ? e.exePath : e.iconPath;
+                    e.icon = appIconCache_.TryGet(p, iconSz);
+                }
+                appEntries_ = std::move(*pEntries);
+                InvalidateRect(hwnd_, nullptr, FALSE);
+            }
+        }
+        delete pEntries;
+        return 0;
+    }
+
+    case WM_APP_ICONS_DONE: {
+        auto* pIcons = reinterpret_cast<std::vector<std::pair<std::wstring, HICON>>*>(lParam);
+        if (!shutdownPending_) {
+            int iconSz = static_cast<int>(wParam);
+            for (auto& [path, icon] : *pIcons)
+                appIconCache_.Store(path, iconSz, icon);
+            // Assign freshly-cached icons to the current entry list.
+            for (auto& e : appEntries_) {
+                const std::wstring& p = e.iconPath.empty() ? e.exePath : e.iconPath;
+                e.icon = appIconCache_.TryGet(p, iconSz);
+            }
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        } else {
+            // App is shutting down — free HICON resources that won't be stored.
+            for (auto& [path, icon] : *pIcons)
+                if (icon) DestroyIcon(icon);
+        }
+        delete pIcons;
+        return 0;
+    }
 
     case WM_DPICHANGED: {
         dpi_ = HIWORD(wParam);
@@ -680,7 +816,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     }
 
     case WM_DESTROY:
+        shutdownPending_ = true;
         KillTimer(hwnd, kTimerActiveWindow);
+        KillTimer(hwnd, kTimerAppScanFirst);
+        KillTimer(hwnd, kTimerAppScan);
         tracker_.Shutdown();
         appBar_.Unregister();
         PostQuitMessage(0);

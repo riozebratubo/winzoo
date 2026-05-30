@@ -122,6 +122,60 @@ BEGIN
     LTEXT           "Tokens — time: $hh $mm $ss  date: $dd $mm $yyyy $yy",
                     IDC_LBL_TOKENS, 12, 126, 200, 16
 
+    /* App Menu tab */
+    LTEXT           "Layout:",             IDC_LBL_APPMENU_LAYOUT,     12, 30, 46, 10
+    COMBOBOX        IDC_COMBO_APPMENU_LAYOUT,                           62, 28, 80, 60,
+                    CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+
+    LTEXT           "Menu width (px):",    IDC_LBL_APPMENU_WIDTH,      12, 46, 70, 10
+    EDITTEXT        IDC_EDIT_APPMENU_WIDTH,                             84, 44, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_APPMENU_WIDTH, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    112, 44, 12, 12
+
+    LTEXT           "Max height (px):",    IDC_LBL_APPMENU_MAXHEIGHT,  12, 62, 70, 10
+    EDITTEXT        IDC_EDIT_APPMENU_MAXHEIGHT,                        84, 60, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_APPMENU_MAXHEIGHT, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    112, 60, 12, 12
+
+    LTEXT           "Row height (px):",    IDC_LBL_APPMENU_ENTRYH,     12, 78, 70, 10
+    EDITTEXT        IDC_EDIT_APPMENU_ENTRYH,                           84, 76, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_APPMENU_ENTRYH, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    112, 76, 12, 12
+
+    LTEXT           "Grid cols:",          IDC_LBL_APPMENU_GRIDCOLS,  130, 46, 40, 10
+    EDITTEXT        IDC_EDIT_APPMENU_GRIDCOLS,                        172, 44, 22, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_APPMENU_GRIDCOLS, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    194, 44, 12, 12
+
+    LTEXT           "Grid rows:",          IDC_LBL_APPMENU_GRIDROWS,  130, 62, 40, 10
+    EDITTEXT        IDC_EDIT_APPMENU_GRIDROWS,                        172, 60, 22, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_APPMENU_GRIDROWS, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    194, 60, 12, 12
+
+    LTEXT           "List font (pt):",     IDC_LBL_APPMENU_LISTFS,    12,  94, 62, 10
+    EDITTEXT        IDC_EDIT_APPMENU_LISTFS,                          76,  92, 22, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_APPMENU_LISTFS, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    98,  92, 12, 12
+
+    LTEXT           "Grid font (pt):",     IDC_LBL_APPMENU_GRIDFS,   116,  94, 62, 10
+    EDITTEXT        IDC_EDIT_APPMENU_GRIDFS,                         180,  92, 22, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_APPMENU_GRIDFS, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    202,  92, 12, 12
+
     DEFPUSHBUTTON   "OK",     IDOK,     110, 158, 46, 14
     PUSHBUTTON      "Cancel", IDCANCEL, 162, 158, 46, 14
 END

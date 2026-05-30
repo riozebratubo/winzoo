@@ -12,6 +12,10 @@ static constexpr const wchar_t* kThemes[] = {
     L"Dark", L"Light", L"Accent (Blue)", L"Forest (Green)", L"Sunset (Orange)"
 };
 
+static constexpr const wchar_t* kAppMenuLayouts[] = {
+    L"List", L"Grid"
+};
+
 struct DlgData {
     Settings* settings;
 };
@@ -43,11 +47,23 @@ static const int kClockControls[] = {
     0
 };
 
-static const int* kTabGroups[] = { kGeneralControls, kAppBtnControls, kClockControls };
+static const int kAppMenuControls[] = {
+    IDC_LBL_APPMENU_LAYOUT,    IDC_COMBO_APPMENU_LAYOUT,
+    IDC_LBL_APPMENU_WIDTH,     IDC_EDIT_APPMENU_WIDTH,    IDC_SPIN_APPMENU_WIDTH,
+    IDC_LBL_APPMENU_MAXHEIGHT, IDC_EDIT_APPMENU_MAXHEIGHT, IDC_SPIN_APPMENU_MAXHEIGHT,
+    IDC_LBL_APPMENU_ENTRYH,    IDC_EDIT_APPMENU_ENTRYH,   IDC_SPIN_APPMENU_ENTRYH,
+    IDC_LBL_APPMENU_GRIDCOLS,  IDC_EDIT_APPMENU_GRIDCOLS, IDC_SPIN_APPMENU_GRIDCOLS,
+    IDC_LBL_APPMENU_GRIDROWS,  IDC_EDIT_APPMENU_GRIDROWS, IDC_SPIN_APPMENU_GRIDROWS,
+    IDC_LBL_APPMENU_LISTFS,    IDC_EDIT_APPMENU_LISTFS,   IDC_SPIN_APPMENU_LISTFS,
+    IDC_LBL_APPMENU_GRIDFS,    IDC_EDIT_APPMENU_GRIDFS,   IDC_SPIN_APPMENU_GRIDFS,
+    0
+};
+
+static const int* kTabGroups[] = { kGeneralControls, kAppBtnControls, kClockControls, kAppMenuControls };
 
 static void ShowTab(HWND hwnd, int tab)
 {
-    for (int g = 0; g < 3; ++g) {
+    for (int g = 0; g < 4; ++g) {
         int cmd = (g == tab) ? SW_SHOW : SW_HIDE;
         for (const int* id = kTabGroups[g]; *id; ++id)
             ShowWindow(GetDlgItem(hwnd, *id), cmd);
@@ -149,12 +165,11 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         HWND hTab = GetDlgItem(hwnd, IDC_TAB_SETTINGS);
         TCITEMW tci = {};
         tci.mask = TCIF_TEXT;
-        wchar_t t0[] = L"General", t1[] = L"App Buttons", t2[] = L"System Clock";
+        wchar_t t0[] = L"General", t1[] = L"App Buttons", t2[] = L"System Clock", t3[] = L"App Menu";
         tci.pszText = t0; TabCtrl_InsertItem(hTab, 0, &tci);
         tci.pszText = t1; TabCtrl_InsertItem(hTab, 1, &tci);
         tci.pszText = t2; TabCtrl_InsertItem(hTab, 2, &tci);
-
-        ShowTab(hwnd, 0);
+        tci.pszText = t3; TabCtrl_InsertItem(hTab, 3, &tci);
 
         // Disable visual styles on checkboxes so they respect the transparent
         // background brush from WM_CTLCOLORBTN instead of painting their own.
@@ -163,6 +178,34 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         };
         for (const int* id = kCheckIds; *id; ++id)
             SetWindowTheme(GetDlgItem(hwnd, *id), L"", L"");
+
+        // App Menu tab init
+        {
+            HWND hLayout = GetDlgItem(hwnd, IDC_COMBO_APPMENU_LAYOUT);
+            for (auto* s : kAppMenuLayouts)
+                SendMessageW(hLayout, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(s));
+            SendMessageW(hLayout, CB_SETCURSEL, static_cast<WPARAM>(data->settings->appMenuLayout), 0);
+
+            auto initSpin = [&](int spinId, int editId, int lo, int hi, int val) {
+                HWND hSpin = GetDlgItem(hwnd, spinId);
+                HWND hEdit = GetDlgItem(hwnd, editId);
+                SendMessageW(hSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hEdit), 0);
+                SendMessageW(hSpin, UDM_SETRANGE32, lo, hi);
+                SendMessageW(hSpin, UDM_SETPOS32,   0, val);
+            };
+
+            initSpin(IDC_SPIN_APPMENU_WIDTH,     IDC_EDIT_APPMENU_WIDTH,     120,  800, data->settings->appMenuWidth);
+            initSpin(IDC_SPIN_APPMENU_MAXHEIGHT, IDC_EDIT_APPMENU_MAXHEIGHT, 100, 2000, data->settings->appMenuMaxHeight);
+            initSpin(IDC_SPIN_APPMENU_ENTRYH,    IDC_EDIT_APPMENU_ENTRYH,     20,   80, data->settings->appMenuEntryHeight);
+            initSpin(IDC_SPIN_APPMENU_GRIDCOLS,  IDC_EDIT_APPMENU_GRIDCOLS,    1,   12, data->settings->appMenuGridCols);
+            initSpin(IDC_SPIN_APPMENU_GRIDROWS,  IDC_EDIT_APPMENU_GRIDROWS,    1,   20, data->settings->appMenuGridRows);
+            initSpin(IDC_SPIN_APPMENU_LISTFS,    IDC_EDIT_APPMENU_LISTFS,      6,   36, data->settings->appMenuListFontSize);
+            initSpin(IDC_SPIN_APPMENU_GRIDFS,    IDC_EDIT_APPMENU_GRIDFS,      6,   36, data->settings->appMenuGridFontSize);
+        }
+
+        // ShowTab must run last so that UDM_SETBUDDY calls (which make edit buddies
+        // visible) are all done before we hide controls belonging to inactive tabs.
+        ShowTab(hwnd, 0);
 
         return TRUE;
     }
@@ -286,6 +329,35 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             if (timeSz >= 6 && timeSz <= 36) data->settings->clockTimeFontSize = timeSz;
             if (dateSz >= 6 && dateSz <= 36) data->settings->clockDateFontSize = dateSz;
             // clockTimeColor and clockDateColor are updated immediately on pick
+
+            // App Menu tab
+            {
+                HWND hLayout = GetDlgItem(hwnd, IDC_COMBO_APPMENU_LAYOUT);
+                int layoutIdx = static_cast<int>(SendMessageW(hLayout, CB_GETCURSEL, 0, 0));
+                if (layoutIdx >= 0)
+                    data->settings->appMenuLayout = static_cast<AppMenuLayout>(layoutIdx);
+
+                auto readSpin = [&](int spinId, int /*lo*/, int /*hi*/) -> int {
+                    return static_cast<int>(
+                        SendMessageW(GetDlgItem(hwnd, spinId), UDM_GETPOS32, 0, 0));
+                };
+
+                int amW  = readSpin(IDC_SPIN_APPMENU_WIDTH, 120, 800);
+                int amMH = readSpin(IDC_SPIN_APPMENU_MAXHEIGHT, 100, 2000);
+                int amEH = readSpin(IDC_SPIN_APPMENU_ENTRYH, 20, 80);
+                int amGC = readSpin(IDC_SPIN_APPMENU_GRIDCOLS, 1, 12);
+                int amGR = readSpin(IDC_SPIN_APPMENU_GRIDROWS, 1, 20);
+                int amLF = readSpin(IDC_SPIN_APPMENU_LISTFS, 6, 36);
+                int amGF = readSpin(IDC_SPIN_APPMENU_GRIDFS, 6, 36);
+
+                if (amW  >= 120  && amW  <= 800)  data->settings->appMenuWidth        = amW;
+                if (amMH >= 100  && amMH <= 2000) data->settings->appMenuMaxHeight    = amMH;
+                if (amEH >= 20   && amEH <= 80)   data->settings->appMenuEntryHeight  = amEH;
+                if (amGC >= 1    && amGC <= 12)   data->settings->appMenuGridCols     = amGC;
+                if (amGR >= 1    && amGR <= 20)   data->settings->appMenuGridRows     = amGR;
+                if (amLF >= 6    && amLF <= 36)   data->settings->appMenuListFontSize = amLF;
+                if (amGF >= 6    && amGF <= 36)   data->settings->appMenuGridFontSize = amGF;
+            }
 
             EndDialog(hwnd, IDOK);
             return TRUE;

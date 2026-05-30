@@ -90,7 +90,8 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
                      int dragIdx, POINT ghostPt,
                      const ThemeColors& colors, int dpi,
                      const ClockInfo& clock,
-                     const ScrollInfo& scroll)
+                     const ScrollInfo& scroll,
+                     const StartButtonInfo& startBtn)
 {
     if (!hdcMem_) return;
 
@@ -184,6 +185,46 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
     }
 
     SelectObject(hdcMem_, oldFont);
+
+    // Start button (drawn last so it's on top of background)
+    if (startBtn.visible) {
+        COLORREF bg = startBtn.hovered ? colors.buttonHover : colors.buttonNormal;
+        HBRUSH sbBr = CreateSolidBrush(bg);
+        FillRect(hdcMem_, &startBtn.rect, sbBr);
+        DeleteObject(sbBr);
+
+        // 3×3 grid of small squares, centered in the button rect
+        int bw     = startBtn.rect.right  - startBtn.rect.left;
+        int bh     = startBtn.rect.bottom - startBtn.rect.top;
+        int dotSz  = MulDiv(4, dpi, 96);   // dot size in pixels
+        int gap    = MulDiv(3, dpi, 96);   // gap between dots
+        int total  = 3 * dotSz + 2 * gap; // 3 cols/rows
+        int ox     = startBtn.rect.left + (bw - total) / 2;
+        int oy     = startBtn.rect.top  + (bh - total) / 2;
+
+        HBRUSH dotBr = CreateSolidBrush(colors.text);
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 3; ++col) {
+                RECT dot = {
+                    ox + col * (dotSz + gap),
+                    oy + row * (dotSz + gap),
+                    ox + col * (dotSz + gap) + dotSz,
+                    oy + row * (dotSz + gap) + dotSz
+                };
+                FillRect(hdcMem_, &dot, dotBr);
+            }
+        }
+        DeleteObject(dotBr);
+
+        // Thin separator on the trailing edge
+        HPEN sepPen = CreatePen(PS_SOLID, 1, colors.separator);
+        HPEN oldPen = static_cast<HPEN>(SelectObject(hdcMem_, sepPen));
+        // Vertical separator (assuming horizontal bar; works for vertical too)
+        MoveToEx(hdcMem_, startBtn.rect.right, startBtn.rect.top,    nullptr);
+        LineTo(  hdcMem_, startBtn.rect.right, startBtn.rect.bottom);
+        SelectObject(hdcMem_, oldPen);
+        DeleteObject(sepPen);
+    }
 
     BitBlt(hdcTarget, 0, 0, w, h, hdcMem_, 0, 0, SRCCOPY);
 }

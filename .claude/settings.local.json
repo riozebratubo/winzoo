@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash($CMAKE *)",
+      "Bash('C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe' -B D:/dev/winzoo/build -S D:/dev/winzoo -G 'Visual Studio 18 2026' -A x64)",
+      "Bash('C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe' --build D:/dev/winzoo/build --config Release)",
+      "Bash(cmd /c build.bat)"
+    ]
+  }
+}

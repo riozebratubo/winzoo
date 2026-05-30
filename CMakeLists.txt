@@ -30,6 +30,9 @@ set(SOURCES
     src/AppBar.cpp
     src/Renderer.cpp
     src/IconCache.cpp
+    src/AppScanner.cpp
+    src/AppIconCache.cpp
+    src/AppMenuWindow.cpp
     res/winzoo.rc
 )
 

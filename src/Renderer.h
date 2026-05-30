@@ -15,6 +15,12 @@ struct ScrollInfo {
     int  hovered  = 0;   // 0=none 1=left/up 2=right/down
 };
 
+struct StartButtonInfo {
+    bool visible = false;
+    RECT rect    = {};
+    bool hovered = false;
+};
+
 struct ClockInfo {
     bool         visible    = false;
     RECT         rect       = {};
@@ -36,7 +42,8 @@ public:
                int dragIdx, POINT ghostPt,
                const ThemeColors& colors, int dpi,
                const ClockInfo& clock,
-               const ScrollInfo& scroll);
+               const ScrollInfo& scroll,
+               const StartButtonInfo& startBtn);
 
     ~Renderer();
 

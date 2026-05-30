@@ -152,6 +152,33 @@ Settings LoadSettings()
     if (s.clockDateFontSize > 36) s.clockDateFontSize = 36;
 
     key.ReadMultiString(L"PinnedPaths", s.pinnedExePaths);
+
+    DWORD amVal;
+    if (key.ReadDword(L"AppMenuLayout",       amVal)) s.appMenuLayout       = static_cast<AppMenuLayout>(amVal);
+    if (key.ReadDword(L"AppMenuWidth",        amVal)) s.appMenuWidth        = static_cast<int>(amVal);
+    if (key.ReadDword(L"AppMenuMaxHeight",    amVal)) s.appMenuMaxHeight    = static_cast<int>(amVal);
+    if (key.ReadDword(L"AppMenuEntryHeight",  amVal)) s.appMenuEntryHeight  = static_cast<int>(amVal);
+    if (key.ReadDword(L"AppMenuGridCols",     amVal)) s.appMenuGridCols     = static_cast<int>(amVal);
+    if (key.ReadDword(L"AppMenuGridRows",     amVal)) s.appMenuGridRows     = static_cast<int>(amVal);
+    if (key.ReadDword(L"AppMenuListFontSize", amVal)) s.appMenuListFontSize = static_cast<int>(amVal);
+    if (key.ReadDword(L"AppMenuGridFontSize", amVal)) s.appMenuGridFontSize = static_cast<int>(amVal);
+
+    // Clamp App Menu values
+    if (s.appMenuWidth        < 120)  s.appMenuWidth        = 120;
+    if (s.appMenuWidth        > 800)  s.appMenuWidth        = 800;
+    if (s.appMenuMaxHeight    < 100)  s.appMenuMaxHeight    = 100;
+    if (s.appMenuMaxHeight    > 2000) s.appMenuMaxHeight    = 2000;
+    if (s.appMenuEntryHeight  < 20)   s.appMenuEntryHeight  = 20;
+    if (s.appMenuEntryHeight  > 80)   s.appMenuEntryHeight  = 80;
+    if (s.appMenuGridCols     < 1)    s.appMenuGridCols     = 1;
+    if (s.appMenuGridCols     > 12)   s.appMenuGridCols     = 12;
+    if (s.appMenuGridRows     < 1)    s.appMenuGridRows     = 1;
+    if (s.appMenuGridRows     > 20)   s.appMenuGridRows     = 20;
+    if (s.appMenuListFontSize < 6)    s.appMenuListFontSize = 6;
+    if (s.appMenuListFontSize > 36)   s.appMenuListFontSize = 36;
+    if (s.appMenuGridFontSize < 6)    s.appMenuGridFontSize = 6;
+    if (s.appMenuGridFontSize > 36)   s.appMenuGridFontSize = 36;
+
     return s;
 }
 
@@ -179,4 +206,12 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"ClockTimeColor",    static_cast<DWORD>(s.clockTimeColor));
     key.WriteDword(L"ClockDateColor",    static_cast<DWORD>(s.clockDateColor));
     key.WriteMultiString(L"PinnedPaths", s.pinnedExePaths);
+    key.WriteDword(L"AppMenuLayout",       static_cast<DWORD>(s.appMenuLayout));
+    key.WriteDword(L"AppMenuWidth",        static_cast<DWORD>(s.appMenuWidth));
+    key.WriteDword(L"AppMenuMaxHeight",    static_cast<DWORD>(s.appMenuMaxHeight));
+    key.WriteDword(L"AppMenuEntryHeight",  static_cast<DWORD>(s.appMenuEntryHeight));
+    key.WriteDword(L"AppMenuGridCols",     static_cast<DWORD>(s.appMenuGridCols));
+    key.WriteDword(L"AppMenuGridRows",     static_cast<DWORD>(s.appMenuGridRows));
+    key.WriteDword(L"AppMenuListFontSize", static_cast<DWORD>(s.appMenuListFontSize));
+    key.WriteDword(L"AppMenuGridFontSize", static_cast<DWORD>(s.appMenuGridFontSize));
 }

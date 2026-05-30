@@ -4,6 +4,7 @@
 #include "Theme.h"
 
 enum class TaskbarPosition { Top, Bottom, Left, Right, Floating };
+enum class AppMenuLayout   { List = 0, Grid = 1 };
 
 struct Settings {
     TaskbarPosition position  = TaskbarPosition::Bottom;
@@ -25,4 +26,14 @@ struct Settings {
     COLORREF        clockTimeColor    = RGB(240, 240, 240);
     COLORREF        clockDateColor    = RGB(110, 110, 110);
     std::vector<std::wstring> pinnedExePaths;
+
+    // App Menu
+    AppMenuLayout appMenuLayout       = AppMenuLayout::List;
+    int           appMenuWidth        = 280;
+    int           appMenuMaxHeight    = 600;
+    int           appMenuEntryHeight  = 36;
+    int           appMenuGridCols     = 4;
+    int           appMenuGridRows     = 5;
+    int           appMenuListFontSize = 9;
+    int           appMenuGridFontSize = 8;
 };

@@ -44,6 +44,16 @@ static void SortTreeLevel(std::vector<AppTreeNode>& nodes)
         if (n.isFolder) SortTreeLevel(n.children);
 }
 
+static void FlattenTreeInto(const std::vector<AppTreeNode>& nodes, std::vector<AppTreeNode>& flat)
+{
+    for (const auto& n : nodes) {
+        if (n.isFolder)
+            FlattenTreeInto(n.children, flat);
+        else
+            flat.push_back(n);
+    }
+}
+
 static std::vector<AppTreeNode> BuildAppTree(const std::vector<AppEntry>& entries)
 {
     std::vector<AppTreeNode> roots;
@@ -405,10 +415,21 @@ void AppMenuWindow::ActivateNode(int idx)
     if (node.isFolder) {
         if (node.children.empty()) return;
 
+        // When flattening submenus, show only leaf apps from the folder's tree.
+        std::vector<AppTreeNode> childNodes;
+        if (settings_ && settings_->appMenuFlattenMode == AppMenuFlattenMode::Submenus) {
+            FlattenTreeInto(node.children, childNodes);
+            std::sort(childNodes.begin(), childNodes.end(), [](const AppTreeNode& a, const AppTreeNode& b) {
+                return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
+            });
+        } else {
+            childNodes = node.children;  // copied; parent retains original
+        }
+
         RECT nodeScreenRect = GetNodeScreenRect(idx);
         AppMenuCloseReason reason = ShowNodes(
             hwnd_, nodeScreenRect, /*isSubmenu=*/true, position_,
-            node.children,   // copied; parent retains original
+            std::move(childNodes),
             *settings_, colors_, dpi_,
             &subMenuHwnd_);  // parent stores child HWND for WM_KILLFOCUS guard
         subMenuHwnd_ = nullptr;
@@ -805,6 +826,16 @@ void AppMenuWindow::Show(HWND hwndOwner, RECT startBtnScreenRect,
     if (entries.empty()) return;
     std::vector<AppTreeNode> tree = BuildAppTree(entries);
     if (tree.empty()) return;
+
+    if (settings.appMenuFlattenMode == AppMenuFlattenMode::All) {
+        std::vector<AppTreeNode> flat;
+        FlattenTreeInto(tree, flat);
+        std::sort(flat.begin(), flat.end(), [](const AppTreeNode& a, const AppTreeNode& b) {
+            return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
+        });
+        tree = std::move(flat);
+    }
+
     ShowNodes(hwndOwner, startBtnScreenRect, /*isSubmenu=*/false, position,
               std::move(tree), settings, colors, dpi);
 }

@@ -5,6 +5,7 @@
 
 enum class TaskbarPosition { Top, Bottom, Left, Right, Floating };
 enum class AppMenuLayout   { List = 0, Grid = 1 };
+enum class AppMenuFlattenMode { None = 0, Submenus = 1, All = 2 };
 
 struct Settings {
     TaskbarPosition position  = TaskbarPosition::Bottom;
@@ -38,6 +39,9 @@ struct Settings {
     int           appMenuGridFontSize = 8;
     int           appMenuMargin       = 0;
     int           appMenuPadding      = 6;
+
+    // App Menu Behavior
+    AppMenuFlattenMode appMenuFlattenMode      = AppMenuFlattenMode::Submenus;
 
     // App Menu Sidebar
     bool appMenuSidebarEnabled         = true;

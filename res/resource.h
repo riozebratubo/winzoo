@@ -89,6 +89,10 @@
 #define IDC_EDIT_APPMENU_PADDING    1127
 #define IDC_SPIN_APPMENU_PADDING    1128
 
+// App Menu behavior controls
+#define IDC_CHECK_APPMENU_FLATTEN_SUBMENUS  1136
+#define IDC_CHECK_APPMENU_FLATTEN_ALL       1137
+
 // App Menu Sidebar controls
 #define IDC_CHECK_APPMENU_SIDEBAR           1129
 #define IDC_LBL_APPMENU_SIDEBARW           1130

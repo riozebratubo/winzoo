@@ -171,6 +171,8 @@ Settings LoadSettings()
     if (key.ReadDword(L"AppMenuSidebarShowExplorer",    amVal)) s.appMenuSidebarShowExplorer    = amVal != 0;
     if (key.ReadDword(L"AppMenuSidebarShowSettings",    amVal)) s.appMenuSidebarShowSettings    = amVal != 0;
     if (key.ReadDword(L"AppMenuSidebarShowPower",       amVal)) s.appMenuSidebarShowPower       = amVal != 0;
+    if (key.ReadDword(L"AppMenuFlattenMode", amVal) && amVal <= 2)
+        s.appMenuFlattenMode = static_cast<AppMenuFlattenMode>(amVal);
 
     // Clamp App Menu values
     if (s.appMenuWidth        < 120)  s.appMenuWidth        = 120;
@@ -236,4 +238,5 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"AppMenuSidebarShowExplorer",    s.appMenuSidebarShowExplorer    ? 1u : 0u);
     key.WriteDword(L"AppMenuSidebarShowSettings",    s.appMenuSidebarShowSettings    ? 1u : 0u);
     key.WriteDword(L"AppMenuSidebarShowPower",       s.appMenuSidebarShowPower       ? 1u : 0u);
+    key.WriteDword(L"AppMenuFlattenMode",            static_cast<DWORD>(s.appMenuFlattenMode));
 }

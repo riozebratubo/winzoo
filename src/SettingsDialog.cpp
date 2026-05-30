@@ -174,6 +174,8 @@ static const int kAppMenuControls[] = {
     IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
     IDC_CHECK_APPMENU_SIDEBAR_SETTINGS,
     IDC_CHECK_APPMENU_SIDEBAR_POWER,
+    IDC_CHECK_APPMENU_FLATTEN_SUBMENUS,
+    IDC_CHECK_APPMENU_FLATTEN_ALL,
     0
 };
 
@@ -319,6 +321,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
             IDC_CHECK_APPMENU_SIDEBAR_SETTINGS,
             IDC_CHECK_APPMENU_SIDEBAR_POWER,
+            IDC_CHECK_APPMENU_FLATTEN_SUBMENUS,
+            IDC_CHECK_APPMENU_FLATTEN_ALL,
             0
         };
         for (const int* id = kCheckIds; *id; ++id)
@@ -359,6 +363,13 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             CheckDlgButton(hwnd, IDC_CHECK_APPMENU_SIDEBAR_POWER,
                            data->settings->appMenuSidebarShowPower ? BST_CHECKED : BST_UNCHECKED);
             SetSidebarControlsEnabled(hwnd, data->settings->appMenuSidebarEnabled);
+
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_FLATTEN_SUBMENUS,
+                           data->settings->appMenuFlattenMode == AppMenuFlattenMode::Submenus
+                           ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_FLATTEN_ALL,
+                           data->settings->appMenuFlattenMode == AppMenuFlattenMode::All
+                           ? BST_CHECKED : BST_UNCHECKED);
         }
 
         // Build scrollable host for the App Menu tab
@@ -502,6 +513,18 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             SetSidebarControlsEnabled(hAm, checked);
             return TRUE;
         }
+        if (LOWORD(wParam) == IDC_CHECK_APPMENU_FLATTEN_SUBMENUS && data) {
+            HWND hAm = data->hScrollHost ? data->hScrollHost : hwnd;
+            if (IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_FLATTEN_SUBMENUS) == BST_CHECKED)
+                CheckDlgButton(hAm, IDC_CHECK_APPMENU_FLATTEN_ALL, BST_UNCHECKED);
+            return TRUE;
+        }
+        if (LOWORD(wParam) == IDC_CHECK_APPMENU_FLATTEN_ALL && data) {
+            HWND hAm = data->hScrollHost ? data->hScrollHost : hwnd;
+            if (IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_FLATTEN_ALL) == BST_CHECKED)
+                CheckDlgButton(hAm, IDC_CHECK_APPMENU_FLATTEN_SUBMENUS, BST_UNCHECKED);
+            return TRUE;
+        }
         if (LOWORD(wParam) == IDOK && data) {
             HWND hPos   = GetDlgItem(hwnd, IDC_COMBO_POSITION);
             HWND hTheme = GetDlgItem(hwnd, IDC_COMBO_THEME);
@@ -597,6 +620,13 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                     IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SIDEBAR_SETTINGS) == BST_CHECKED;
                 data->settings->appMenuSidebarShowPower =
                     IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SIDEBAR_POWER) == BST_CHECKED;
+
+                bool flatSubmenus = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_FLATTEN_SUBMENUS) == BST_CHECKED;
+                bool flatAll      = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_FLATTEN_ALL)      == BST_CHECKED;
+                data->settings->appMenuFlattenMode =
+                    flatAll      ? AppMenuFlattenMode::All     :
+                    flatSubmenus ? AppMenuFlattenMode::Submenus :
+                                   AppMenuFlattenMode::None;
             }
 
             EndDialog(hwnd, IDOK);

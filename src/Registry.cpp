@@ -162,6 +162,8 @@ Settings LoadSettings()
     if (key.ReadDword(L"AppMenuGridRows",     amVal)) s.appMenuGridRows     = static_cast<int>(amVal);
     if (key.ReadDword(L"AppMenuListFontSize", amVal)) s.appMenuListFontSize = static_cast<int>(amVal);
     if (key.ReadDword(L"AppMenuGridFontSize", amVal)) s.appMenuGridFontSize = static_cast<int>(amVal);
+    if (key.ReadDword(L"AppMenuMargin",       amVal)) s.appMenuMargin       = static_cast<int>(amVal);
+    if (key.ReadDword(L"AppMenuPadding",      amVal)) s.appMenuPadding      = static_cast<int>(amVal);
 
     // Clamp App Menu values
     if (s.appMenuWidth        < 120)  s.appMenuWidth        = 120;
@@ -178,6 +180,10 @@ Settings LoadSettings()
     if (s.appMenuListFontSize > 36)   s.appMenuListFontSize = 36;
     if (s.appMenuGridFontSize < 6)    s.appMenuGridFontSize = 6;
     if (s.appMenuGridFontSize > 36)   s.appMenuGridFontSize = 36;
+    if (s.appMenuMargin < 0)  s.appMenuMargin = 0;
+    if (s.appMenuMargin > 40) s.appMenuMargin = 40;
+    if (s.appMenuPadding < 0)  s.appMenuPadding = 0;
+    if (s.appMenuPadding > 40) s.appMenuPadding = 40;
 
     return s;
 }
@@ -214,4 +220,6 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"AppMenuGridRows",     static_cast<DWORD>(s.appMenuGridRows));
     key.WriteDword(L"AppMenuListFontSize", static_cast<DWORD>(s.appMenuListFontSize));
     key.WriteDword(L"AppMenuGridFontSize", static_cast<DWORD>(s.appMenuGridFontSize));
+    key.WriteDword(L"AppMenuMargin",       static_cast<DWORD>(s.appMenuMargin));
+    key.WriteDword(L"AppMenuPadding",      static_cast<DWORD>(s.appMenuPadding));
 }

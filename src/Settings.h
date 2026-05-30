@@ -36,4 +36,6 @@ struct Settings {
     int           appMenuGridRows     = 5;
     int           appMenuListFontSize = 9;
     int           appMenuGridFontSize = 8;
+    int           appMenuMargin       = 0;
+    int           appMenuPadding      = 6;
 };

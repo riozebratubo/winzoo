@@ -56,6 +56,8 @@ static const int kAppMenuControls[] = {
     IDC_LBL_APPMENU_GRIDROWS,  IDC_EDIT_APPMENU_GRIDROWS, IDC_SPIN_APPMENU_GRIDROWS,
     IDC_LBL_APPMENU_LISTFS,    IDC_EDIT_APPMENU_LISTFS,   IDC_SPIN_APPMENU_LISTFS,
     IDC_LBL_APPMENU_GRIDFS,    IDC_EDIT_APPMENU_GRIDFS,   IDC_SPIN_APPMENU_GRIDFS,
+    IDC_LBL_APPMENU_MARGIN,    IDC_EDIT_APPMENU_MARGIN,   IDC_SPIN_APPMENU_MARGIN,
+    IDC_LBL_APPMENU_PADDING,   IDC_EDIT_APPMENU_PADDING,  IDC_SPIN_APPMENU_PADDING,
     0
 };
 
@@ -201,6 +203,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             initSpin(IDC_SPIN_APPMENU_GRIDROWS,  IDC_EDIT_APPMENU_GRIDROWS,    1,   20, data->settings->appMenuGridRows);
             initSpin(IDC_SPIN_APPMENU_LISTFS,    IDC_EDIT_APPMENU_LISTFS,      6,   36, data->settings->appMenuListFontSize);
             initSpin(IDC_SPIN_APPMENU_GRIDFS,    IDC_EDIT_APPMENU_GRIDFS,      6,   36, data->settings->appMenuGridFontSize);
+            initSpin(IDC_SPIN_APPMENU_MARGIN,    IDC_EDIT_APPMENU_MARGIN,      0,   40, data->settings->appMenuMargin);
+            initSpin(IDC_SPIN_APPMENU_PADDING,   IDC_EDIT_APPMENU_PADDING,     0,   40, data->settings->appMenuPadding);
         }
 
         // ShowTab must run last so that UDM_SETBUDDY calls (which make edit buddies
@@ -349,6 +353,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 int amGR = readSpin(IDC_SPIN_APPMENU_GRIDROWS, 1, 20);
                 int amLF = readSpin(IDC_SPIN_APPMENU_LISTFS, 6, 36);
                 int amGF = readSpin(IDC_SPIN_APPMENU_GRIDFS, 6, 36);
+                int amMgn = readSpin(IDC_SPIN_APPMENU_MARGIN, 0, 40);
+                int amPad = readSpin(IDC_SPIN_APPMENU_PADDING, 0, 40);
 
                 if (amW  >= 120  && amW  <= 800)  data->settings->appMenuWidth        = amW;
                 if (amMH >= 100  && amMH <= 2000) data->settings->appMenuMaxHeight    = amMH;
@@ -357,6 +363,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 if (amGR >= 1    && amGR <= 20)   data->settings->appMenuGridRows     = amGR;
                 if (amLF >= 6    && amLF <= 36)   data->settings->appMenuListFontSize = amLF;
                 if (amGF >= 6    && amGF <= 36)   data->settings->appMenuGridFontSize = amGF;
+                if (amMgn >= 0   && amMgn <= 40)  data->settings->appMenuMargin       = amMgn;
+                if (amPad >= 0   && amPad <= 40)  data->settings->appMenuPadding      = amPad;
             }
 
             EndDialog(hwnd, IDOK);

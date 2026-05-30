@@ -2,6 +2,24 @@
 #include "Registry.h"
 #include "AppMenuWindow.h"
 
+struct MonitorEnumData {
+    std::vector<HMONITOR>* monitors;
+    HMONITOR               primary;
+};
+
+static BOOL CALLBACK CollectMonitors(HMONITOR hMon, HDC, LPRECT, LPARAM lParam)
+{
+    auto* d = reinterpret_cast<MonitorEnumData*>(lParam);
+    d->monitors->push_back(hMon);
+
+    MONITORINFO mi = { sizeof(mi) };
+    GetMonitorInfo(hMon, &mi);
+    if (mi.dwFlags & MONITORINFOF_PRIMARY)
+        d->primary = hMon;
+
+    return TRUE;
+}
+
 App& App::Instance()
 {
     static App instance;
@@ -54,16 +72,44 @@ bool App::Init(HINSTANCE hInst)
     while ((sec = FindWindowExW(nullptr, sec, L"Shell_SecondaryTrayWnd", nullptr)) != nullptr)
         ShowWindow(sec, SW_HIDE);
 
-    if (!taskbar_.Create(hInst_, settings_))
-        return false;
+    // Enumerate monitors
+    std::vector<HMONITOR> monitors;
+    MonitorEnumData enumData{ &monitors, nullptr };
+    EnumDisplayMonitors(nullptr, nullptr, CollectMonitors,
+                        reinterpret_cast<LPARAM>(&enumData));
 
-    taskbar_.Show();
+    HMONITOR primaryMon = enumData.primary;
+    if (!primaryMon && !monitors.empty())
+        primaryMon = monitors[0];
+
+    bool allMonitors = (settings_.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
+
+    if (allMonitors) {
+        for (HMONITOR hMon : monitors) {
+            bool isPrimary = (hMon == primaryMon);
+            auto tb = std::make_unique<TaskbarWindow>();
+            if (!tb->Create(hInst_, settings_, hMon, isPrimary))
+                return false;
+            tb->Show();
+            taskbars_.push_back(std::move(tb));
+        }
+    } else {
+        // Primary monitor only
+        auto tb = std::make_unique<TaskbarWindow>();
+        if (!tb->Create(hInst_, settings_, primaryMon, true))
+            return false;
+        tb->Show();
+        taskbars_.push_back(std::move(tb));
+    }
+
     return true;
 }
 
 void App::Shutdown()
 {
-    taskbar_.Destroy();
+    for (auto& tb : taskbars_)
+        tb->Destroy();
+    taskbars_.clear();
 
     // Restore the native Windows taskbar
     HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
@@ -78,6 +124,20 @@ void App::Shutdown()
         CloseHandle(mutex_);
         mutex_ = nullptr;
     }
+}
+
+void App::PropagateSettings(const Settings& newSettings, TaskbarWindow* origin)
+{
+    bool monitorModeChanged = (newSettings.taskbarMonitorMode != settings_.taskbarMonitorMode);
+    settings_ = newSettings;
+
+    for (auto& tb : taskbars_) {
+        if (tb.get() != origin)
+            tb->ApplySettings(settings_);
+    }
+
+    if (monitorModeChanged)
+        RequestRestart();
 }
 
 void App::Quit()

@@ -69,12 +69,18 @@ LRESULT CALLBACK TaskbarWindow::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPA
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 }
 
-bool TaskbarWindow::Create(HINSTANCE hInst, const Settings& settings)
+bool TaskbarWindow::Create(HINSTANCE hInst, const Settings& settings,
+                           HMONITOR hMonitor, bool isPrimary)
 {
     hInst_    = hInst;
     settings_ = settings;
     colors_   = GetThemeColors(settings.theme);
     dpi_      = GetWindowDpi(nullptr);
+    hMonitor_ = hMonitor;
+    isPrimary_= isPrimary;
+    showStartButton_ = isPrimary_
+                     || settings_.showAppMenuOnAllMonitors
+                     || settings_.taskbarMonitorMode == TaskbarMonitorMode::Primary;
 
     if (!RegisterWndClass(hInst)) return false;
 
@@ -95,14 +101,21 @@ bool TaskbarWindow::Create(HINSTANCE hInst, const Settings& settings)
     return hwnd != nullptr;
 }
 
+void TaskbarWindow::SetMonitor(HMONITOR hMonitor, bool isPrimary)
+{
+    hMonitor_  = hMonitor;
+    isPrimary_ = isPrimary;
+    showStartButton_ = isPrimary_
+                     || settings_.showAppMenuOnAllMonitors
+                     || settings_.taskbarMonitorMode == TaskbarMonitorMode::Primary;
+}
+
 RECT TaskbarWindow::CalculateWindowRect() const
 {
-    // Get primary monitor work area for initial estimate
-    RECT desktop = {};
-    SystemParametersInfoW(SPI_GETWORKAREA, 0, &desktop, 0);
-
-    // Full monitor
-    HMONITOR hMon = MonitorFromPoint({ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+    // Use the assigned monitor; fall back to primary if not set
+    HMONITOR hMon = hMonitor_
+                  ? hMonitor_
+                  : MonitorFromPoint({ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO mi = { sizeof(mi) };
     GetMonitorInfo(hMon, &mi);
     RECT mon = mi.rcMonitor;
@@ -144,6 +157,9 @@ void TaskbarWindow::ApplySettings(const Settings& s)
 {
     settings_ = s;
     colors_   = GetThemeColors(s.theme);
+    showStartButton_ = isPrimary_
+                     || settings_.showAppMenuOnAllMonitors
+                     || settings_.taskbarMonitorMode == TaskbarMonitorMode::Primary;
     SaveSettings(s);
 
     if (settings_.position != TaskbarPosition::Floating) {
@@ -180,23 +196,51 @@ void TaskbarWindow::LayoutButtons()
     int h = client.bottom - client.top;
 
     auto& buttons = tracker_.MutableButtons();
-    int count = static_cast<int>(buttons.size());
+
+    // Determine visible buttons. When filtering by current monitor, buttons whose
+    // window is on a different monitor are hidden (rect zeroed). Pinned-only buttons
+    // (no running HWND) appear only on the primary taskbar when filtering is active.
+    bool filterByMonitor = settings_.showCurrentMonitorAppsOnly
+                        && settings_.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors
+                        && hMonitor_ != nullptr;
+
+    std::vector<TaskButton*> visible;
+    visible.reserve(buttons.size());
+    for (auto& btn : buttons) {
+        bool show = true;
+        if (filterByMonitor) {
+            if (btn.hwnd)
+                show = (MonitorFromWindow(btn.hwnd, MONITOR_DEFAULTTONULL) == hMonitor_);
+            else
+                show = isPrimary_;
+        }
+        if (show)
+            visible.push_back(&btn);
+        else
+            btn.rect = {};
+    }
+
+    int count = static_cast<int>(visible.size());
 
     clockRect_       = {};
     scrollNeeded_    = false;
     scrollLeftRect_  = scrollRightRect_ = {};
     maxScrollOffset_ = 0;
 
-    // Start button: a square on the leading edge
-    int startSz  = Scale(settings_.thickness, dpi_);
+    // Start button: a square on the leading edge (hidden if showStartButton_ is false)
+    int startSz  = showStartButton_ ? Scale(settings_.thickness, dpi_) : 0;
     bool isHoriz = (settings_.position != TaskbarPosition::Left &&
                     settings_.position != TaskbarPosition::Right);
     int pad      = Scale(2, dpi_);
 
-    if (isHoriz)
-        startBtnRect_ = { 0, pad, startSz, h - pad };
-    else
-        startBtnRect_ = { pad, 0, w - pad, startSz };
+    if (showStartButton_) {
+        if (isHoriz)
+            startBtnRect_ = { 0, pad, startSz, h - pad };
+        else
+            startBtnRect_ = { pad, 0, w - pad, startSz };
+    } else {
+        startBtnRect_ = {};
+    }
 
     if (count == 0) return;
     int arrowW  = Scale(20, dpi_);
@@ -229,8 +273,8 @@ void TaskbarWindow::LayoutButtons()
                                 std::max(minBtnW,
                                          (area - (count - 1) * pad) / count));
             int x = start + pad;
-            for (auto& btn : buttons) {
-                btn.rect = { x, pad, x + btnW, h - pad };
+            for (auto* btn : visible) {
+                btn->rect = { x, pad, x + btnW, h - pad };
                 x += btnW + pad;
             }
         } else {
@@ -243,10 +287,10 @@ void TaskbarWindow::LayoutButtons()
             maxScrollOffset_ = std::max(0, count - visCount);
             scrollOffset_    = std::min(scrollOffset_, maxScrollOffset_);
 
-            for (auto& btn : buttons) btn.rect = {};
+            for (auto* btn : visible) btn->rect = {};
             int x = start + arrowW + pad;
             for (int i = scrollOffset_; i < scrollOffset_ + visCount && i < count; ++i) {
-                buttons[i].rect = { x, pad, x + minBtnW, h - pad };
+                visible[i]->rect = { x, pad, x + minBtnW, h - pad };
                 x += minBtnW + pad;
             }
         }
@@ -259,8 +303,8 @@ void TaskbarWindow::LayoutButtons()
         if (totalMin <= available) {
             scrollOffset_ = 0;
             int y = start + pad;
-            for (auto& btn : buttons) {
-                btn.rect = { pad, y, w - pad, y + btnH };
+            for (auto* btn : visible) {
+                btn->rect = { pad, y, w - pad, y + btnH };
                 y += btnH + pad;
             }
         } else {
@@ -273,10 +317,10 @@ void TaskbarWindow::LayoutButtons()
             maxScrollOffset_ = std::max(0, count - visCount);
             scrollOffset_    = std::min(scrollOffset_, maxScrollOffset_);
 
-            for (auto& btn : buttons) btn.rect = {};
+            for (auto* btn : visible) btn->rect = {};
             int y = start + arrowW + pad;
             for (int i = scrollOffset_; i < scrollOffset_ + visCount && i < count; ++i) {
-                buttons[i].rect = { pad, y, w - pad, y + minBtnW };
+                visible[i]->rect = { pad, y, w - pad, y + minBtnW };
                 y += minBtnW + pad;
             }
         }
@@ -395,8 +439,10 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
 
     switch (id) {
     case IDM_SETTINGS:
-        if (SettingsDialog::Show(hwnd_, settings_))
+        if (SettingsDialog::Show(hwnd_, settings_)) {
+            App::Instance().PropagateSettings(settings_, this);
             ApplySettings(settings_);
+        }
         break;
 
     case IDM_ABOUT:
@@ -570,7 +616,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                         drag_.State() == DragState::Dragging ? drag_.DragIndex() : -1,
                         ghostPt,
                         colors_, dpi_, clock, scroll,
-                        StartButtonInfo{ true, startBtnRect_, hoveredStart_ },
+                        StartButtonInfo{ showStartButton_, startBtnRect_, hoveredStart_ },
                         MinimizedIndicatorOptions{
                             settings_.showMinimizedIndicator,
                             settings_.minimizedIndicatorW,

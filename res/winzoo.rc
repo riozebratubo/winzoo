@@ -53,6 +53,16 @@ BEGIN
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
                     124, 64, 12, 12
 
+    LTEXT           "Show taskbar:",       IDC_LBL_TASKBAR_MONITOR, 12, 84,  54, 10
+    COMBOBOX        IDC_COMBO_TASKBAR_MONITOR,                       70, 82, 100, 50,
+                    CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+
+    CONTROL         "Show App Menu on all monitors", IDC_CHECK_APPMENU_ALL_MONITORS,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 100, 164, 10
+
+    CONTROL         "Show buttons for current monitor apps only", IDC_CHECK_CURRENT_MONITOR_APPS,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 114, 192, 10
+
     /* App Buttons tab */
     LTEXT           "Max btn width (px):", IDC_LBL_MAXBTNW,   12,  30,  82, 10
     EDITTEXT        IDC_EDIT_MAXBTNW,                         96,  28,  28, 12,

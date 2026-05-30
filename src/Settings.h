@@ -3,9 +3,10 @@
 #include <vector>
 #include "Theme.h"
 
-enum class TaskbarPosition { Top, Bottom, Left, Right, Floating };
-enum class AppMenuLayout   { List = 0, Grid = 1 };
+enum class TaskbarPosition    { Top, Bottom, Left, Right, Floating };
+enum class AppMenuLayout      { List = 0, Grid = 1 };
 enum class AppMenuFlattenMode { None = 0, Submenus = 1, All = 2 };
+enum class TaskbarMonitorMode { AllMonitors = 0, Primary = 1 };
 
 struct Settings {
     TaskbarPosition position  = TaskbarPosition::Bottom;
@@ -13,6 +14,9 @@ struct Settings {
     int             thickness = 48;
     int             floatX           = 100;
     int             floatY           = 100;
+    TaskbarMonitorMode taskbarMonitorMode        = TaskbarMonitorMode::AllMonitors;
+    bool               showAppMenuOnAllMonitors  = true;
+    bool               showCurrentMonitorAppsOnly = true;
     int             maxButtonWidth    = 200;
     int             minButtonWidth    = 48;
     bool            middleClickClose  = true;

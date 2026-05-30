@@ -19,7 +19,9 @@
 
 class TaskbarWindow {
 public:
-    bool Create(HINSTANCE hInst, const Settings& settings);
+    bool Create(HINSTANCE hInst, const Settings& settings,
+                HMONITOR hMonitor = nullptr, bool isPrimary = true);
+    void SetMonitor(HMONITOR hMonitor, bool isPrimary);
     void Show();
     void Destroy();
     void ApplySettings(const Settings& s);
@@ -48,6 +50,9 @@ private:
     Settings        settings_;
     ThemeColors     colors_         = {};
     int             dpi_            = 96;
+    HMONITOR        hMonitor_       = nullptr;
+    bool            isPrimary_      = true;
+    bool            showStartButton_= true;
     int             hoveredIdx_     = -1;
     int             hoveredScroll_  = 0;
     bool            hoveredStart_   = false;

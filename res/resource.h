@@ -102,6 +102,12 @@
 #define IDC_CHECK_APPMENU_FLATTEN_SUBMENUS  1136
 #define IDC_CHECK_APPMENU_FLATTEN_ALL       1137
 
+// General tab — multi-monitor controls
+#define IDC_LBL_TASKBAR_MONITOR             1138
+#define IDC_COMBO_TASKBAR_MONITOR           1139
+#define IDC_CHECK_APPMENU_ALL_MONITORS      1140
+#define IDC_CHECK_CURRENT_MONITOR_APPS      1141
+
 // App Menu Sidebar controls
 #define IDC_CHECK_APPMENU_SIDEBAR           1129
 #define IDC_LBL_APPMENU_SIDEBARW           1130

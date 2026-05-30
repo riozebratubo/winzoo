@@ -1,5 +1,7 @@
 #pragma once
 #include <windows.h>
+#include <memory>
+#include <vector>
 #include "Settings.h"
 #include "TaskbarWindow.h"
 
@@ -10,6 +12,7 @@ public:
     int  Run(HINSTANCE hInst, int nCmdShow);
     void Quit();
     void RequestRestart();
+    void PropagateSettings(const Settings& newSettings, TaskbarWindow* origin);
 
 private:
     App()  = default;
@@ -22,7 +25,7 @@ private:
 
     HINSTANCE     hInst_    = nullptr;
     HANDLE        mutex_    = nullptr;
-    TaskbarWindow taskbar_;
+    std::vector<std::unique_ptr<TaskbarWindow>> taskbars_;
     Settings      settings_;
     bool          restart_  = false;
 };

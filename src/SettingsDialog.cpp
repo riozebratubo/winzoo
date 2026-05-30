@@ -17,6 +17,10 @@ static constexpr const wchar_t* kAppMenuLayouts[] = {
     L"List", L"Grid"
 };
 
+static constexpr const wchar_t* kTaskbarMonitorModes[] = {
+    L"On all monitors", L"On primary monitor"
+};
+
 struct DlgData {
     Settings* settings;
     HWND      hScrollHost = nullptr;
@@ -136,6 +140,9 @@ static const int kGeneralControls[] = {
     IDC_LBL_POSITION,  IDC_COMBO_POSITION,
     IDC_LBL_THEME,     IDC_COMBO_THEME,
     IDC_LBL_THICKNESS, IDC_EDIT_THICKNESS, IDC_SPIN_THICKNESS,
+    IDC_LBL_TASKBAR_MONITOR, IDC_COMBO_TASKBAR_MONITOR,
+    IDC_CHECK_APPMENU_ALL_MONITORS,
+    IDC_CHECK_CURRENT_MONITOR_APPS,
     0
 };
 static const int kAppBtnControls[] = {
@@ -244,6 +251,12 @@ static void SetMinimizedIndicatorControlsEnabled(HWND hwnd, bool enabled)
         EnableWindow(GetDlgItem(hwnd, *id), enabled ? TRUE : FALSE);
 }
 
+static void SetAllMonitorsControlsEnabled(HWND hwnd, bool enabled)
+{
+    EnableWindow(GetDlgItem(hwnd, IDC_CHECK_APPMENU_ALL_MONITORS),  enabled ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_CHECK_CURRENT_MONITOR_APPS),  enabled ? TRUE : FALSE);
+}
+
 INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     DlgData* data = reinterpret_cast<DlgData*>(GetWindowLongPtrW(hwnd, DWLP_USER));
@@ -266,6 +279,21 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         SendMessageW(hThickSpin, UDM_SETBUDDY, reinterpret_cast<WPARAM>(hThickEdit), 0);
         SendMessageW(hThickSpin, UDM_SETRANGE32, 28, 120);
         SendMessageW(hThickSpin, UDM_SETPOS32, 0, static_cast<LPARAM>(data->settings->thickness));
+
+        {
+            HWND hMon = GetDlgItem(hwnd, IDC_COMBO_TASKBAR_MONITOR);
+            for (auto* s : kTaskbarMonitorModes)
+                SendMessageW(hMon, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(s));
+            SendMessageW(hMon, CB_SETCURSEL,
+                         static_cast<WPARAM>(data->settings->taskbarMonitorMode), 0);
+
+            bool allMonitors = (data->settings->taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_ALL_MONITORS,
+                           data->settings->showAppMenuOnAllMonitors ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_CURRENT_MONITOR_APPS,
+                           data->settings->showCurrentMonitorAppsOnly ? BST_CHECKED : BST_UNCHECKED);
+            SetAllMonitorsControlsEnabled(hwnd, allMonitors);
+        }
 
         // App Buttons
         HWND hMaxSpin = GetDlgItem(hwnd, IDC_SPIN_MAXBTNW);
@@ -349,6 +377,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         static const int kCheckIds[] = {
             IDC_CHECK_MIDDLECLICK, IDC_CHECK_RIGHTCLICKGAP, IDC_CHECK_SHOWCLOCK,
             IDC_CHECK_MINIMIZED_INDICATOR,
+            IDC_CHECK_APPMENU_ALL_MONITORS, IDC_CHECK_CURRENT_MONITOR_APPS,
             IDC_CHECK_APPMENU_SIDEBAR,
             IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
             IDC_CHECK_APPMENU_SIDEBAR_SETTINGS,
@@ -539,6 +568,15 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             SetClockControlsEnabled(hwnd, checked);
             return TRUE;
         }
+        if (LOWORD(wParam) == IDC_COMBO_TASKBAR_MONITOR
+            && HIWORD(wParam) == CBN_SELCHANGE)
+        {
+            int sel = static_cast<int>(
+                SendMessageW(GetDlgItem(hwnd, IDC_COMBO_TASKBAR_MONITOR), CB_GETCURSEL, 0, 0));
+            bool allMonitors = (sel == static_cast<int>(TaskbarMonitorMode::AllMonitors));
+            SetAllMonitorsControlsEnabled(hwnd, allMonitors);
+            return TRUE;
+        }
         if (LOWORD(wParam) == IDC_CHECK_MINIMIZED_INDICATOR) {
             bool checked = IsDlgButtonChecked(hwnd, IDC_CHECK_MINIMIZED_INDICATOR) == BST_CHECKED;
             SetMinimizedIndicatorControlsEnabled(hwnd, checked);
@@ -574,6 +612,17 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             if (posIdx >= 0)                          data->settings->position  = static_cast<TaskbarPosition>(posIdx);
             if (themeIdx >= 0)                        data->settings->theme     = static_cast<ThemePreset>(themeIdx);
             if (thick >= 28 && thick <= 120)          data->settings->thickness = thick;
+
+            {
+                HWND hMon = GetDlgItem(hwnd, IDC_COMBO_TASKBAR_MONITOR);
+                int monIdx = static_cast<int>(SendMessageW(hMon, CB_GETCURSEL, 0, 0));
+                if (monIdx >= 0)
+                    data->settings->taskbarMonitorMode = static_cast<TaskbarMonitorMode>(monIdx);
+                data->settings->showAppMenuOnAllMonitors =
+                    IsDlgButtonChecked(hwnd, IDC_CHECK_APPMENU_ALL_MONITORS) == BST_CHECKED;
+                data->settings->showCurrentMonitorAppsOnly =
+                    IsDlgButtonChecked(hwnd, IDC_CHECK_CURRENT_MONITOR_APPS) == BST_CHECKED;
+            }
 
             int maxW = static_cast<int>(
                 SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MAXBTNW), UDM_GETPOS32, 0, 0));

@@ -116,6 +116,11 @@ Settings LoadSettings()
     if (key.ReadDword(L"FloatX", val))    s.floatX    = static_cast<int>(val);
     if (key.ReadDword(L"FloatY", val))    s.floatY    = static_cast<int>(val);
 
+    if (key.ReadDword(L"TaskbarMonitorMode", val) && val <= 1)
+        s.taskbarMonitorMode = static_cast<TaskbarMonitorMode>(val);
+    if (key.ReadDword(L"ShowAppMenuOnAllMonitors",   val)) s.showAppMenuOnAllMonitors   = val != 0;
+    if (key.ReadDword(L"ShowCurrentMonitorAppsOnly", val)) s.showCurrentMonitorAppsOnly = val != 0;
+
     // Clamp thickness
     if (s.thickness < 28) s.thickness = 28;
     if (s.thickness > 120) s.thickness = 120;
@@ -216,6 +221,9 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"Thickness", static_cast<DWORD>(s.thickness));
     key.WriteDword(L"FloatX",    static_cast<DWORD>(s.floatX));
     key.WriteDword(L"FloatY",          static_cast<DWORD>(s.floatY));
+    key.WriteDword(L"TaskbarMonitorMode",        static_cast<DWORD>(s.taskbarMonitorMode));
+    key.WriteDword(L"ShowAppMenuOnAllMonitors",   s.showAppMenuOnAllMonitors   ? 1u : 0u);
+    key.WriteDword(L"ShowCurrentMonitorAppsOnly", s.showCurrentMonitorAppsOnly ? 1u : 0u);
     key.WriteDword(L"MaxButtonWidth", static_cast<DWORD>(s.maxButtonWidth));
     key.WriteDword(L"MinButtonWidth", static_cast<DWORD>(s.minButtonWidth));
     key.WriteDword(L"MiddleClickClose",  s.middleClickClose  ? 1u : 0u);

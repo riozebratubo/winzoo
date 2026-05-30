@@ -382,13 +382,13 @@ void TaskbarWindow::ShowTaskButtonMenu(int idx, POINT ptScreen)
 void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
 {
     std::vector<MenuItem> items = {
-        { L"Settings",            IDM_SETTINGS,          false, false, false },
-        { L"About Winzoo",        IDM_ABOUT,             false, false, false },
+        { L"Settings...",         IDM_SETTINGS,          false, false, false },
         { L"",                    0,                     true,  false, false },
         { L"Rebuild icon cache",  IDM_REBUILD_ICON_CACHE, false, false, false },
+        { L"About Winzoo...",     IDM_ABOUT,             false, false, false },
         { L"",                    0,                     true,  false, false },
-        { L"Restart Winzoo",      IDM_RESTART,           false, false, false },
-        { L"Close Taskbar",       IDM_CLOSE_TASKBAR,     false, false, false },
+        { L"Restart",             IDM_RESTART,           false, false, false },
+        { L"Close",               IDM_CLOSE_TASKBAR,     false, false, false },
     };
 
     UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);

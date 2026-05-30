@@ -108,7 +108,7 @@ bool AppMenuWindow::RegisterWndClass(HINSTANCE hInst)
     if (GetClassInfoExW(hInst, kAppMenuClass, &existing)) return true;
 
     WNDCLASSEXW wc = { sizeof(wc) };
-    wc.style         = CS_HREDRAW | CS_VREDRAW | CS_DROPSHADOW;
+    wc.style         = CS_DROPSHADOW;
     wc.lpfnWndProc   = AppMenuWindow::WndProc;
     wc.hInstance     = hInst;
     wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
@@ -553,7 +553,16 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         HDC hdc = BeginPaint(hwnd, &ps);
         RECT rc;
         GetClientRect(hwnd, &rc);
-        Paint(hdc, rc.right, rc.bottom);
+        // Double-buffer: compose the full frame offscreen, then blit atomically.
+        // This eliminates flicker from partial-frame draws (background → icons → text).
+        HDC     memDC  = CreateCompatibleDC(hdc);
+        HBITMAP memBmp = CreateCompatibleBitmap(hdc, rc.right, rc.bottom);
+        HBITMAP oldBmp = static_cast<HBITMAP>(SelectObject(memDC, memBmp));
+        Paint(memDC, rc.right, rc.bottom);
+        BitBlt(hdc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
+        SelectObject(memDC, oldBmp);
+        DeleteObject(memBmp);
+        DeleteDC(memDC);
         EndPaint(hwnd, &ps);
         return 0;
     }

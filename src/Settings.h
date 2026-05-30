@@ -17,6 +17,9 @@ struct Settings {
     int             minButtonWidth    = 48;
     bool            middleClickClose  = true;
     bool            showRightClickGap = true;
+    bool            showMinimizedIndicator = true;
+    int             minimizedIndicatorW    = 10;
+    int             minimizedIndicatorH    = 4;
     bool            showClock         = true;
     int             clockWidth        = 80;
     int             clockLineSpacing  = 0;

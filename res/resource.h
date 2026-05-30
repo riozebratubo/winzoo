@@ -46,6 +46,15 @@
 #define IDC_EDIT_LINESPACING    1036
 #define IDC_SPIN_LINESPACING    1037
 
+// App Buttons — minimized indicator controls
+#define IDC_CHECK_MINIMIZED_INDICATOR   1038
+#define IDC_LBL_MINIMIZED_INDICATOR_W   1039
+#define IDC_EDIT_MINIMIZED_INDICATOR_W  1040
+#define IDC_SPIN_MINIMIZED_INDICATOR_W  1041
+#define IDC_LBL_MINIMIZED_INDICATOR_H   1042
+#define IDC_EDIT_MINIMIZED_INDICATOR_H  1043
+#define IDC_SPIN_MINIMIZED_INDICATOR_H  1044
+
 // Taskbar background right-click menu item IDs
 #define IDM_SETTINGS            301
 #define IDM_ABOUT               302

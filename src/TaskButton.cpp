@@ -1,7 +1,8 @@
 #include "TaskButton.h"
 
 void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
-                      bool hovered, bool pressed, bool isDragGhost, int dpi) const
+                      bool hovered, bool pressed, bool isDragGhost, int dpi,
+                      const MinimizedIndicatorOptions& indicator) const
 {
     COLORREF bgColor;
     if (!IsRunning())
@@ -64,5 +65,23 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
         SetBkMode(hdc, TRANSPARENT);
         DrawTextW(hdc, title.c_str(), -1, &textRect,
                   DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+    }
+
+    // Minimized indicator: small accent-colored rectangle at bottom-right
+    if (indicator.enabled && !isDragGhost && IsRunning()
+        && IsWindow(hwnd) && IsIconic(hwnd))
+    {
+        int iw     = Scale(indicator.width,  dpi);
+        int ih     = Scale(indicator.height, dpi);
+        int margin = Scale(2, dpi);
+        RECT indRect = {
+            rect.right  - iw - margin,
+            rect.bottom - ih - margin,
+            rect.right  - margin,
+            rect.bottom - margin
+        };
+        HBRUSH indBrush = CreateSolidBrush(colors.buttonActive);
+        FillRect(hdc, &indRect, indBrush);
+        DeleteObject(indBrush);
     }
 }

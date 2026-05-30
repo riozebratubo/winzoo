@@ -43,7 +43,8 @@ public:
                const ThemeColors& colors, int dpi,
                const ClockInfo& clock,
                const ScrollInfo& scroll,
-               const StartButtonInfo& startBtn);
+               const StartButtonInfo& startBtn,
+               const MinimizedIndicatorOptions& indicator = {});
 
     ~Renderer();
 

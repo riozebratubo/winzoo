@@ -129,6 +129,13 @@ Settings LoadSettings()
 
     if (key.ReadDword(L"MiddleClickClose",  val)) s.middleClickClose  = val != 0;
     if (key.ReadDword(L"ShowRightClickGap", val)) s.showRightClickGap = val != 0;
+    if (key.ReadDword(L"ShowMinimizedIndicator", val)) s.showMinimizedIndicator = val != 0;
+    if (key.ReadDword(L"MinimizedIndicatorW", val)) s.minimizedIndicatorW = static_cast<int>(val);
+    if (key.ReadDword(L"MinimizedIndicatorH", val)) s.minimizedIndicatorH = static_cast<int>(val);
+    if (s.minimizedIndicatorW < 2)  s.minimizedIndicatorW = 2;
+    if (s.minimizedIndicatorW > 40) s.minimizedIndicatorW = 40;
+    if (s.minimizedIndicatorH < 1)  s.minimizedIndicatorH = 1;
+    if (s.minimizedIndicatorH > 20) s.minimizedIndicatorH = 20;
     if (key.ReadDword(L"ShowClock",         val)) s.showClock         = val != 0;
     if (key.ReadDword(L"ClockWidth",       val)) s.clockWidth       = static_cast<int>(val);
     if (key.ReadDword(L"ClockLineSpacing", val)) s.clockLineSpacing = static_cast<int>(val);
@@ -213,6 +220,9 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"MinButtonWidth", static_cast<DWORD>(s.minButtonWidth));
     key.WriteDword(L"MiddleClickClose",  s.middleClickClose  ? 1u : 0u);
     key.WriteDword(L"ShowRightClickGap", s.showRightClickGap ? 1u : 0u);
+    key.WriteDword(L"ShowMinimizedIndicator", s.showMinimizedIndicator ? 1u : 0u);
+    key.WriteDword(L"MinimizedIndicatorW",    static_cast<DWORD>(s.minimizedIndicatorW));
+    key.WriteDword(L"MinimizedIndicatorH",    static_cast<DWORD>(s.minimizedIndicatorH));
     key.WriteDword(L"ShowClock",         s.showClock         ? 1u : 0u);
     key.WriteDword(L"ClockWidth",       static_cast<DWORD>(s.clockWidth));
     key.WriteDword(L"ClockLineSpacing", static_cast<DWORD>(s.clockLineSpacing));

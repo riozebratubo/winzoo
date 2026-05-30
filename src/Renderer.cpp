@@ -91,7 +91,8 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
                      const ThemeColors& colors, int dpi,
                      const ClockInfo& clock,
                      const ScrollInfo& scroll,
-                     const StartButtonInfo& startBtn)
+                     const StartButtonInfo& startBtn,
+                     const MinimizedIndicatorOptions& indicator)
 {
     if (!hdcMem_) return;
 
@@ -111,7 +112,7 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
         if (i == dragIdx) continue;
         buttons[i].Draw(hdcMem_, colors,
                         i == hoveredIdx, i == pressedIdx,
-                        false, dpi);
+                        false, dpi, indicator);
     }
 
     // Drag ghost
@@ -124,7 +125,7 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
             ghostPt.x - bw / 2, ghostPt.y - bh / 2,
             ghostPt.x + bw / 2, ghostPt.y + bh / 2
         };
-        ghost.Draw(hdcMem_, colors, false, false, true, dpi);
+        ghost.Draw(hdcMem_, colors, false, false, true, dpi, indicator);
 
         // Drop indicator line
         for (int i = 0; i <= static_cast<int>(buttons.size()); ++i) {

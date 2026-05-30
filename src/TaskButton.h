@@ -4,6 +4,12 @@
 #include "Theme.h"
 #include "Dpi.h"
 
+struct MinimizedIndicatorOptions {
+    bool enabled = true;
+    int  width   = 10;
+    int  height  = 4;
+};
+
 struct TaskButton {
     HWND         hwnd     = nullptr;
     HICON        icon     = nullptr;
@@ -21,5 +27,6 @@ struct TaskButton {
     }
 
     void Draw(HDC hdc, const ThemeColors& colors,
-              bool hovered, bool pressed, bool isDragGhost, int dpi) const;
+              bool hovered, bool pressed, bool isDragGhost, int dpi,
+              const MinimizedIndicatorOptions& indicator = {}) const;
 };

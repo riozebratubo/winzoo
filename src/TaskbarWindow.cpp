@@ -570,7 +570,12 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                         drag_.State() == DragState::Dragging ? drag_.DragIndex() : -1,
                         ghostPt,
                         colors_, dpi_, clock, scroll,
-                        StartButtonInfo{ true, startBtnRect_, hoveredStart_ });
+                        StartButtonInfo{ true, startBtnRect_, hoveredStart_ },
+                        MinimizedIndicatorOptions{
+                            settings_.showMinimizedIndicator,
+                            settings_.minimizedIndicatorW,
+                            settings_.minimizedIndicatorH
+                        });
         EndPaint(hwnd, &ps);
         return 0;
     }

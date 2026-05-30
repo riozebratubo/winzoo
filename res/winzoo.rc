@@ -74,6 +74,23 @@ BEGIN
     CONTROL         "Show right-click gap when no clock", IDC_CHECK_RIGHTCLICKGAP,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 76, 180, 10
 
+    CONTROL         "Show minimized indicator", IDC_CHECK_MINIMIZED_INDICATOR,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 90, 140, 10
+
+    LTEXT           "Indicator width (px):",  IDC_LBL_MINIMIZED_INDICATOR_W,  12, 106, 82, 10
+    EDITTEXT        IDC_EDIT_MINIMIZED_INDICATOR_W,                            96, 104, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_MINIMIZED_INDICATOR_W, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    124, 104, 12, 12
+
+    LTEXT           "Indicator height (px):", IDC_LBL_MINIMIZED_INDICATOR_H,  12, 122, 82, 10
+    EDITTEXT        IDC_EDIT_MINIMIZED_INDICATOR_H,                            96, 120, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_MINIMIZED_INDICATOR_H, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    124, 120, 12, 12
+
     /* System Clock tab */
     CONTROL         "Show clock", IDC_CHECK_SHOWCLOCK,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 28, 80, 12

@@ -142,6 +142,9 @@ static const int kAppBtnControls[] = {
     IDC_LBL_MAXBTNW,        IDC_EDIT_MAXBTNW, IDC_SPIN_MAXBTNW,
     IDC_LBL_MINBTNW,        IDC_EDIT_MINBTNW, IDC_SPIN_MINBTNW,
     IDC_CHECK_MIDDLECLICK,  IDC_CHECK_RIGHTCLICKGAP,
+    IDC_CHECK_MINIMIZED_INDICATOR,
+    IDC_LBL_MINIMIZED_INDICATOR_W, IDC_EDIT_MINIMIZED_INDICATOR_W, IDC_SPIN_MINIMIZED_INDICATOR_W,
+    IDC_LBL_MINIMIZED_INDICATOR_H, IDC_EDIT_MINIMIZED_INDICATOR_H, IDC_SPIN_MINIMIZED_INDICATOR_H,
     0
 };
 static const int kClockControls[] = {
@@ -230,6 +233,17 @@ static void SetSidebarControlsEnabled(HWND hwnd, bool enabled)
         EnableWindow(GetDlgItem(hwnd, *id), enabled ? TRUE : FALSE);
 }
 
+static void SetMinimizedIndicatorControlsEnabled(HWND hwnd, bool enabled)
+{
+    static const int kIds[] = {
+        IDC_LBL_MINIMIZED_INDICATOR_W, IDC_EDIT_MINIMIZED_INDICATOR_W, IDC_SPIN_MINIMIZED_INDICATOR_W,
+        IDC_LBL_MINIMIZED_INDICATOR_H, IDC_EDIT_MINIMIZED_INDICATOR_H, IDC_SPIN_MINIMIZED_INDICATOR_H,
+        0
+    };
+    for (const int* id = kIds; *id; ++id)
+        EnableWindow(GetDlgItem(hwnd, *id), enabled ? TRUE : FALSE);
+}
+
 INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     DlgData* data = reinterpret_cast<DlgData*>(GetWindowLongPtrW(hwnd, DWLP_USER));
@@ -270,6 +284,23 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                        data->settings->middleClickClose ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(hwnd, IDC_CHECK_RIGHTCLICKGAP,
                        data->settings->showRightClickGap ? BST_CHECKED : BST_UNCHECKED);
+
+        CheckDlgButton(hwnd, IDC_CHECK_MINIMIZED_INDICATOR,
+                       data->settings->showMinimizedIndicator ? BST_CHECKED : BST_UNCHECKED);
+
+        HWND hIndWSpin = GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_W);
+        HWND hIndWEdit = GetDlgItem(hwnd, IDC_EDIT_MINIMIZED_INDICATOR_W);
+        SendMessageW(hIndWSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hIndWEdit), 0);
+        SendMessageW(hIndWSpin, UDM_SETRANGE32, 2, 40);
+        SendMessageW(hIndWSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(data->settings->minimizedIndicatorW));
+
+        HWND hIndHSpin = GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_H);
+        HWND hIndHEdit = GetDlgItem(hwnd, IDC_EDIT_MINIMIZED_INDICATOR_H);
+        SendMessageW(hIndHSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hIndHEdit), 0);
+        SendMessageW(hIndHSpin, UDM_SETRANGE32, 1, 20);
+        SendMessageW(hIndHSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(data->settings->minimizedIndicatorH));
+
+        SetMinimizedIndicatorControlsEnabled(hwnd, data->settings->showMinimizedIndicator);
 
         // System Clock
         CheckDlgButton(hwnd, IDC_CHECK_SHOWCLOCK,
@@ -317,6 +348,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         // background brush from WM_CTLCOLORBTN instead of painting their own.
         static const int kCheckIds[] = {
             IDC_CHECK_MIDDLECLICK, IDC_CHECK_RIGHTCLICKGAP, IDC_CHECK_SHOWCLOCK,
+            IDC_CHECK_MINIMIZED_INDICATOR,
             IDC_CHECK_APPMENU_SIDEBAR,
             IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
             IDC_CHECK_APPMENU_SIDEBAR_SETTINGS,
@@ -507,6 +539,11 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             SetClockControlsEnabled(hwnd, checked);
             return TRUE;
         }
+        if (LOWORD(wParam) == IDC_CHECK_MINIMIZED_INDICATOR) {
+            bool checked = IsDlgButtonChecked(hwnd, IDC_CHECK_MINIMIZED_INDICATOR) == BST_CHECKED;
+            SetMinimizedIndicatorControlsEnabled(hwnd, checked);
+            return TRUE;
+        }
         if (LOWORD(wParam) == IDC_CHECK_APPMENU_SIDEBAR) {
             HWND hAm = (data && data->hScrollHost) ? data->hScrollHost : hwnd;
             bool checked = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SIDEBAR) == BST_CHECKED;
@@ -551,6 +588,16 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 IsDlgButtonChecked(hwnd, IDC_CHECK_MIDDLECLICK) == BST_CHECKED;
             data->settings->showRightClickGap =
                 IsDlgButtonChecked(hwnd, IDC_CHECK_RIGHTCLICKGAP) == BST_CHECKED;
+
+            data->settings->showMinimizedIndicator =
+                IsDlgButtonChecked(hwnd, IDC_CHECK_MINIMIZED_INDICATOR) == BST_CHECKED;
+
+            int indW = static_cast<int>(
+                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_W), UDM_GETPOS32, 0, 0));
+            int indH = static_cast<int>(
+                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_H), UDM_GETPOS32, 0, 0));
+            if (indW >= 2 && indW <= 40) data->settings->minimizedIndicatorW = indW;
+            if (indH >= 1 && indH <= 20) data->settings->minimizedIndicatorH = indH;
 
             data->settings->showClock =
                 IsDlgButtonChecked(hwnd, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;

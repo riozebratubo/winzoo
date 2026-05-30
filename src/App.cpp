@@ -1,5 +1,6 @@
 #include "App.h"
 #include "Registry.h"
+#include "SettingsFile.h"
 #include "AppMenuWindow.h"
 
 struct MonitorEnumData {
@@ -60,6 +61,12 @@ bool App::Init(HINSTANCE hInst)
     }
 
     settings_ = LoadSettings();
+
+    // If a settings file was placed next to the exe, absorb it and re-normalise.
+    if (ImportAndDeleteSettingsFile(settings_)) {
+        SaveSettings(settings_);
+        settings_ = LoadSettings(); // re-normalise through registry clamping
+    }
 
     AppMenuWindow::CachePowerOptions();
 

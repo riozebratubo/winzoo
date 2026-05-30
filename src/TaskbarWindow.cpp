@@ -1,9 +1,11 @@
 #include "TaskbarWindow.h"
 #include "App.h"
 #include "Registry.h"
+#include "SettingsFile.h"
 #include "resource.h"
 #include <algorithm>
 #include <windowsx.h>
+#include <objbase.h>
 
 static std::wstring ApplyClockPattern(const std::wstring& pattern, const SYSTEMTIME& st, bool isTime)
 {
@@ -427,6 +429,7 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
 {
     std::vector<MenuItem> items = {
         { L"Settings...",         IDM_SETTINGS,          false, false, false },
+        { L"Export settings...",  IDM_EXPORT_SETTINGS,   false, false, false },
         { L"",                    0,                     true,  false, false },
         { L"Rebuild icon cache",  IDM_REBUILD_ICON_CACHE, false, false, false },
         { L"About Winzoo...",     IDM_ABOUT,             false, false, false },
@@ -443,6 +446,18 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
             App::Instance().PropagateSettings(settings_, this);
             ApplySettings(settings_);
         }
+        break;
+
+    case IDM_EXPORT_SETTINGS:
+        if (ExportSettingsToFile(settings_))
+            MessageBoxW(hwnd_,
+                        L"Settings exported to winzoo-settings.json in the application folder.",
+                        L"Export successful", MB_OK | MB_ICONINFORMATION);
+        else
+            MessageBoxW(hwnd_,
+                        L"Failed to write winzoo-settings.json.\n"
+                        L"Check that the application folder is writable.",
+                        L"Export failed", MB_OK | MB_ICONERROR);
         break;
 
     case IDM_ABOUT:
@@ -504,13 +519,15 @@ void TaskbarWindow::StartScanThread(bool isFirstScan)
 void TaskbarWindow::StartIconLoadThread()
 {
     HWND hwnd = hwnd_;
-    int  sizePx = Scale(20, dpi_);
+    int  sizePx = Scale(48, dpi_);
     std::vector<std::wstring> paths;
     paths.reserve(appEntries_.size());
     for (const auto& e : appEntries_) {
         paths.push_back(e.iconPath.empty() ? e.exePath : e.iconPath);
     }
     std::thread([hwnd, sizePx, paths = std::move(paths)]() {
+        // SHGetImageList internally calls CoCreateInstance and requires COM.
+        HRESULT hrCom = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         using Pair = std::pair<std::wstring, HICON>;
         auto* pResults = new std::vector<Pair>();
         pResults->reserve(paths.size());
@@ -518,6 +535,7 @@ void TaskbarWindow::StartIconLoadThread()
             pResults->emplace_back(path, AppIconCache::LoadStatic(path, sizePx));
         PostMessageW(hwnd, WM_APP_ICONS_DONE, static_cast<WPARAM>(sizePx),
                      reinterpret_cast<LPARAM>(pResults));
+        if (SUCCEEDED(hrCom)) CoUninitialize();
     }).detach();
 }
 
@@ -798,7 +816,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     case WM_APP_SCAN_DONE: {
         auto* pEntries = reinterpret_cast<std::vector<AppEntry>*>(lParam);
         if (!shutdownPending_) {
-            int iconSz = Scale(20, dpi_);
+            int iconSz = Scale(48, dpi_);
             if (wParam == 0) {
                 // First scan: icons not yet cached; leave them null until icon thread finishes.
                 appEntries_ = std::move(*pEntries);
@@ -824,12 +842,16 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             int iconSz = static_cast<int>(wParam);
             for (auto& [path, icon] : *pIcons)
                 appIconCache_.Store(path, iconSz, icon);
-            // Assign freshly-cached icons to the current entry list.
-            for (auto& e : appEntries_) {
-                const std::wstring& p = e.iconPath.empty() ? e.exePath : e.iconPath;
-                e.icon = appIconCache_.TryGet(p, iconSz);
+            // Only bind icons to entries if they match the current desired size,
+            // preventing a stale load thread (e.g. from before a DPI change) from
+            // assigning wrong-sized icons to the live entry list.
+            if (iconSz == Scale(48, dpi_)) {
+                for (auto& e : appEntries_) {
+                    const std::wstring& p = e.iconPath.empty() ? e.exePath : e.iconPath;
+                    e.icon = appIconCache_.TryGet(p, iconSz);
+                }
+                InvalidateRect(hwnd_, nullptr, FALSE);
             }
-            InvalidateRect(hwnd_, nullptr, FALSE);
         } else {
             // App is shutting down — free HICON resources that won't be stored.
             for (auto& [path, icon] : *pIcons)
@@ -850,6 +872,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         renderer_.Resize(prc->right - prc->left, prc->bottom - prc->top, hdc);
         ReleaseDC(hwnd_, hdc);
         LayoutButtons();
+        // Reload icons at the new DPI scale so they stay crisp.
+        for (auto& e : appEntries_) e.icon = nullptr;
+        appIconCache_.Clear();
+        StartIconLoadThread();
         return 0;
     }
 

@@ -61,6 +61,7 @@
 #define IDM_CLOSE_TASKBAR       303
 #define IDM_REBUILD_ICON_CACHE  304
 #define IDM_RESTART             305
+#define IDM_EXPORT_SETTINGS     306
 
 // Task button right-click menu item IDs
 #define IDM_OPEN_NEW_WINDOW     401

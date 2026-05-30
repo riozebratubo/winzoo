@@ -1,5 +1,20 @@
 #include "AppIconCache.h"
 #include <shellapi.h>
+#include <shlobj.h>
+#include <shobjidl.h>
+#include <commoncontrols.h>
+
+// Converts a 32-bit ARGB HBITMAP (from IShellItemImageFactory::GetImage) to an HICON.
+static HICON BitmapToIcon(HBITMAP hbm, int size)
+{
+    // A zero-filled 1-bit mask lets the 32-bit alpha channel handle transparency.
+    HBITMAP hbmMask = CreateBitmap(size, size, 1, 1, nullptr);
+    if (!hbmMask) return nullptr;
+    ICONINFO ii = { TRUE, 0, 0, hbmMask, hbm };
+    HICON hIcon = CreateIconIndirect(&ii);
+    DeleteObject(hbmMask);
+    return hIcon;
+}
 
 void AppIconCache::ParseIconPath(const std::wstring& raw,
                                   std::wstring& outPath, int& outIndex)
@@ -38,6 +53,31 @@ HICON AppIconCache::LoadStatic(const std::wstring& iconPath, int sizePx)
     // Expand environment strings
     wchar_t expanded[MAX_PATH * 2];
     ExpandEnvironmentStringsW(path.c_str(), expanded, MAX_PATH * 2);
+
+    // For default icons (no explicit resource index), use IShellItemImageFactory —
+    // the same API the Windows shell uses. It renders from the best available icon
+    // asset (256 px for modern apps, 32 px anti-aliased for legacy apps) at exactly
+    // sizePx × sizePx, so DrawIconEx can blit it 1:1 with no GDI scaling artifacts.
+    if (index == 0) {
+        IShellItem* pItem = nullptr;
+        if (SUCCEEDED(SHCreateItemFromParsingName(expanded, nullptr, IID_PPV_ARGS(&pItem)))) {
+            IShellItemImageFactory* pSIIF = nullptr;
+            if (SUCCEEDED(pItem->QueryInterface(IID_PPV_ARGS(&pSIIF)))) {
+                SIZE sz = { sizePx, sizePx };
+                HBITMAP hBitmap = nullptr;
+                SIIGBF flags = (SIIGBF)(SIIGBF_ICONONLY | SIIGBF_SCALEUP);
+                if (SUCCEEDED(pSIIF->GetImage(sz, flags, &hBitmap)) && hBitmap) {
+                    HICON hIcon = BitmapToIcon(hBitmap, sizePx);
+                    DeleteObject(hBitmap);
+                    pSIIF->Release();
+                    pItem->Release();
+                    if (hIcon) return hIcon;
+                }
+                pSIIF->Release();
+            }
+            pItem->Release();
+        }
+    }
 
     // Try ExtractIconExW for specific index
     HICON hLarge = nullptr, hSmall = nullptr;

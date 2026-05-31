@@ -2,6 +2,7 @@
 #include "Registry.h"
 #include "SettingsFile.h"
 #include "AppMenuWindow.h"
+#include <objbase.h>
 
 struct MonitorEnumData {
     std::vector<HMONITOR>* monitors;
@@ -52,6 +53,8 @@ int App::Run(HINSTANCE hInst, int /*nCmdShow*/)
 bool App::Init(HINSTANCE hInst)
 {
     hInst_ = hInst;
+
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
     mutex_ = CreateMutexW(nullptr, TRUE, L"WinzooSingleInstance");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -131,6 +134,8 @@ void App::Shutdown()
         CloseHandle(mutex_);
         mutex_ = nullptr;
     }
+
+    CoUninitialize();
 }
 
 void App::PropagateSettings(const Settings& newSettings, TaskbarWindow* origin)

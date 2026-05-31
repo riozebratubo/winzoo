@@ -116,6 +116,39 @@
 #define IDC_CHECK_PINNED_AS_BUTTONS         1143
 #define IDC_CHECK_PINNED_PER_MONITOR        1144
 
+// General tab — system status zone
+#define IDC_CHECK_STATUS_ZONE               1145
+#define IDC_LBL_STATUS_ICON_SZ              1146
+#define IDC_EDIT_STATUS_ICON_SZ             1147
+#define IDC_SPIN_STATUS_ICON_SZ             1148
+
+// General tab — notification-area (tray) icons
+#define IDC_CHECK_TRAY_ICONS                1149
+#define IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS   1159
+#define IDC_LBL_TRAY_ICON_SIZE              1150
+#define IDC_EDIT_TRAY_ICON_SIZE             1151
+#define IDC_SPIN_TRAY_ICON_SIZE             1152
+#define IDC_LBL_TRAY_ICON_PADDING           1153
+#define IDC_EDIT_TRAY_ICON_PADDING          1154
+#define IDC_SPIN_TRAY_ICON_PADDING          1155
+#define IDC_LBL_TRAY_ICON_MARGIN            1156
+#define IDC_EDIT_TRAY_ICON_MARGIN           1157
+#define IDC_SPIN_TRAY_ICON_MARGIN           1158
+
+// Volume icon context menu
+#define IDM_VOL_MIXER       501
+#define IDM_VOL_SOUNDS      502
+#define IDM_VOL_SETTINGS    503
+
+// Network icon context menu
+#define IDM_NET_SETTINGS    511
+#define IDM_NET_SHARING     512
+
+// Battery icon context menu
+#define IDM_BAT_BRIGHTNESS  521
+#define IDM_BAT_POWER       522
+#define IDM_BAT_SETTINGS    523
+
 // App Menu Sidebar controls
 #define IDC_CHECK_APPMENU_SIDEBAR           1129
 #define IDC_LBL_APPMENU_SIDEBARW           1130

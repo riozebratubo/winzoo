@@ -3,8 +3,10 @@
 #include "Registry.h"
 #include "SettingsFile.h"
 #include "resource.h"
+#include "SystemStatus.h"
 #include <algorithm>
 #include <atomic>
+#include <commctrl.h>
 #include <windowsx.h>
 #include <objbase.h>
 
@@ -293,6 +295,92 @@ void TaskbarWindow::RebuildPinnedButtons()
     pinnedButtons_ = std::move(newPinned);
 }
 
+// Forward a mouse notification to a tray icon's owner window.
+// Sends both NOTIFYICON_VERSION_4 format (modern) and VERSION_3 format (legacy)
+// so all apps respond regardless of which version they registered with.
+static void ForwardTrayNotification(HWND hWnd, UINT callbackMsg, UINT uID,
+                                    POINT screenPt, bool rightClick)
+{
+    if (!hWnd || !callbackMsg) return;
+
+    // For right-click menus: target window must be foreground so TrackPopupMenu works.
+    SetForegroundWindow(hWnd);
+
+    const UINT down = rightClick ? WM_RBUTTONDOWN : WM_LBUTTONDOWN;
+    const UINT up   = rightClick ? WM_RBUTTONUP   : WM_LBUTTONUP;
+    const UINT ctx  = rightClick ? WM_CONTEXTMENU : 0;
+
+    // VERSION_4 format: wParam = screen coords, lParam = MAKELPARAM(notification, uID)
+    WPARAM wp4 = MAKEWPARAM(static_cast<WORD>(screenPt.x), static_cast<WORD>(screenPt.y));
+    PostMessage(hWnd, callbackMsg, wp4, MAKELPARAM(down, uID));
+    PostMessage(hWnd, callbackMsg, wp4, MAKELPARAM(up,   uID));
+    if (rightClick)
+        PostMessage(hWnd, callbackMsg, wp4, MAKELPARAM(ctx, uID));
+    else
+        PostMessage(hWnd, callbackMsg, wp4, MAKELPARAM(NIN_SELECT, uID));
+
+    // VERSION_3 format: wParam = uID, lParam = notification (fallback for older apps).
+    // v4 apps will ignore these because their uID check is in HIWORD(lParam), not wParam.
+    PostMessage(hWnd, callbackMsg, static_cast<WPARAM>(uID), static_cast<LPARAM>(down));
+    PostMessage(hWnd, callbackMsg, static_cast<WPARAM>(uID), static_cast<LPARAM>(up));
+}
+
+void TaskbarWindow::RefreshTrayIcons()
+{
+    if (!settings_.showTrayIcons) {
+        for (auto& e : trayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
+        trayIcons_.clear();
+        return;
+    }
+
+    int iconPx = std::min(Scale(settings_.trayIconSize, dpi_),
+                          Scale(settings_.thickness, dpi_));
+    auto fresh = EnumerateTrayIcons(iconPx);
+
+    // --- Sort by settings_.trayIconOrder ---
+    // Build an index map: orderKey → position in the saved order.
+    std::vector<std::wstring>& order = settings_.trayIconOrder;
+
+    // Separate fresh icons into known (in order) and unknown (new).
+    std::vector<TrayIconEntry> known, unknown;
+    for (auto& e : fresh) {
+        auto it = std::find(order.begin(), order.end(), e.orderKey);
+        if (it != order.end())
+            known.push_back(std::move(e));
+        else
+            unknown.push_back(std::move(e));
+    }
+
+    // Sort known icons by their position in the order list.
+    std::sort(known.begin(), known.end(), [&](const TrayIconEntry& a, const TrayIconEntry& b) {
+        auto ia = std::find(order.begin(), order.end(), a.orderKey);
+        auto ib = std::find(order.begin(), order.end(), b.orderKey);
+        return std::distance(order.begin(), ia) < std::distance(order.begin(), ib);
+    });
+
+    // Prepend new (unknown) icons at the front of the order list and result.
+    if (!unknown.empty()) {
+        std::vector<std::wstring> newKeys;
+        newKeys.reserve(unknown.size());
+        for (const auto& e : unknown) newKeys.push_back(e.orderKey);
+        order.insert(order.begin(), newKeys.begin(), newKeys.end());
+        SaveSettings(settings_);
+    }
+
+    // Merge: new icons first, then known icons in order.
+    std::vector<TrayIconEntry> sorted;
+    sorted.reserve(unknown.size() + known.size());
+    for (auto& e : unknown) sorted.push_back(std::move(e));
+    for (auto& e : known)   sorted.push_back(std::move(e));
+
+    // Destroy old icons and replace.
+    for (auto& e : trayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
+    trayIcons_ = std::move(sorted);
+
+    LayoutButtons();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
 void TaskbarWindow::LayoutButtons()
 {
     if (!hwnd_) return;
@@ -348,11 +436,39 @@ void TaskbarWindow::LayoutButtons()
     scrollLeftRect_  = scrollRightRect_ = {};
     maxScrollOffset_ = 0;
     pinnedSepX_      = 0;
+    statusZoneRect_  = {};
+    volIconRect_     = {};
+    netIconRect_     = {};
+    batIconRect_     = {};
+    trayZoneRect_    = {};
+    trayIconRects_.clear();
 
     int startSz  = showStartButton_ ? Scale(settings_.thickness, dpi_) : 0;
     bool isHoriz = (settings_.position != TaskbarPosition::Left &&
                     settings_.position != TaskbarPosition::Right);
     int pad      = Scale(2, dpi_);
+    // Status icons use the configured size (DPI-scaled), clamped to fit the taskbar
+    int statusIconW = std::min(Scale(settings_.statusIconSize, dpi_), h - 2 * pad);
+
+    // Status zone width (only on horizontal bars)
+    int statusZoneW = 0;
+    if (settings_.showStatusZone && isHoriz) {
+        if (statusData_.volAvailable && !settings_.hideDefaultTrayIcons) statusZoneW += statusIconW;
+        if (statusData_.netAvailable && !settings_.hideDefaultTrayIcons) statusZoneW += statusIconW;
+        if (statusData_.batAvailable) statusZoneW += statusIconW;
+    }
+
+    // Tray zone width (only on horizontal bars, to the left of the status zone)
+    int traySlotW = 0;  // width of one icon slot (icon + margins)
+    int trayZoneW = 0;
+    if (settings_.showTrayIcons && isHoriz && !trayIcons_.empty()) {
+        int iconPx = std::min(Scale(settings_.trayIconSize, dpi_), h - 2 * pad);
+        int margPx = Scale(settings_.trayIconMargin, dpi_);
+        int padPx  = Scale(settings_.trayIconPadding, dpi_);
+        traySlotW  = iconPx + 2 * padPx;
+        int n      = static_cast<int>(trayIcons_.size());
+        trayZoneW  = n * traySlotW + (n > 1 ? (n - 1) * margPx : 0);
+    }
 
     if (showStartButton_) {
         if (isHoriz)
@@ -371,11 +487,53 @@ void TaskbarWindow::LayoutButtons()
     int tail = 0;
     if (settings_.showClock) {
         int cw = Scale(settings_.clockWidth, dpi_);
-        tail = cw;
+        tail = statusZoneW + trayZoneW + cw;
         clockRect_ = isHoriz ? RECT{ w - cw, pad, w - pad, h - pad }
                               : RECT{ pad, h - cw, w - pad, h - pad };
     } else {
-        tail = settings_.showRightClickGap ? Scale(20, dpi_) : 0;
+        tail = statusZoneW + trayZoneW + (settings_.showRightClickGap ? Scale(20, dpi_) : 0);
+    }
+
+    // Status icon rects (to the left of the clock, or at the right edge)
+    if (statusZoneW > 0 && isHoriz) {
+        int szRight = settings_.showClock ? (w - Scale(settings_.clockWidth, dpi_))
+                                           : w - (settings_.showRightClickGap ? Scale(20, dpi_) : 0);
+        statusZoneRect_ = { szRight - statusZoneW, pad, szRight, h - pad };
+        int iconTop = (h - statusIconW) / 2;
+        int iconBot = iconTop + statusIconW;
+        int x = statusZoneRect_.left;
+        if (statusData_.volAvailable && !settings_.hideDefaultTrayIcons) {
+            volIconRect_ = { x, iconTop, x + statusIconW, iconBot };
+            x += statusIconW;
+        }
+        if (statusData_.netAvailable && !settings_.hideDefaultTrayIcons) {
+            netIconRect_ = { x, iconTop, x + statusIconW, iconBot };
+            x += statusIconW;
+        }
+        if (statusData_.batAvailable) {
+            batIconRect_ = { x, iconTop, x + statusIconW, iconBot };
+        }
+    }
+
+    // Tray icon rects (to the left of the status zone)
+    if (trayZoneW > 0 && isHoriz) {
+        int tzRight  = statusZoneRect_.left > 0 ? statusZoneRect_.left
+                       : (settings_.showClock ? (w - Scale(settings_.clockWidth, dpi_))
+                          : w - (settings_.showRightClickGap ? Scale(20, dpi_) : 0));
+        trayZoneRect_ = { tzRight - trayZoneW, pad, tzRight, h - pad };
+
+        int iconPx = std::min(Scale(settings_.trayIconSize, dpi_), h - 2 * pad);
+        int margPx = Scale(settings_.trayIconMargin, dpi_);
+        int padPx  = Scale(settings_.trayIconPadding, dpi_);
+        int iconTop = (h - iconPx) / 2;
+        int iconBot = iconTop + iconPx;
+        int n = static_cast<int>(trayIcons_.size());
+        trayIconRects_.resize(n);
+        int x = trayZoneRect_.left;
+        for (int i = 0; i < n; ++i) {
+            trayIconRects_[i] = { x + padPx, iconTop, x + padPx + iconPx, iconBot };
+            x += traySlotW + (i + 1 < n ? margPx : 0);
+        }
     }
 
     if (isHoriz) {
@@ -728,6 +886,62 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
     }
 }
 
+void TaskbarWindow::ShowStatusIconMenu(int which, POINT ptScreen)
+{
+    if (which == 1) {   // Volume
+        std::vector<MenuItem> items = {
+            { L"Open Volume mixer", IDM_VOL_MIXER,    false, false, false },
+            { L"Sounds",            IDM_VOL_SOUNDS,   false, false, false },
+            { L"Sound settings",    IDM_VOL_SETTINGS, false, false, false },
+        };
+        UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
+        switch (id) {
+        case IDM_VOL_MIXER:
+            ShellExecuteW(nullptr, L"open", L"sndvol.exe", nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        case IDM_VOL_SOUNDS:
+            ShellExecuteW(nullptr, L"open", L"mmsys.cpl", nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        case IDM_VOL_SETTINGS:
+            ShellExecuteW(nullptr, L"open", L"ms-settings:sound", nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        }
+    } else if (which == 2) {   // Network
+        std::vector<MenuItem> items = {
+            { L"Open Network & Internet settings",  IDM_NET_SETTINGS, false, false, false },
+            { L"Open Network and Sharing Center",   IDM_NET_SHARING,  false, false, false },
+        };
+        UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
+        switch (id) {
+        case IDM_NET_SETTINGS:
+            ShellExecuteW(nullptr, L"open", L"ms-settings:network-status", nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        case IDM_NET_SHARING:
+            ShellExecuteW(nullptr, L"open", L"control.exe",
+                          L"/name Microsoft.NetworkAndSharingCenter", nullptr, SW_SHOWNORMAL);
+            break;
+        }
+    } else if (which == 3) {   // Battery
+        std::vector<MenuItem> items = {
+            { L"Adjust screen brightness", IDM_BAT_BRIGHTNESS, false, false, false },
+            { L"Power Options",            IDM_BAT_POWER,      false, false, false },
+            { L"Battery settings",         IDM_BAT_SETTINGS,   false, false, false },
+        };
+        UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
+        switch (id) {
+        case IDM_BAT_BRIGHTNESS:
+            ShellExecuteW(nullptr, L"open", L"ms-settings:display", nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        case IDM_BAT_POWER:
+            ShellExecuteW(nullptr, L"open", L"powercfg.cpl", nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        case IDM_BAT_SETTINGS:
+            ShellExecuteW(nullptr, L"open", L"ms-settings:batterysaver", nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        }
+    }
+}
+
 RECT TaskbarWindow::GetStartBtnScreenRect() const
 {
     RECT r = startBtnRect_;
@@ -875,6 +1089,12 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         LayoutButtons();
         SetTimer(hwnd, kTimerActiveWindow, kTimerIntervalMs, nullptr);
         SetTimer(hwnd, kTimerAppScanFirst, 500, nullptr);
+        SetTimer(hwnd, kTimerStatus, kTimerStatusMs, nullptr);
+        SetTimer(hwnd, kTimerTray, kTimerTrayMs, nullptr);
+        // Immediately prime the status data so layout includes it on first paint
+        statusData_ = PollSystemStatus();
+        RefreshTrayIcons();
+        LayoutButtons();
         return 0;
     }
 
@@ -919,6 +1139,43 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         for (const auto& b : pinnedButtons_)       allButtons.push_back(b);
         for (const auto& b : tracker_.Buttons())   allButtons.push_back(b);
 
+        StatusZoneInfo status;
+        status.visible = settings_.showStatusZone && isHoriz;
+        if (status.visible) {
+            status.rect = statusZoneRect_;
+            status.volAvailable = statusData_.volAvailable && !settings_.hideDefaultTrayIcons;
+            status.volRect      = volIconRect_;
+            status.volLevel     = statusData_.volLevel;
+            status.volMuted     = statusData_.volMuted;
+            status.volHovered   = (hoveredStatus_ == 1);
+            status.netAvailable = statusData_.netAvailable && !settings_.hideDefaultTrayIcons;
+            status.netRect      = netIconRect_;
+            status.netConnected = statusData_.netConnected;
+            status.netHovered   = (hoveredStatus_ == 2);
+            status.batAvailable = statusData_.batAvailable;
+            status.batRect      = batIconRect_;
+            status.batOnAC      = statusData_.batOnAC;
+            status.batCharging  = statusData_.batCharging;
+            status.batPercent   = statusData_.batPercent;
+            status.batHovered   = (hoveredStatus_ == 3);
+        }
+
+        TrayZoneInfo tray;
+        tray.visible = settings_.showTrayIcons && isHoriz && !trayIcons_.empty();
+        if (tray.visible) {
+            int n = static_cast<int>(trayIcons_.size());
+            tray.icons.resize(n);
+            for (int i = 0; i < n; ++i) {
+                tray.icons[i].hIcon   = trayIcons_[i].hIcon;
+                tray.icons[i].rect    = (i < (int)trayIconRects_.size()) ? trayIconRects_[i] : RECT{};
+                tray.icons[i].hovered = (i == hoveredTrayIdx_);
+            }
+            if (trayDragging_) {
+                tray.dragGhostIdx = trayDragStart_;
+                tray.ghostPt      = trayDragPt_;
+            }
+        }
+
         renderer_.Paint(hdc, client.right, client.bottom,
                         allButtons,
                         hoveredIdx_,
@@ -932,7 +1189,9 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                             settings_.minimizedIndicatorW,
                             settings_.minimizedIndicatorH
                         },
-                        pinnedSepX_);
+                        pinnedSepX_,
+                        status,
+                        tray);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -976,6 +1235,29 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             InvalidateRect(hwnd, nullptr, FALSE);
         }
 
+        int newHovStatus = 0;
+        if (settings_.showStatusZone) {
+            if (statusData_.volAvailable && PtInRect(&volIconRect_, pt)) newHovStatus = 1;
+            else if (statusData_.netAvailable && PtInRect(&netIconRect_, pt)) newHovStatus = 2;
+            else if (statusData_.batAvailable && PtInRect(&batIconRect_, pt)) newHovStatus = 3;
+        }
+        if (newHovStatus != hoveredStatus_) {
+            hoveredStatus_ = newHovStatus;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+
+        // Tray icon hover
+        int newHovTray = -1;
+        if (settings_.showTrayIcons) {
+            for (int i = 0; i < (int)trayIconRects_.size(); ++i) {
+                if (PtInRect(&trayIconRects_[i], pt)) { newHovTray = i; break; }
+            }
+        }
+        if (newHovTray != hoveredTrayIdx_) {
+            hoveredTrayIdx_ = newHovTray;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+
         TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, hwnd, 0 };
         TrackMouseEvent(&tme);
 
@@ -985,6 +1267,22 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             drag_.OnMouseMove(screenPt);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
+
+        // Tray drag threshold
+        if (trayDragStart_ >= 0 && !trayDragging_) {
+            constexpr int kThresh = 6;
+            if (std::abs(pt.x - trayDragPt_.x) > kThresh ||
+                std::abs(pt.y - trayDragPt_.y) > kThresh)
+            {
+                trayDragging_ = true;
+                SetCapture(hwnd);
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+        }
+        if (trayDragging_) {
+            trayDragPt_ = pt;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
         return 0;
     }
 
@@ -992,6 +1290,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         hoveredIdx_    = -1;
         hoveredScroll_ = 0;
         hoveredStart_  = false;
+        hoveredStatus_ = 0;
+        hoveredTrayIdx_= -1;
         InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
 
@@ -1015,6 +1315,19 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 return 0;
             }
         }
+
+        // Tray icon drag/click start
+        if (settings_.showTrayIcons) {
+            for (int i = 0; i < (int)trayIconRects_.size(); ++i) {
+                if (PtInRect(&trayIconRects_[i], pt)) {
+                    trayDragStart_ = i;
+                    trayDragPt_    = pt;
+                    trayDragging_  = false;
+                    return 0;
+                }
+            }
+        }
+
         int idx = HitTestButton(pt);
         if (idx >= 0) {
             POINT screenPt = pt;
@@ -1031,6 +1344,55 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         bool wasDragging = drag_.State() == DragState::Dragging;
         bool wasPressed  = drag_.State() == DragState::Pressed;
         int  origIdx     = drag_.DragIndex();
+
+        // Handle tray drag/click first
+        if (trayDragStart_ >= 0) {
+            if (trayDragging_) {
+                // Find drop target icon slot
+                int dropIdx = -1;
+                for (int i = 0; i < (int)trayIconRects_.size(); ++i) {
+                    RECT r = trayIconRects_[i];
+                    int cx = (r.left + r.right) / 2;
+                    if (pt.x < cx) { dropIdx = i; break; }
+                }
+                if (dropIdx < 0) dropIdx = static_cast<int>(trayIconRects_.size()) - 1;
+                if (dropIdx < 0) dropIdx = 0;
+
+                int from = trayDragStart_;
+                int to   = dropIdx;
+                if (from != to && from < (int)trayIcons_.size() &&
+                    to < (int)trayIcons_.size())
+                {
+                    // Reorder trayIcons_ and settings_.trayIconOrder
+                    TrayIconEntry moved = std::move(trayIcons_[from]);
+                    trayIcons_.erase(trayIcons_.begin() + from);
+                    int insertAt = (to > from) ? to : to;
+                    trayIcons_.insert(trayIcons_.begin() + insertAt, std::move(moved));
+
+                    // Rebuild trayIconOrder from new display order
+                    settings_.trayIconOrder.clear();
+                    for (const auto& e : trayIcons_) settings_.trayIconOrder.push_back(e.orderKey);
+                    SaveSettings(settings_);
+                    LayoutButtons();
+                }
+                ReleaseCapture();
+            } else {
+                // Plain left click — forward notification to the icon's owner
+                int i = trayDragStart_;
+                if (i < (int)trayIcons_.size() && trayIcons_[i].hWnd &&
+                    trayIcons_[i].uCallbackMsg)
+                {
+                    POINT screenPt = pt;
+                    ClientToScreen(hwnd, &screenPt);
+                    ForwardTrayNotification(trayIcons_[i].hWnd, trayIcons_[i].uCallbackMsg,
+                                            trayIcons_[i].uID, screenPt, /*rightClick=*/false);
+                }
+            }
+            trayDragStart_ = -1;
+            trayDragging_  = false;
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return 0;
+        }
 
         if (wasDragging) {
             // Perform the drop — only swap within the same zone
@@ -1071,6 +1433,28 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         ReleaseCapture();
 
         if (wasPressed) {
+            // Check status icon click first
+            if (settings_.showStatusZone) {
+                if (statusData_.volAvailable && PtInRect(&volIconRect_, pt)) {
+                    // Open volume flyout: sndvol.exe -f <hwnd> positions it near our window
+                    wchar_t arg[32];
+                    swprintf_s(arg, L"-f %Iu", reinterpret_cast<UINT_PTR>(hwnd));
+                    ShellExecuteW(nullptr, L"open", L"sndvol.exe", arg, nullptr, SW_SHOWNORMAL);
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return 0;
+                }
+                if (statusData_.netAvailable && PtInRect(&netIconRect_, pt)) {
+                    // Open available networks flyout
+                    ShellExecuteW(nullptr, L"open", L"ms-availablenetworks:", nullptr, nullptr, SW_SHOWNORMAL);
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return 0;
+                }
+                if (statusData_.batAvailable && PtInRect(&batIconRect_, pt)) {
+                    ShellExecuteW(nullptr, L"open", L"ms-settings:batterysaver", nullptr, nullptr, SW_SHOWNORMAL);
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return 0;
+                }
+            }
             ActivateButton(origIdx);
         }
 
@@ -1080,6 +1464,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_CAPTURECHANGED:
         drag_.OnCaptureChanged();
+        trayDragStart_ = -1;
+        trayDragging_  = false;
         InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
 
@@ -1104,6 +1490,38 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         POINT screenPt = pt;
         ClientToScreen(hwnd, &screenPt);
+
+        // Tray icon right click — forward notification to the icon's owner
+        if (settings_.showTrayIcons) {
+            for (int i = 0; i < (int)trayIconRects_.size(); ++i) {
+                if (PtInRect(&trayIconRects_[i], pt)) {
+                    if (i < (int)trayIcons_.size() && trayIcons_[i].hWnd &&
+                        trayIcons_[i].uCallbackMsg)
+                    {
+                        ForwardTrayNotification(trayIcons_[i].hWnd, trayIcons_[i].uCallbackMsg,
+                                                trayIcons_[i].uID, screenPt, /*rightClick=*/true);
+                    }
+                    return 0;
+                }
+            }
+        }
+
+        // Status icons get their own context menus
+        if (settings_.showStatusZone) {
+            if (statusData_.volAvailable && PtInRect(&volIconRect_, pt)) {
+                ShowStatusIconMenu(1, screenPt);
+                return 0;
+            }
+            if (statusData_.netAvailable && PtInRect(&netIconRect_, pt)) {
+                ShowStatusIconMenu(2, screenPt);
+                return 0;
+            }
+            if (statusData_.batAvailable && PtInRect(&batIconRect_, pt)) {
+                ShowStatusIconMenu(3, screenPt);
+                return 0;
+            }
+        }
+
         int idx = HitTestButton(pt);
         if (idx >= 0)
             ShowButtonMenu(idx, screenPt);
@@ -1133,6 +1551,16 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             StartScanThread(true);
         } else if (wParam == kTimerAppScan) {
             StartScanThread(false);
+        } else if (wParam == kTimerStatus) {
+            SystemStatusData fresh = PollSystemStatus();
+            bool availChanged = (fresh.volAvailable != statusData_.volAvailable ||
+                                 fresh.netAvailable != statusData_.netAvailable ||
+                                 fresh.batAvailable != statusData_.batAvailable);
+            statusData_ = fresh;
+            if (availChanged) LayoutButtons();
+            InvalidateRect(hwnd, nullptr, FALSE);
+        } else if (wParam == kTimerTray) {
+            RefreshTrayIcons();
         }
         return 0;
 
@@ -1228,6 +1656,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         KillTimer(hwnd, kTimerActiveWindow);
         KillTimer(hwnd, kTimerAppScanFirst);
         KillTimer(hwnd, kTimerAppScan);
+        KillTimer(hwnd, kTimerStatus);
+        KillTimer(hwnd, kTimerTray);
+        for (auto& e : trayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
+        trayIcons_.clear();
         tracker_.Shutdown();
         appBar_.Unregister();
         PostQuitMessage(0);

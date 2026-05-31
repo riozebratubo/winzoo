@@ -328,6 +328,13 @@ bool ExportSettingsToFile(const Settings& s)
     wBool("showMinimizedIndicator", s.showMinimizedIndicator);
     wInt("minimizedIndicatorW",    s.minimizedIndicatorW);
     wInt("minimizedIndicatorH",    s.minimizedIndicatorH);
+    wBool("showStatusZone",   s.showStatusZone);
+    wInt("statusIconSize",    s.statusIconSize);
+    wBool("showTrayIcons",    s.showTrayIcons);
+    wBool("hideDefaultTrayIcons", s.hideDefaultTrayIcons);
+    wInt("trayIconSize",      s.trayIconSize);
+    wInt("trayIconPadding",   s.trayIconPadding);
+    wInt("trayIconMargin",    s.trayIconMargin);
     wBool("showClock",        s.showClock);
     wInt("clockWidth",        s.clockWidth);
     wInt("clockLineSpacing",  s.clockLineSpacing);
@@ -364,6 +371,20 @@ bool ExportSettingsToFile(const Settings& s)
             j += "    ";
             AppendJsonEscaped(j, s.pinnedExePaths[i]);
             if (i + 1 < s.pinnedExePaths.size()) j += ",";
+            j += "\n";
+        }
+        j += "  ";
+    }
+    j += "],\n";
+
+    // trayIconOrder
+    j += "  \"trayIconOrder\": [";
+    if (!s.trayIconOrder.empty()) {
+        j += "\n";
+        for (size_t i = 0; i < s.trayIconOrder.size(); ++i) {
+            j += "    ";
+            AppendJsonEscaped(j, s.trayIconOrder[i]);
+            if (i + 1 < s.trayIconOrder.size()) j += ",";
             j += "\n";
         }
         j += "  ";
@@ -493,6 +514,13 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     rb("showMinimizedIndicator", ns.showMinimizedIndicator);
     ri("minimizedIndicatorW", ns.minimizedIndicatorW);
     ri("minimizedIndicatorH", ns.minimizedIndicatorH);
+    rb("showStatusZone",   ns.showStatusZone);
+    ri("statusIconSize",   ns.statusIconSize);
+    rb("showTrayIcons",    ns.showTrayIcons);
+    rb("hideDefaultTrayIcons", ns.hideDefaultTrayIcons);
+    ri("trayIconSize",     ns.trayIconSize);
+    ri("trayIconPadding",  ns.trayIconPadding);
+    ri("trayIconMargin",   ns.trayIconMargin);
     rb("showClock",        ns.showClock);
     ri("clockWidth",       ns.clockWidth);
     ri("clockLineSpacing", ns.clockLineSpacing);
@@ -530,6 +558,9 @@ bool ImportAndDeleteSettingsFile(Settings& s)
 
     { size_t p = FindValue(content, "pinnedExePaths");
       if (p != std::string::npos) ParseStringArray(content, p, ns.pinnedExePaths); }
+
+    { size_t p = FindValue(content, "trayIconOrder");
+      if (p != std::string::npos) ParseStringArray(content, p, ns.trayIconOrder); }
 
     { size_t p = FindValue(content, "pinnedExePathsPerMonitor");
       if (p != std::string::npos) ParseStringArrayMap(content, p, ns.pinnedExePathsPerMonitor); }

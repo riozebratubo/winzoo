@@ -25,7 +25,17 @@ struct Settings {
     bool            showMinimizedIndicator = true;
     int             minimizedIndicatorW    = 10;
     int             minimizedIndicatorH    = 4;
-    bool            showClock         = true;
+    bool showStatusZone    = true;   // show volume / network / battery icons
+    int  statusIconSize    = 22;     // icon side length in logical pixels
+
+    bool showTrayIcons     = true;   // show notification-area (system tray) icons
+    bool hideDefaultTrayIcons = true; // hide explorer.exe-owned default icons (sound, network) from tray
+    int  trayIconSize      = 22;     // icon side length in logical pixels
+    int  trayIconPadding   = 0;      // padding inside each icon slot (px each side)
+    int  trayIconMargin    = 2;      // gap between adjacent icons (px)
+    std::vector<std::wstring> trayIconOrder; // ordered list of icon keys (exeName|uID)
+
+    bool showClock         = true;
     int             clockWidth        = 80;
     int             clockLineSpacing  = 0;
     std::wstring    clockTimeFormat   = L"$hh:$mm";

@@ -15,6 +15,8 @@
 #include "AppScanner.h"
 #include "AppIconCache.h"
 #include "AppMenuWindow.h"
+#include "SystemStatus.h"
+#include "TrayIconProvider.h"
 #include <vector>
 
 class TaskbarWindow {
@@ -39,6 +41,7 @@ private:
     void ActivateButton(int combinedIdx);
     void ShowButtonMenu(int combinedIdx, POINT ptScreen);
     void ShowBackgroundMenu(POINT ptScreen);
+    void ShowStatusIconMenu(int which, POINT ptScreen);  // 1=vol, 2=net, 3=bat
     void ShowAppMenu();
     void StartScanThread(bool isFirstScan);
     void StartIconLoadThread();
@@ -48,6 +51,9 @@ private:
     // Pinned buttons management
     void RebuildPinnedButtons();
     void UpdateMonitorDeviceName();
+
+    // Tray icon management
+    void RefreshTrayIcons();
 
     // Combined-index helpers (0..P-1 = pinned, P..P+T-1 = task)
     int             TotalCount()        const;
@@ -76,6 +82,12 @@ private:
     int             hoveredScroll_  = 0;
     bool            hoveredStart_   = false;
     RECT            clockRect_      = {};
+    RECT            statusZoneRect_ = {};
+    RECT            volIconRect_    = {};
+    RECT            netIconRect_    = {};
+    RECT            batIconRect_    = {};
+    int             hoveredStatus_  = 0;  // 0=none 1=vol 2=net 3=bat
+    SystemStatusData statusData_    = {};
     bool            scrollNeeded_   = false;
     int             scrollOffset_   = 0;
     int             maxScrollOffset_= 0;
@@ -105,14 +117,27 @@ private:
     bool  menuOpen_             = false;
     DWORD menuLastClosedTick_   = 0;
 
+    // Tray icon (notification area) state
+    RECT                       trayZoneRect_   = {};
+    std::vector<TrayIconEntry> trayIcons_;          // owns the HICONs
+    std::vector<RECT>          trayIconRects_;
+    int                        hoveredTrayIdx_ = -1;
+    int                        trayDragStart_  = -1; // index pressed
+    bool                       trayDragging_   = false;
+    POINT                      trayDragPt_     = {}; // client coords
+
     // Shutdown guard: set in WM_DESTROY so late WM_APP messages free heap and exit
     bool            shutdownPending_ = false;
 
     static constexpr UINT_PTR kTimerActiveWindow = 1;
     static constexpr UINT_PTR kTimerAppScanFirst = 2;
     static constexpr UINT_PTR kTimerAppScan      = 3;
+    static constexpr UINT_PTR kTimerStatus       = 4;
+    static constexpr UINT_PTR kTimerTray         = 5;
     static constexpr UINT     kTimerIntervalMs   = 250;
     static constexpr UINT     kTimerAppScanMs    = 30000;
+    static constexpr UINT     kTimerStatusMs     = 1000;
+    static constexpr UINT     kTimerTrayMs       = 2000;
 
     // Custom WM_APP messages posted by background threads
     static constexpr UINT WM_APP_SCAN_DONE  = WM_APP + 1;

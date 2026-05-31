@@ -29,13 +29,13 @@ BEGIN
     END
 END
 
-IDD_SETTINGS DIALOGEX 0, 0, 220, 178
+IDD_SETTINGS DIALOGEX 0, 0, 220, 248
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Winzoo Settings"
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
     CONTROL         "", IDC_TAB_SETTINGS, "SysTabControl32",
-                    WS_TABSTOP, 4, 4, 212, 148
+                    WS_TABSTOP, 4, 4, 212, 204
 
     /* General tab */
     LTEXT           "Position:",           IDC_LBL_POSITION,  12,  30,  44, 10
@@ -65,6 +65,43 @@ BEGIN
 
     CONTROL         "Pinned apps: separate per monitor", IDC_CHECK_PINNED_PER_MONITOR,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 128, 192, 10
+
+    CONTROL         "Show status zone (volume/network/battery)", IDC_CHECK_STATUS_ZONE,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 142, 192, 10
+
+    LTEXT           "Status icon size (px):", IDC_LBL_STATUS_ICON_SZ, 20, 158, 90, 10
+    EDITTEXT        IDC_EDIT_STATUS_ICON_SZ,                          116, 156, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_STATUS_ICON_SZ, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    144, 156, 12, 12
+
+    CONTROL         "Show tray icons (notification area)", IDC_CHECK_TRAY_ICONS,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 174, 192, 10
+
+    CONTROL         "Hide default system icons (sound, network)", IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 186, 184, 10
+
+    LTEXT           "Tray icon size (px):",    IDC_LBL_TRAY_ICON_SIZE,    20, 204, 90, 10
+    EDITTEXT        IDC_EDIT_TRAY_ICON_SIZE,                              116, 202, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_TRAY_ICON_SIZE, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    144, 202, 12, 12
+
+    LTEXT           "Tray icon padding (px):", IDC_LBL_TRAY_ICON_PADDING, 20, 220, 90, 10
+    EDITTEXT        IDC_EDIT_TRAY_ICON_PADDING,                           116, 218, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_TRAY_ICON_PADDING, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    144, 218, 12, 12
+
+    LTEXT           "Tray icon margin (px):",  IDC_LBL_TRAY_ICON_MARGIN,  20, 236, 90, 10
+    EDITTEXT        IDC_EDIT_TRAY_ICON_MARGIN,                            116, 234, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_TRAY_ICON_MARGIN, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    144, 234, 12, 12
 
     /* App Buttons tab */
     LTEXT           "Max btn width (px):", IDC_LBL_MAXBTNW,   12,  30,  82, 10
@@ -248,7 +285,7 @@ BEGIN
     CONTROL         "Flatten the whole apps list", IDC_CHECK_APPMENU_FLATTEN_ALL,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 224, 140, 10
 
-    PUSHBUTTON      "Defaults", IDC_BTN_RESET_DEFAULTS, 4, 158, 52, 14
-    DEFPUSHBUTTON   "OK",     IDOK,     110, 158, 46, 14
-    PUSHBUTTON      "Cancel", IDCANCEL, 162, 158, 46, 14
+    PUSHBUTTON      "Defaults", IDC_BTN_RESET_DEFAULTS, 4, 228, 52, 14
+    DEFPUSHBUTTON   "OK",     IDOK,     110, 228, 46, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 162, 228, 46, 14
 END

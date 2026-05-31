@@ -33,6 +33,43 @@ struct ClockInfo {
     COLORREF     dateColor    = RGB(110, 110, 110);
 };
 
+struct StatusZoneInfo {
+    bool visible = false;
+    RECT rect    = {};          // full zone rect (client coords)
+
+    bool volAvailable = false;
+    RECT volRect      = {};
+    float volLevel    = 0.0f;
+    bool  volMuted    = false;
+    bool  volHovered  = false;
+
+    bool netAvailable = false;
+    RECT netRect      = {};
+    bool netConnected = false;
+    bool netHovered   = false;
+
+    bool batAvailable = false;
+    RECT batRect      = {};
+    bool batOnAC      = false;
+    bool batCharging  = false;
+    int  batPercent   = 0;
+    bool batHovered   = false;
+};
+
+struct TrayZoneInfo {
+    bool visible = false;
+
+    struct Icon {
+        RECT  rect    = {};
+        HICON hIcon   = nullptr;
+        bool  hovered = false;
+    };
+    std::vector<Icon> icons;
+
+    int   dragGhostIdx = -1;  // index of icon being dragged (-1 = none)
+    POINT ghostPt      = {};  // screen-relative cursor while dragging
+};
+
 class Renderer {
 public:
     void Resize(int w, int h, HDC hdcRef);
@@ -45,7 +82,9 @@ public:
                const ScrollInfo& scroll,
                const StartButtonInfo& startBtn,
                const MinimizedIndicatorOptions& indicator = {},
-               int pinnedSepX = 0);
+               int pinnedSepX = 0,
+               const StatusZoneInfo& status = {},
+               const TrayZoneInfo& tray = {});
 
     ~Renderer();
 

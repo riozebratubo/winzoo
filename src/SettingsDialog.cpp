@@ -23,11 +23,11 @@ static constexpr const wchar_t* kTaskbarMonitorModes[] = {
 
 struct DlgData {
     Settings* settings;
-    HWND      hScrollHost = nullptr;
+    HWND      hScrollHosts[4] = {};
 };
 
-// Scroll host for the App Menu tab — scrolls its children vertically
-static constexpr wchar_t kScrollHostClass[] = L"WinzooAppMenuScrollHost";
+// Scrollable panel used for every settings tab — scrolls its children vertically
+static constexpr wchar_t kScrollHostClass[] = L"WinzooTabScrollHost";
 
 // Reposition every child by -delta px (no per-child repaints), then
 // synchronously erase + repaint everything in one shot to avoid the
@@ -116,6 +116,7 @@ static LRESULT CALLBACK AppMenuScrollHostProc(HWND hwnd, UINT uMsg, WPARAM wPara
     case WM_CTLCOLORSTATIC:
     case WM_CTLCOLORBTN:
     case WM_DRAWITEM:
+    case WM_NOTIFY:
         return SendMessageW(GetParent(hwnd), uMsg, wParam, lParam);
     }
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
@@ -135,6 +136,50 @@ static void RegisterScrollHostClass()
     RegisterClassExW(&wc);
 }
 
+// Creates a scrollable host panel, reparents the given controls into it, and
+// sets up the vertical scrollbar. Returns the panel HWND (or nullptr on failure).
+static HWND CreateTabScrollHost(HWND hwnd, const int* controls,
+                                int left, int top, int w, int h)
+{
+    HWND hPanel = CreateWindowExW(
+        WS_EX_CONTROLPARENT, kScrollHostClass, nullptr,
+        WS_CHILD | WS_VSCROLL,
+        left, top, w, h,
+        hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!hPanel) return nullptr;
+
+    int contentH = 0;
+    for (const int* id = controls; *id; ++id) {
+        HWND hCtrl = GetDlgItem(hwnd, *id);
+        if (!hCtrl) continue;
+        RECT r;
+        GetWindowRect(hCtrl, &r);
+        SetParent(hCtrl, hPanel);
+        MapWindowPoints(HWND_DESKTOP, hPanel, reinterpret_cast<LPPOINT>(&r), 2);
+        SetWindowPos(hCtrl, nullptr, r.left, r.top, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        contentH = std::max(contentH, static_cast<int>(r.bottom));
+    }
+    contentH += 4;
+
+    SCROLLINFO si = {};
+    si.cbSize = sizeof(si);
+    si.fMask  = SIF_ALL;
+    si.nMin   = 0;
+    si.nMax   = contentH;
+    si.nPage  = static_cast<UINT>(h);
+    si.nPos   = 0;
+    SetScrollInfo(hPanel, SB_VERT, &si, TRUE);
+    return hPanel;
+}
+
+// Returns the scroll host for the given tab, or hwnd as a fallback.
+static HWND TabHost(DlgData* data, int tab, HWND hwnd)
+{
+    if (data && data->hScrollHosts[tab]) return data->hScrollHosts[tab];
+    return hwnd;
+}
+
 // Null-terminated control ID lists per tab
 static const int kGeneralControls[] = {
     IDC_LBL_POSITION,  IDC_COMBO_POSITION,
@@ -144,6 +189,13 @@ static const int kGeneralControls[] = {
     IDC_CHECK_APPMENU_ALL_MONITORS,
     IDC_CHECK_CURRENT_MONITOR_APPS,
     IDC_CHECK_PINNED_PER_MONITOR,
+    IDC_CHECK_STATUS_ZONE,
+    IDC_LBL_STATUS_ICON_SZ, IDC_EDIT_STATUS_ICON_SZ, IDC_SPIN_STATUS_ICON_SZ,
+    IDC_CHECK_TRAY_ICONS,
+    IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
+    IDC_LBL_TRAY_ICON_SIZE,    IDC_EDIT_TRAY_ICON_SIZE,    IDC_SPIN_TRAY_ICON_SIZE,
+    IDC_LBL_TRAY_ICON_PADDING, IDC_EDIT_TRAY_ICON_PADDING, IDC_SPIN_TRAY_ICON_PADDING,
+    IDC_LBL_TRAY_ICON_MARGIN,  IDC_EDIT_TRAY_ICON_MARGIN,  IDC_SPIN_TRAY_ICON_MARGIN,
     0
 };
 static const int kAppBtnControls[] = {
@@ -195,19 +247,16 @@ static const int* kTabGroups[] = { kGeneralControls, kAppBtnControls, kClockCont
 
 static void ShowTab(HWND hwnd, int tab, DlgData* data)
 {
-    // Tabs 0–2 are managed directly; tab 3 (App Menu) uses the scroll host
-    for (int g = 0; g < 3; ++g) {
-        int cmd = (g == tab) ? SW_SHOW : SW_HIDE;
-        for (const int* id = kTabGroups[g]; *id; ++id)
-            ShowWindow(GetDlgItem(hwnd, *id), cmd);
-    }
-    if (data && data->hScrollHost) {
-        ShowWindow(data->hScrollHost, tab == 3 ? SW_SHOW : SW_HIDE);
-    } else {
-        // Fallback: scroll host not yet created
-        int cmd = (tab == 3) ? SW_SHOW : SW_HIDE;
-        for (const int* id = kAppMenuControls; *id; ++id)
-            ShowWindow(GetDlgItem(hwnd, *id), cmd);
+    for (int g = 0; g < 4; ++g) {
+        bool visible = (g == tab);
+        HWND hHost = (data && data->hScrollHosts[g]) ? data->hScrollHosts[g] : nullptr;
+        if (hHost) {
+            ShowWindow(hHost, visible ? SW_SHOW : SW_HIDE);
+        } else {
+            int cmd = visible ? SW_SHOW : SW_HIDE;
+            for (const int* id = kTabGroups[g]; *id; ++id)
+                ShowWindow(GetDlgItem(hwnd, *id), cmd);
+        }
     }
 }
 
@@ -267,49 +316,63 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
 {
     const Settings& s = *data->settings;
 
+    HWND hGen = TabHost(data, 0, hwnd);
+    HWND hBtn = TabHost(data, 1, hwnd);
+    HWND hClk = TabHost(data, 2, hwnd);
+    HWND hAm  = TabHost(data, 3, hwnd);
+
     // General tab
-    SendMessageW(GetDlgItem(hwnd, IDC_COMBO_POSITION), CB_SETCURSEL, static_cast<WPARAM>(s.position), 0);
-    SendMessageW(GetDlgItem(hwnd, IDC_COMBO_THEME),    CB_SETCURSEL, static_cast<WPARAM>(s.theme),    0);
-    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_THICKNESS), UDM_SETPOS32, 0, s.thickness);
-    SendMessageW(GetDlgItem(hwnd, IDC_COMBO_TASKBAR_MONITOR), CB_SETCURSEL,
+    SendMessageW(GetDlgItem(hGen, IDC_COMBO_POSITION), CB_SETCURSEL, static_cast<WPARAM>(s.position), 0);
+    SendMessageW(GetDlgItem(hGen, IDC_COMBO_THEME),    CB_SETCURSEL, static_cast<WPARAM>(s.theme),    0);
+    SendMessageW(GetDlgItem(hGen, IDC_SPIN_THICKNESS), UDM_SETPOS32, 0, s.thickness);
+    SendMessageW(GetDlgItem(hGen, IDC_COMBO_TASKBAR_MONITOR), CB_SETCURSEL,
                  static_cast<WPARAM>(s.taskbarMonitorMode), 0);
-    CheckDlgButton(hwnd, IDC_CHECK_APPMENU_ALL_MONITORS,
+    CheckDlgButton(hGen, IDC_CHECK_APPMENU_ALL_MONITORS,
                    s.showAppMenuOnAllMonitors ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd, IDC_CHECK_CURRENT_MONITOR_APPS,
+    CheckDlgButton(hGen, IDC_CHECK_CURRENT_MONITOR_APPS,
                    s.showCurrentMonitorAppsOnly ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd, IDC_CHECK_PINNED_PER_MONITOR,
+    CheckDlgButton(hGen, IDC_CHECK_PINNED_PER_MONITOR,
                    s.pinnedAppsPerMonitor ? BST_CHECKED : BST_UNCHECKED);
-    SetAllMonitorsControlsEnabled(hwnd, s.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
+    CheckDlgButton(hGen, IDC_CHECK_STATUS_ZONE,
+                   s.showStatusZone ? BST_CHECKED : BST_UNCHECKED);
+    SendMessageW(GetDlgItem(hGen, IDC_SPIN_STATUS_ICON_SZ), UDM_SETPOS32, 0, s.statusIconSize);
+    CheckDlgButton(hGen, IDC_CHECK_TRAY_ICONS,
+                   s.showTrayIcons ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hGen, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
+                   s.hideDefaultTrayIcons ? BST_CHECKED : BST_UNCHECKED);
+    SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_SIZE),    UDM_SETPOS32, 0, s.trayIconSize);
+    SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_PADDING), UDM_SETPOS32, 0, s.trayIconPadding);
+    SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_MARGIN),  UDM_SETPOS32, 0, s.trayIconMargin);
+    SetAllMonitorsControlsEnabled(hGen, s.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
 
     // App Buttons tab
-    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MAXBTNW), UDM_SETPOS32, 0, s.maxButtonWidth);
-    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINBTNW), UDM_SETPOS32, 0, s.minButtonWidth);
-    CheckDlgButton(hwnd, IDC_CHECK_MIDDLECLICK,
+    SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MAXBTNW), UDM_SETPOS32, 0, s.maxButtonWidth);
+    SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MINBTNW), UDM_SETPOS32, 0, s.minButtonWidth);
+    CheckDlgButton(hBtn, IDC_CHECK_MIDDLECLICK,
                    s.middleClickClose ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd, IDC_CHECK_RIGHTCLICKGAP,
+    CheckDlgButton(hBtn, IDC_CHECK_RIGHTCLICKGAP,
                    s.showRightClickGap ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd, IDC_CHECK_MINIMIZED_INDICATOR,
+    CheckDlgButton(hBtn, IDC_CHECK_MINIMIZED_INDICATOR,
                    s.showMinimizedIndicator ? BST_CHECKED : BST_UNCHECKED);
-    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_W), UDM_SETPOS32, 0, s.minimizedIndicatorW);
-    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_H), UDM_SETPOS32, 0, s.minimizedIndicatorH);
-    SetMinimizedIndicatorControlsEnabled(hwnd, s.showMinimizedIndicator);
-    CheckDlgButton(hwnd, IDC_CHECK_PINNED_AS_BUTTONS,
+    SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MINIMIZED_INDICATOR_W), UDM_SETPOS32, 0, s.minimizedIndicatorW);
+    SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MINIMIZED_INDICATOR_H), UDM_SETPOS32, 0, s.minimizedIndicatorH);
+    SetMinimizedIndicatorControlsEnabled(hBtn, s.showMinimizedIndicator);
+    CheckDlgButton(hBtn, IDC_CHECK_PINNED_AS_BUTTONS,
                    s.pinnedAppsAsButtonsWhenOpen ? BST_CHECKED : BST_UNCHECKED);
 
     // Clock tab
-    CheckDlgButton(hwnd, IDC_CHECK_SHOWCLOCK, s.showClock ? BST_CHECKED : BST_UNCHECKED);
-    SetDlgItemTextW(hwnd, IDC_EDIT_TIMEFMT, s.clockTimeFormat.c_str());
-    SetDlgItemTextW(hwnd, IDC_EDIT_DATEFMT, s.clockDateFormat.c_str());
-    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_CLOCKW),       UDM_SETPOS32, 0, s.clockWidth);
-    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_LINESPACING),  UDM_SETPOS32, 0, s.clockLineSpacing);
-    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_TIMEFONTSIZE), UDM_SETPOS32, 0, s.clockTimeFontSize);
-    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_DATEFONTSIZE), UDM_SETPOS32, 0, s.clockDateFontSize);
-    InvalidateRect(GetDlgItem(hwnd, IDC_BTN_TIMECOLOR), nullptr, FALSE);
-    InvalidateRect(GetDlgItem(hwnd, IDC_BTN_DATECOLOR), nullptr, FALSE);
-    SetClockControlsEnabled(hwnd, s.showClock);
+    CheckDlgButton(hClk, IDC_CHECK_SHOWCLOCK, s.showClock ? BST_CHECKED : BST_UNCHECKED);
+    SetDlgItemTextW(hClk, IDC_EDIT_TIMEFMT, s.clockTimeFormat.c_str());
+    SetDlgItemTextW(hClk, IDC_EDIT_DATEFMT, s.clockDateFormat.c_str());
+    SendMessageW(GetDlgItem(hClk, IDC_SPIN_CLOCKW),       UDM_SETPOS32, 0, s.clockWidth);
+    SendMessageW(GetDlgItem(hClk, IDC_SPIN_LINESPACING),  UDM_SETPOS32, 0, s.clockLineSpacing);
+    SendMessageW(GetDlgItem(hClk, IDC_SPIN_TIMEFONTSIZE), UDM_SETPOS32, 0, s.clockTimeFontSize);
+    SendMessageW(GetDlgItem(hClk, IDC_SPIN_DATEFONTSIZE), UDM_SETPOS32, 0, s.clockDateFontSize);
+    InvalidateRect(GetDlgItem(hClk, IDC_BTN_TIMECOLOR), nullptr, FALSE);
+    InvalidateRect(GetDlgItem(hClk, IDC_BTN_DATECOLOR), nullptr, FALSE);
+    SetClockControlsEnabled(hClk, s.showClock);
 
-    // App Menu tab — controls live in hScrollHost after WM_INITDIALOG reparents them
-    HWND hAm = data->hScrollHost ? data->hScrollHost : hwnd;
+    // App Menu tab — controls live in hScrollHosts[3] after WM_INITDIALOG reparents them
     SendMessageW(GetDlgItem(hAm, IDC_COMBO_APPMENU_LAYOUT), CB_SETCURSEL,
                  static_cast<WPARAM>(s.appMenuLayout), 0);
     auto setPos = [&](int spinId, int val) {
@@ -377,6 +440,34 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                            data->settings->showCurrentMonitorAppsOnly ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(hwnd, IDC_CHECK_PINNED_PER_MONITOR,
                            data->settings->pinnedAppsPerMonitor ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_STATUS_ZONE,
+                           data->settings->showStatusZone ? BST_CHECKED : BST_UNCHECKED);
+            {
+                HWND hSzSpin = GetDlgItem(hwnd, IDC_SPIN_STATUS_ICON_SZ);
+                HWND hSzEdit = GetDlgItem(hwnd, IDC_EDIT_STATUS_ICON_SZ);
+                SendMessageW(hSzSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hSzEdit), 0);
+                SendMessageW(hSzSpin, UDM_SETRANGE32, 12, 48);
+                SendMessageW(hSzSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(data->settings->statusIconSize));
+            }
+            CheckDlgButton(hwnd, IDC_CHECK_TRAY_ICONS,
+                           data->settings->showTrayIcons ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
+                           data->settings->hideDefaultTrayIcons ? BST_CHECKED : BST_UNCHECKED);
+            {
+                auto setupSpin = [&](int spinId, int editId, int lo, int hi, int val) {
+                    HWND hSpin = GetDlgItem(hwnd, spinId);
+                    HWND hEdit = GetDlgItem(hwnd, editId);
+                    SendMessageW(hSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hEdit), 0);
+                    SendMessageW(hSpin, UDM_SETRANGE32, lo, hi);
+                    SendMessageW(hSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(val));
+                };
+                setupSpin(IDC_SPIN_TRAY_ICON_SIZE,    IDC_EDIT_TRAY_ICON_SIZE,    12, 48,
+                          data->settings->trayIconSize);
+                setupSpin(IDC_SPIN_TRAY_ICON_PADDING, IDC_EDIT_TRAY_ICON_PADDING,  0, 20,
+                          data->settings->trayIconPadding);
+                setupSpin(IDC_SPIN_TRAY_ICON_MARGIN,  IDC_EDIT_TRAY_ICON_MARGIN,   0, 20,
+                          data->settings->trayIconMargin);
+            }
             SetAllMonitorsControlsEnabled(hwnd, allMonitors);
         }
 
@@ -467,6 +558,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             IDC_CHECK_MINIMIZED_INDICATOR, IDC_CHECK_PINNED_AS_BUTTONS,
             IDC_CHECK_APPMENU_ALL_MONITORS, IDC_CHECK_CURRENT_MONITOR_APPS,
             IDC_CHECK_PINNED_PER_MONITOR,
+            IDC_CHECK_STATUS_ZONE, IDC_CHECK_TRAY_ICONS, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
             IDC_CHECK_APPMENU_SIDEBAR,
             IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
             IDC_CHECK_APPMENU_SIDEBAR_SETTINGS,
@@ -522,11 +614,10 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                            ? BST_CHECKED : BST_UNCHECKED);
         }
 
-        // Build scrollable host for the App Menu tab
+        // Build scrollable hosts for all tabs
         {
             RegisterScrollHostClass();
 
-            // Compute the tab's content area in dialog client coordinates
             HWND hTabCtrl = GetDlgItem(hwnd, IDC_TAB_SETTINGS);
             RECT tabWndRect;
             GetWindowRect(hTabCtrl, &tabWndRect);
@@ -537,42 +628,9 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             int panelW = content.right  - content.left;
             int panelH = content.bottom - content.top;
 
-            HWND hPanel = CreateWindowExW(
-                WS_EX_CONTROLPARENT,
-                kScrollHostClass, nullptr,
-                WS_CHILD | WS_VSCROLL,
-                content.left, content.top, panelW, panelH,
-                hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
-
-            data->hScrollHost = hPanel;
-
-            if (hPanel) {
-                // Reparent every App Menu control into the scroll host and
-                // convert its position to be relative to the scroll host.
-                int contentH = 0;
-                for (const int* id = kAppMenuControls; *id; ++id) {
-                    HWND hCtrl = GetDlgItem(hwnd, *id);
-                    if (!hCtrl) continue;
-                    RECT r;
-                    GetWindowRect(hCtrl, &r);
-                    SetParent(hCtrl, hPanel);
-                    MapWindowPoints(HWND_DESKTOP, hPanel,
-                                    reinterpret_cast<LPPOINT>(&r), 2);
-                    SetWindowPos(hCtrl, nullptr, r.left, r.top, 0, 0,
-                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-                    contentH = std::max(contentH, static_cast<int>(r.bottom));
-                }
-                contentH += 4; // small bottom padding
-
-                SCROLLINFO si = {};
-                si.cbSize = sizeof(si);
-                si.fMask  = SIF_ALL;
-                si.nMin   = 0;
-                si.nMax   = contentH;
-                si.nPage  = static_cast<UINT>(panelH);
-                si.nPos   = 0;
-                SetScrollInfo(hPanel, SB_VERT, &si, TRUE);
-            }
+            for (int g = 0; g < 4; ++g)
+                data->hScrollHosts[g] = CreateTabScrollHost(hwnd, kTabGroups[g],
+                    content.left, content.top, panelW, panelH);
         }
 
         // ShowTab must run last so that UDM_SETBUDDY calls (which make edit buddies
@@ -588,8 +646,9 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             int tab = TabCtrl_GetCurSel(GetDlgItem(hwnd, IDC_TAB_SETTINGS));
             ShowTab(hwnd, tab, data);
             if (tab == 2) {
-                bool on = IsDlgButtonChecked(hwnd, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;
-                SetClockControlsEnabled(hwnd, on);
+                HWND hClk = TabHost(data, 2, hwnd);
+                bool on = IsDlgButtonChecked(hClk, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;
+                SetClockControlsEnabled(hClk, on);
             }
             return TRUE;
         }
@@ -597,9 +656,14 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
     }
 
     case WM_MOUSEWHEEL:
-        if (data && data->hScrollHost && IsWindowVisible(data->hScrollHost)) {
-            SendMessageW(data->hScrollHost, WM_MOUSEWHEEL, wParam, lParam);
-            return TRUE;
+        if (data) {
+            for (int g = 0; g < 4; ++g) {
+                HWND hH = data->hScrollHosts[g];
+                if (hH && IsWindowVisible(hH)) {
+                    SendMessageW(hH, WM_MOUSEWHEEL, wParam, lParam);
+                    return TRUE;
+                }
+            }
         }
         break;
 
@@ -648,43 +712,47 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             cc.Flags           = CC_RGBINIT | CC_FULLOPEN;
             if (ChooseColorW(&cc)) {
                 *colorField = cc.rgbResult;
-                InvalidateRect(GetDlgItem(hwnd, LOWORD(wParam)), nullptr, FALSE);
+                HWND hClk = TabHost(data, 2, hwnd);
+                InvalidateRect(GetDlgItem(hClk, LOWORD(wParam)), nullptr, FALSE);
             }
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_SHOWCLOCK) {
-            bool checked = IsDlgButtonChecked(hwnd, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;
-            SetClockControlsEnabled(hwnd, checked);
+            HWND hClk = TabHost(data, 2, hwnd);
+            bool checked = IsDlgButtonChecked(hClk, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;
+            SetClockControlsEnabled(hClk, checked);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_COMBO_TASKBAR_MONITOR
             && HIWORD(wParam) == CBN_SELCHANGE)
         {
+            HWND hGen = TabHost(data, 0, hwnd);
             int sel = static_cast<int>(
-                SendMessageW(GetDlgItem(hwnd, IDC_COMBO_TASKBAR_MONITOR), CB_GETCURSEL, 0, 0));
+                SendMessageW(GetDlgItem(hGen, IDC_COMBO_TASKBAR_MONITOR), CB_GETCURSEL, 0, 0));
             bool allMonitors = (sel == static_cast<int>(TaskbarMonitorMode::AllMonitors));
-            SetAllMonitorsControlsEnabled(hwnd, allMonitors);
+            SetAllMonitorsControlsEnabled(hGen, allMonitors);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_MINIMIZED_INDICATOR) {
-            bool checked = IsDlgButtonChecked(hwnd, IDC_CHECK_MINIMIZED_INDICATOR) == BST_CHECKED;
-            SetMinimizedIndicatorControlsEnabled(hwnd, checked);
+            HWND hBtn = TabHost(data, 1, hwnd);
+            bool checked = IsDlgButtonChecked(hBtn, IDC_CHECK_MINIMIZED_INDICATOR) == BST_CHECKED;
+            SetMinimizedIndicatorControlsEnabled(hBtn, checked);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_APPMENU_SIDEBAR) {
-            HWND hAm = (data && data->hScrollHost) ? data->hScrollHost : hwnd;
+            HWND hAm = TabHost(data, 3, hwnd);
             bool checked = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SIDEBAR) == BST_CHECKED;
             SetSidebarControlsEnabled(hAm, checked);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_APPMENU_FLATTEN_SUBMENUS && data) {
-            HWND hAm = data->hScrollHost ? data->hScrollHost : hwnd;
+            HWND hAm = TabHost(data, 3, hwnd);
             if (IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_FLATTEN_SUBMENUS) == BST_CHECKED)
                 CheckDlgButton(hAm, IDC_CHECK_APPMENU_FLATTEN_ALL, BST_UNCHECKED);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_APPMENU_FLATTEN_ALL && data) {
-            HWND hAm = data->hScrollHost ? data->hScrollHost : hwnd;
+            HWND hAm = TabHost(data, 3, hwnd);
             if (IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_FLATTEN_ALL) == BST_CHECKED)
                 CheckDlgButton(hAm, IDC_CHECK_APPMENU_FLATTEN_SUBMENUS, BST_UNCHECKED);
             return TRUE;
@@ -707,86 +775,112 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             return TRUE;
         }
         if (LOWORD(wParam) == IDOK && data) {
-            HWND hPos   = GetDlgItem(hwnd, IDC_COMBO_POSITION);
-            HWND hTheme = GetDlgItem(hwnd, IDC_COMBO_THEME);
+            HWND hGen = TabHost(data, 0, hwnd);
+            HWND hBtn = TabHost(data, 1, hwnd);
+            HWND hClk = TabHost(data, 2, hwnd);
+            HWND hAm  = TabHost(data, 3, hwnd);
+
+            HWND hPos   = GetDlgItem(hGen, IDC_COMBO_POSITION);
+            HWND hTheme = GetDlgItem(hGen, IDC_COMBO_THEME);
 
             int posIdx   = static_cast<int>(SendMessageW(hPos,   CB_GETCURSEL, 0, 0));
             int themeIdx = static_cast<int>(SendMessageW(hTheme, CB_GETCURSEL, 0, 0));
             int thick    = static_cast<int>(
-                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_THICKNESS), UDM_GETPOS32, 0, 0));
+                SendMessageW(GetDlgItem(hGen, IDC_SPIN_THICKNESS), UDM_GETPOS32, 0, 0));
 
             if (posIdx >= 0)                          data->settings->position  = static_cast<TaskbarPosition>(posIdx);
             if (themeIdx >= 0)                        data->settings->theme     = static_cast<ThemePreset>(themeIdx);
             if (thick >= 28 && thick <= 120)          data->settings->thickness = thick;
 
             {
-                HWND hMon = GetDlgItem(hwnd, IDC_COMBO_TASKBAR_MONITOR);
+                HWND hMon = GetDlgItem(hGen, IDC_COMBO_TASKBAR_MONITOR);
                 int monIdx = static_cast<int>(SendMessageW(hMon, CB_GETCURSEL, 0, 0));
                 if (monIdx >= 0)
                     data->settings->taskbarMonitorMode = static_cast<TaskbarMonitorMode>(monIdx);
                 data->settings->showAppMenuOnAllMonitors =
-                    IsDlgButtonChecked(hwnd, IDC_CHECK_APPMENU_ALL_MONITORS) == BST_CHECKED;
+                    IsDlgButtonChecked(hGen, IDC_CHECK_APPMENU_ALL_MONITORS) == BST_CHECKED;
                 data->settings->showCurrentMonitorAppsOnly =
-                    IsDlgButtonChecked(hwnd, IDC_CHECK_CURRENT_MONITOR_APPS) == BST_CHECKED;
+                    IsDlgButtonChecked(hGen, IDC_CHECK_CURRENT_MONITOR_APPS) == BST_CHECKED;
                 data->settings->pinnedAppsPerMonitor =
-                    IsDlgButtonChecked(hwnd, IDC_CHECK_PINNED_PER_MONITOR) == BST_CHECKED;
+                    IsDlgButtonChecked(hGen, IDC_CHECK_PINNED_PER_MONITOR) == BST_CHECKED;
+                data->settings->showStatusZone =
+                    IsDlgButtonChecked(hGen, IDC_CHECK_STATUS_ZONE) == BST_CHECKED;
+                {
+                    int sz = static_cast<int>(
+                        SendMessageW(GetDlgItem(hGen, IDC_SPIN_STATUS_ICON_SZ), UDM_GETPOS32, 0, 0));
+                    if (sz >= 12 && sz <= 48) data->settings->statusIconSize = sz;
+                }
+                data->settings->showTrayIcons =
+                    IsDlgButtonChecked(hGen, IDC_CHECK_TRAY_ICONS) == BST_CHECKED;
+                data->settings->hideDefaultTrayIcons =
+                    IsDlgButtonChecked(hGen, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS) == BST_CHECKED;
+                {
+                    int tsz = static_cast<int>(
+                        SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_SIZE), UDM_GETPOS32, 0, 0));
+                    if (tsz >= 12 && tsz <= 48) data->settings->trayIconSize = tsz;
+                    int tpad = static_cast<int>(
+                        SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_PADDING), UDM_GETPOS32, 0, 0));
+                    if (tpad >= 0 && tpad <= 20) data->settings->trayIconPadding = tpad;
+                    int tmar = static_cast<int>(
+                        SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_MARGIN), UDM_GETPOS32, 0, 0));
+                    if (tmar >= 0 && tmar <= 20) data->settings->trayIconMargin = tmar;
+                }
             }
 
             int maxW = static_cast<int>(
-                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MAXBTNW), UDM_GETPOS32, 0, 0));
+                SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MAXBTNW), UDM_GETPOS32, 0, 0));
             int minW = static_cast<int>(
-                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINBTNW), UDM_GETPOS32, 0, 0));
+                SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MINBTNW), UDM_GETPOS32, 0, 0));
             if (maxW >= 48 && maxW <= 400) data->settings->maxButtonWidth = maxW;
             if (minW >= 24 && minW <= 400) data->settings->minButtonWidth = minW;
             if (data->settings->minButtonWidth > data->settings->maxButtonWidth)
                 data->settings->minButtonWidth = data->settings->maxButtonWidth;
 
             data->settings->middleClickClose =
-                IsDlgButtonChecked(hwnd, IDC_CHECK_MIDDLECLICK) == BST_CHECKED;
+                IsDlgButtonChecked(hBtn, IDC_CHECK_MIDDLECLICK) == BST_CHECKED;
             data->settings->showRightClickGap =
-                IsDlgButtonChecked(hwnd, IDC_CHECK_RIGHTCLICKGAP) == BST_CHECKED;
+                IsDlgButtonChecked(hBtn, IDC_CHECK_RIGHTCLICKGAP) == BST_CHECKED;
 
             data->settings->showMinimizedIndicator =
-                IsDlgButtonChecked(hwnd, IDC_CHECK_MINIMIZED_INDICATOR) == BST_CHECKED;
+                IsDlgButtonChecked(hBtn, IDC_CHECK_MINIMIZED_INDICATOR) == BST_CHECKED;
 
             int indW = static_cast<int>(
-                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_W), UDM_GETPOS32, 0, 0));
+                SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MINIMIZED_INDICATOR_W), UDM_GETPOS32, 0, 0));
             int indH = static_cast<int>(
-                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_H), UDM_GETPOS32, 0, 0));
+                SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MINIMIZED_INDICATOR_H), UDM_GETPOS32, 0, 0));
             if (indW >= 2 && indW <= 40) data->settings->minimizedIndicatorW = indW;
             if (indH >= 1 && indH <= 20) data->settings->minimizedIndicatorH = indH;
 
             data->settings->pinnedAppsAsButtonsWhenOpen =
-                IsDlgButtonChecked(hwnd, IDC_CHECK_PINNED_AS_BUTTONS) == BST_CHECKED;
+                IsDlgButtonChecked(hBtn, IDC_CHECK_PINNED_AS_BUTTONS) == BST_CHECKED;
 
             data->settings->showClock =
-                IsDlgButtonChecked(hwnd, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;
+                IsDlgButtonChecked(hClk, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;
 
             wchar_t buf[128];
-            GetDlgItemTextW(hwnd, IDC_EDIT_TIMEFMT, buf, 128);
+            GetDlgItemTextW(hClk, IDC_EDIT_TIMEFMT, buf, 128);
             data->settings->clockTimeFormat = buf;
-            GetDlgItemTextW(hwnd, IDC_EDIT_DATEFMT, buf, 128);
+            GetDlgItemTextW(hClk, IDC_EDIT_DATEFMT, buf, 128);
             data->settings->clockDateFormat = buf;
 
             int cw = static_cast<int>(
-                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_CLOCKW), UDM_GETPOS32, 0, 0));
+                SendMessageW(GetDlgItem(hClk, IDC_SPIN_CLOCKW), UDM_GETPOS32, 0, 0));
             if (cw >= 40 && cw <= 400) data->settings->clockWidth = cw;
 
             int spacing = static_cast<int>(
-                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_LINESPACING), UDM_GETPOS32, 0, 0));
+                SendMessageW(GetDlgItem(hClk, IDC_SPIN_LINESPACING), UDM_GETPOS32, 0, 0));
             if (spacing >= 0 && spacing <= 20) data->settings->clockLineSpacing = spacing;
 
             int timeSz = static_cast<int>(
-                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_TIMEFONTSIZE), UDM_GETPOS32, 0, 0));
+                SendMessageW(GetDlgItem(hClk, IDC_SPIN_TIMEFONTSIZE), UDM_GETPOS32, 0, 0));
             int dateSz = static_cast<int>(
-                SendMessageW(GetDlgItem(hwnd, IDC_SPIN_DATEFONTSIZE), UDM_GETPOS32, 0, 0));
+                SendMessageW(GetDlgItem(hClk, IDC_SPIN_DATEFONTSIZE), UDM_GETPOS32, 0, 0));
             if (timeSz >= 6 && timeSz <= 36) data->settings->clockTimeFontSize = timeSz;
             if (dateSz >= 6 && dateSz <= 36) data->settings->clockDateFontSize = dateSz;
             // clockTimeColor and clockDateColor are updated immediately on pick
 
-            // App Menu tab — controls are reparented into hScrollHost, so look up from there
+            // App Menu tab — controls are reparented into hScrollHosts[3]
             {
-                HWND hAm = data->hScrollHost ? data->hScrollHost : hwnd;
                 HWND hLayout = GetDlgItem(hAm, IDC_COMBO_APPMENU_LAYOUT);
                 int layoutIdx = static_cast<int>(SendMessageW(hLayout, CB_GETCURSEL, 0, 0));
                 if (layoutIdx >= 0)

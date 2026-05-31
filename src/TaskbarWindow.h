@@ -47,6 +47,7 @@ private:
 
     // Pinned buttons management
     void RebuildPinnedButtons();
+    void UpdateMonitorDeviceName();
 
     // Combined-index helpers (0..P-1 = pinned, P..P+T-1 = task)
     int             TotalCount()        const;
@@ -69,6 +70,7 @@ private:
     int             dpi_            = 96;
     HMONITOR        hMonitor_       = nullptr;
     bool            isPrimary_      = true;
+    std::wstring    monitorDeviceName_;  // e.g. "DISPLAY1", stripped of "\\.\\" prefix
     bool            showStartButton_= true;
     int             hoveredIdx_     = -1;  // combined index
     int             hoveredScroll_  = 0;

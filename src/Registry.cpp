@@ -1,5 +1,6 @@
 #include "Registry.h"
 #include "Settings.h"
+#include <map>
 
 static constexpr wchar_t kRegPath[] = L"Software\\Winzoo";
 
@@ -103,6 +104,90 @@ bool RegistryKey::WriteMultiString(std::wstring_view name, const std::vector<std
                           static_cast<DWORD>(buf.size() * sizeof(wchar_t))) == ERROR_SUCCESS;
 }
 
+// ─── Per-monitor pinned-paths helpers ────────────────────────────────────────
+
+static constexpr wchar_t kPerMonPrefix[]  = L"PinnedPaths_";
+static constexpr size_t  kPerMonPrefixLen = 12;
+
+static void LoadPerMonitorPins(HKEY hKey,
+                               std::map<std::wstring, std::vector<std::wstring>>& out)
+{
+    DWORD valueCount = 0, maxNameLen = 0;
+    if (RegQueryInfoKeyW(hKey, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                         &valueCount, &maxNameLen, nullptr, nullptr, nullptr) != ERROR_SUCCESS)
+        return;
+
+    std::wstring nameBuf(maxNameLen + 1, L'\0');
+    for (DWORD i = 0; i < valueCount; ++i) {
+        DWORD nameLen = static_cast<DWORD>(nameBuf.size());
+        DWORD type    = 0;
+        if (RegEnumValueW(hKey, i, nameBuf.data(), &nameLen,
+                          nullptr, &type, nullptr, nullptr) != ERROR_SUCCESS)
+            continue;
+        if (type != REG_MULTI_SZ) continue;
+        if (wcsncmp(nameBuf.data(), kPerMonPrefix, kPerMonPrefixLen) != 0) continue;
+
+        std::wstring monName = nameBuf.data() + kPerMonPrefixLen;
+        if (monName.empty()) continue;
+
+        // Read data by name (avoids double-enumeration index mismatch)
+        DWORD dataSize = 0;
+        if (RegQueryValueExW(hKey, nameBuf.data(), nullptr, nullptr,
+                             nullptr, &dataSize) != ERROR_SUCCESS || dataSize == 0) {
+            out[monName] = {};
+            continue;
+        }
+        std::wstring data(dataSize / sizeof(wchar_t) + 1, L'\0');
+        if (RegQueryValueExW(hKey, nameBuf.data(), nullptr, &type,
+                             reinterpret_cast<BYTE*>(data.data()), &dataSize) != ERROR_SUCCESS)
+            continue;
+
+        std::vector<std::wstring> paths;
+        const wchar_t* p = data.data();
+        while (*p) {
+            paths.emplace_back(p);
+            p += paths.back().size() + 1;
+        }
+        out[monName] = std::move(paths);
+    }
+}
+
+static void SavePerMonitorPins(HKEY hKey,
+                               const std::map<std::wstring, std::vector<std::wstring>>& pins)
+{
+    // Collect and delete existing PinnedPaths_* values before writing new ones.
+    DWORD valueCount = 0, maxNameLen = 0;
+    if (RegQueryInfoKeyW(hKey, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                         &valueCount, &maxNameLen, nullptr, nullptr, nullptr) != ERROR_SUCCESS)
+        return;
+
+    if (valueCount > 0 && maxNameLen > 0) {
+        std::wstring nameBuf(maxNameLen + 1, L'\0');
+        std::vector<std::wstring> toDelete;
+        for (DWORD i = 0; i < valueCount; ++i) {
+            DWORD nameLen = static_cast<DWORD>(nameBuf.size());
+            if (RegEnumValueW(hKey, i, nameBuf.data(), &nameLen,
+                              nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS)
+                continue;
+            if (wcsncmp(nameBuf.data(), kPerMonPrefix, kPerMonPrefixLen) == 0)
+                toDelete.push_back(nameBuf.data());
+        }
+        for (const auto& name : toDelete)
+            RegDeleteValueW(hKey, name.c_str());
+    }
+
+    for (const auto& [monName, paths] : pins) {
+        std::wstring valueName = kPerMonPrefix;
+        valueName += monName;
+        std::wstring buf;
+        for (const auto& p : paths) { buf += p; buf += L'\0'; }
+        buf += L'\0';
+        RegSetValueExW(hKey, valueName.c_str(), 0, REG_MULTI_SZ,
+                       reinterpret_cast<const BYTE*>(buf.data()),
+                       static_cast<DWORD>(buf.size() * sizeof(wchar_t)));
+    }
+}
+
 Settings LoadSettings()
 {
     Settings s;
@@ -165,6 +250,8 @@ Settings LoadSettings()
 
     key.ReadMultiString(L"PinnedPaths", s.pinnedExePaths);
     if (key.ReadDword(L"PinnedAppsAsButtonsWhenOpen", val)) s.pinnedAppsAsButtonsWhenOpen = val != 0;
+    if (key.ReadDword(L"PinnedAppsPerMonitor",        val)) s.pinnedAppsPerMonitor        = val != 0;
+    LoadPerMonitorPins(key.GetHKey(), s.pinnedExePathsPerMonitor);
 
     DWORD amVal;
     if (key.ReadDword(L"AppMenuLayout",       amVal)) s.appMenuLayout       = static_cast<AppMenuLayout>(amVal);
@@ -214,7 +301,7 @@ Settings LoadSettings()
 
 void SaveSettings(const Settings& s)
 {
-    auto key = RegistryKey::OpenAppKey(KEY_WRITE);
+    auto key = RegistryKey::OpenAppKey(KEY_READ | KEY_WRITE);
     if (!key.IsOpen()) return;
 
     key.WriteDword(L"Position",  static_cast<DWORD>(s.position));
@@ -243,6 +330,8 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"ClockDateColor",    static_cast<DWORD>(s.clockDateColor));
     key.WriteMultiString(L"PinnedPaths", s.pinnedExePaths);
     key.WriteDword(L"PinnedAppsAsButtonsWhenOpen", s.pinnedAppsAsButtonsWhenOpen ? 1u : 0u);
+    key.WriteDword(L"PinnedAppsPerMonitor",        s.pinnedAppsPerMonitor        ? 1u : 0u);
+    SavePerMonitorPins(key.GetHKey(), s.pinnedExePathsPerMonitor);
     key.WriteDword(L"AppMenuLayout",       static_cast<DWORD>(s.appMenuLayout));
     key.WriteDword(L"AppMenuWidth",        static_cast<DWORD>(s.appMenuWidth));
     key.WriteDword(L"AppMenuMaxHeight",    static_cast<DWORD>(s.appMenuMaxHeight));

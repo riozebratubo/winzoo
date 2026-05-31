@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 #include <string>
 #include <vector>
 #include "Theme.h"
@@ -34,7 +35,11 @@ struct Settings {
     COLORREF        clockTimeColor    = RGB(240, 240, 240);
     COLORREF        clockDateColor    = RGB(110, 110, 110);
     bool pinnedAppsAsButtonsWhenOpen = true;
+    bool pinnedAppsPerMonitor        = true;
     std::vector<std::wstring> pinnedExePaths;
+    // Per-monitor pinned paths, keyed by display name (e.g. "DISPLAY1").
+    // Used when pinnedAppsPerMonitor is true.
+    std::map<std::wstring, std::vector<std::wstring>> pinnedExePathsPerMonitor;
 
     // App Menu
     AppMenuLayout appMenuLayout       = AppMenuLayout::List;

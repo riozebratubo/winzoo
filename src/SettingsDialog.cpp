@@ -143,6 +143,7 @@ static const int kGeneralControls[] = {
     IDC_LBL_TASKBAR_MONITOR, IDC_COMBO_TASKBAR_MONITOR,
     IDC_CHECK_APPMENU_ALL_MONITORS,
     IDC_CHECK_CURRENT_MONITOR_APPS,
+    IDC_CHECK_PINNED_PER_MONITOR,
     0
 };
 static const int kAppBtnControls[] = {
@@ -256,6 +257,7 @@ static void SetAllMonitorsControlsEnabled(HWND hwnd, bool enabled)
 {
     EnableWindow(GetDlgItem(hwnd, IDC_CHECK_APPMENU_ALL_MONITORS),  enabled ? TRUE : FALSE);
     EnableWindow(GetDlgItem(hwnd, IDC_CHECK_CURRENT_MONITOR_APPS),  enabled ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_CHECK_PINNED_PER_MONITOR),    enabled ? TRUE : FALSE);
 }
 
 // Pushes all current settings values into dialog controls.
@@ -275,6 +277,8 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
                    s.showAppMenuOnAllMonitors ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwnd, IDC_CHECK_CURRENT_MONITOR_APPS,
                    s.showCurrentMonitorAppsOnly ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd, IDC_CHECK_PINNED_PER_MONITOR,
+                   s.pinnedAppsPerMonitor ? BST_CHECKED : BST_UNCHECKED);
     SetAllMonitorsControlsEnabled(hwnd, s.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
 
     // App Buttons tab
@@ -371,6 +375,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                            data->settings->showAppMenuOnAllMonitors ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(hwnd, IDC_CHECK_CURRENT_MONITOR_APPS,
                            data->settings->showCurrentMonitorAppsOnly ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_PINNED_PER_MONITOR,
+                           data->settings->pinnedAppsPerMonitor ? BST_CHECKED : BST_UNCHECKED);
             SetAllMonitorsControlsEnabled(hwnd, allMonitors);
         }
 
@@ -460,6 +466,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             IDC_CHECK_MIDDLECLICK, IDC_CHECK_RIGHTCLICKGAP, IDC_CHECK_SHOWCLOCK,
             IDC_CHECK_MINIMIZED_INDICATOR, IDC_CHECK_PINNED_AS_BUTTONS,
             IDC_CHECK_APPMENU_ALL_MONITORS, IDC_CHECK_CURRENT_MONITOR_APPS,
+            IDC_CHECK_PINNED_PER_MONITOR,
             IDC_CHECK_APPMENU_SIDEBAR,
             IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
             IDC_CHECK_APPMENU_SIDEBAR_SETTINGS,
@@ -689,8 +696,12 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                             MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES)
             {
                 std::vector<std::wstring> pinned = data->settings->pinnedExePaths;
+                auto pinnedPerMonitor = data->settings->pinnedExePathsPerMonitor;
+                bool pinnedPerMonitorFlag = data->settings->pinnedAppsPerMonitor;
                 *data->settings = Settings{};
                 data->settings->pinnedExePaths = std::move(pinned);
+                data->settings->pinnedExePathsPerMonitor = std::move(pinnedPerMonitor);
+                data->settings->pinnedAppsPerMonitor = pinnedPerMonitorFlag;
                 ApplySettingsToControls(hwnd, data);
             }
             return TRUE;
@@ -717,6 +728,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                     IsDlgButtonChecked(hwnd, IDC_CHECK_APPMENU_ALL_MONITORS) == BST_CHECKED;
                 data->settings->showCurrentMonitorAppsOnly =
                     IsDlgButtonChecked(hwnd, IDC_CHECK_CURRENT_MONITOR_APPS) == BST_CHECKED;
+                data->settings->pinnedAppsPerMonitor =
+                    IsDlgButtonChecked(hwnd, IDC_CHECK_PINNED_PER_MONITOR) == BST_CHECKED;
             }
 
             int maxW = static_cast<int>(

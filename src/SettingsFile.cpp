@@ -1,6 +1,7 @@
 #include "SettingsFile.h"
 #include <windows.h>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -246,6 +247,39 @@ static bool ParseStringArray(const std::string& json, size_t pos,
     }
 }
 
+// Parse a JSON object of the form {"key": ["str1", ...], ...}.
+static bool ParseStringArrayMap(const std::string& json, size_t pos,
+                                std::map<std::wstring, std::vector<std::wstring>>& out)
+{
+    pos = SkipWS(json, pos);
+    if (pos >= json.size() || json[pos] != '{') return false;
+    ++pos;
+    out.clear();
+    while (true) {
+        pos = SkipWS(json, pos);
+        if (pos >= json.size()) return false;
+        if (json[pos] == '}') return true;
+        if (json[pos] != '"') return false;
+
+        std::wstring key;
+        size_t endPos = 0;
+        if (!ParseString(json, pos, key, endPos)) return false;
+        pos = endPos;
+        pos = SkipWS(json, pos);
+        if (pos >= json.size() || json[pos] != ':') return false;
+        ++pos;
+        pos = SkipWS(json, pos);
+
+        std::vector<std::wstring> vals;
+        if (pos < json.size() && json[pos] == '[')
+            ParseStringArray(json, pos, vals);
+        pos = SkipValue(json, pos); // advance past the value regardless
+        out[std::move(key)] = std::move(vals);
+        pos = SkipWS(json, pos);
+        if (pos < json.size() && json[pos] == ',') ++pos;
+    }
+}
+
 } // anonymous namespace
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -320,8 +354,9 @@ bool ExportSettingsToFile(const Settings& s)
     wBool("appMenuSidebarShowSettings",    s.appMenuSidebarShowSettings);
     wBool("appMenuSidebarShowPower",       s.appMenuSidebarShowPower);
     wBool("pinnedAppsAsButtonsWhenOpen",   s.pinnedAppsAsButtonsWhenOpen);
+    wBool("pinnedAppsPerMonitor",          s.pinnedAppsPerMonitor);
 
-    // pinnedExePaths — last field, no trailing comma
+    // pinnedExePaths
     j += "  \"pinnedExePaths\": [";
     if (!s.pinnedExePaths.empty()) {
         j += "\n";
@@ -333,7 +368,34 @@ bool ExportSettingsToFile(const Settings& s)
         }
         j += "  ";
     }
-    j += "]\n";
+    j += "],\n";
+
+    // pinnedExePathsPerMonitor — last field, no trailing comma
+    j += "  \"pinnedExePathsPerMonitor\": {";
+    if (!s.pinnedExePathsPerMonitor.empty()) {
+        j += "\n";
+        bool firstMon = true;
+        for (const auto& [mon, paths] : s.pinnedExePathsPerMonitor) {
+            if (!firstMon) j += ",\n";
+            firstMon = false;
+            j += "    ";
+            AppendJsonEscaped(j, mon);
+            j += ": [";
+            if (!paths.empty()) {
+                j += "\n";
+                for (size_t k = 0; k < paths.size(); ++k) {
+                    j += "      ";
+                    AppendJsonEscaped(j, paths[k]);
+                    if (k + 1 < paths.size()) j += ",";
+                    j += "\n";
+                }
+                j += "    ";
+            }
+            j += "]";
+        }
+        j += "\n  ";
+    }
+    j += "}\n";
     j += "}\n";
 
     std::wstring path = GetSettingsFilePath();
@@ -464,9 +526,13 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     rb("appMenuSidebarShowSettings",    ns.appMenuSidebarShowSettings);
     rb("appMenuSidebarShowPower",       ns.appMenuSidebarShowPower);
     rb("pinnedAppsAsButtonsWhenOpen",   ns.pinnedAppsAsButtonsWhenOpen);
+    rb("pinnedAppsPerMonitor",          ns.pinnedAppsPerMonitor);
 
     { size_t p = FindValue(content, "pinnedExePaths");
       if (p != std::string::npos) ParseStringArray(content, p, ns.pinnedExePaths); }
+
+    { size_t p = FindValue(content, "pinnedExePathsPerMonitor");
+      if (p != std::string::npos) ParseStringArrayMap(content, p, ns.pinnedExePathsPerMonitor); }
 
     s = ns;
     DeleteFileW(path.c_str());

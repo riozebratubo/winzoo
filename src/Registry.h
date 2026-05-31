@@ -15,6 +15,7 @@ public:
     RegistryKey& operator=(const RegistryKey&) = delete;
 
     bool IsOpen() const { return hKey_ != nullptr; }
+    HKEY GetHKey() const { return hKey_; }
 
     bool ReadDword(std::wstring_view name, DWORD& out) const;
     bool ReadString(std::wstring_view name, std::wstring& out) const;

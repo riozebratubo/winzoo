@@ -114,6 +114,7 @@
 
 // App Buttons — pinned apps behavior
 #define IDC_CHECK_PINNED_AS_BUTTONS         1143
+#define IDC_CHECK_PINNED_PER_MONITOR        1144
 
 // App Menu Sidebar controls
 #define IDC_CHECK_APPMENU_SIDEBAR           1129

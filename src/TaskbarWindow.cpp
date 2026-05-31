@@ -81,6 +81,7 @@ bool TaskbarWindow::Create(HINSTANCE hInst, const Settings& settings,
     dpi_      = GetWindowDpi(nullptr);
     hMonitor_ = hMonitor;
     isPrimary_= isPrimary;
+    UpdateMonitorDeviceName();
     showStartButton_ = isPrimary_
                      || settings_.showAppMenuOnAllMonitors
                      || settings_.taskbarMonitorMode == TaskbarMonitorMode::Primary;
@@ -108,6 +109,7 @@ void TaskbarWindow::SetMonitor(HMONITOR hMonitor, bool isPrimary)
 {
     hMonitor_  = hMonitor;
     isPrimary_ = isPrimary;
+    UpdateMonitorDeviceName();
     showStartButton_ = isPrimary_
                      || settings_.showAppMenuOnAllMonitors
                      || settings_.taskbarMonitorMode == TaskbarMonitorMode::Primary;
@@ -158,7 +160,9 @@ void TaskbarWindow::Destroy()
 
 void TaskbarWindow::ApplySettings(const Settings& s)
 {
-    bool pinnedPathsChanged = (s.pinnedExePaths != settings_.pinnedExePaths);
+    bool pinnedPathsChanged = (s.pinnedExePaths != settings_.pinnedExePaths)
+                           || (s.pinnedExePathsPerMonitor != settings_.pinnedExePathsPerMonitor)
+                           || (s.pinnedAppsPerMonitor != settings_.pinnedAppsPerMonitor);
 
     settings_ = s;
     colors_   = GetThemeColors(s.theme);
@@ -248,12 +252,36 @@ bool TaskbarWindow::IsExeRunning(const std::wstring& exePath) const
     return name;
 }
 
+void TaskbarWindow::UpdateMonitorDeviceName()
+{
+    monitorDeviceName_.clear();
+    if (!hMonitor_) return;
+    MONITORINFOEXW mi = {};
+    mi.cbSize = sizeof(mi);
+    if (GetMonitorInfoW(hMonitor_, &mi)) {
+        const wchar_t* name = mi.szDevice;
+        if (wcsncmp(name, L"\\\\.\\", 4) == 0)
+            name += 4;
+        monitorDeviceName_ = name;
+    }
+}
+
 void TaskbarWindow::RebuildPinnedButtons()
 {
     int iconSz = Scale(48, dpi_);
+
+    const std::vector<std::wstring>* paths = nullptr;
+    static const std::vector<std::wstring> kEmpty;
+    if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
+        auto it = settings_.pinnedExePathsPerMonitor.find(monitorDeviceName_);
+        paths = (it != settings_.pinnedExePathsPerMonitor.end()) ? &it->second : &kEmpty;
+    } else {
+        paths = &settings_.pinnedExePaths;
+    }
+
     std::vector<TaskButton> newPinned;
-    newPinned.reserve(settings_.pinnedExePaths.size());
-    for (const auto& path : settings_.pinnedExePaths) {
+    newPinned.reserve(paths->size());
+    for (const auto& path : *paths) {
         TaskButton btn;
         btn.exePath  = path;
         btn.isPinned = true;
@@ -304,7 +332,7 @@ void TaskbarWindow::LayoutButtons()
         bool show = true;
         if (!settings_.pinnedAppsAsButtonsWhenOpen && IsExeRunning(btn.exePath))
             show = false;
-        if (filterByMonitor && !isPrimary_)
+        if (filterByMonitor && !isPrimary_ && !settings_.pinnedAppsPerMonitor)
             show = false;
         if (show)
             visiblePinned.push_back(&btn);
@@ -542,12 +570,22 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
             break;
 
         case IDM_PIN_UNPIN: {
-            // Unpin: remove from pinnedButtons_ and pinnedExePaths
+            // Unpin: remove from the effective pinned list for this taskbar
             Settings updated = settings_;
-            updated.pinnedExePaths.clear();
-            for (const auto& p : settings_.pinnedExePaths)
-                if (_wcsicmp(p.c_str(), exePath.c_str()) != 0)
-                    updated.pinnedExePaths.push_back(p);
+            if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
+                auto it = updated.pinnedExePathsPerMonitor.find(monitorDeviceName_);
+                if (it != updated.pinnedExePathsPerMonitor.end()) {
+                    auto& vec = it->second;
+                    vec.erase(std::remove_if(vec.begin(), vec.end(),
+                        [&](const auto& p) { return _wcsicmp(p.c_str(), exePath.c_str()) == 0; }),
+                        vec.end());
+                }
+            } else {
+                updated.pinnedExePaths.clear();
+                for (const auto& p : settings_.pinnedExePaths)
+                    if (_wcsicmp(p.c_str(), exePath.c_str()) != 0)
+                        updated.pinnedExePaths.push_back(p);
+            }
             ApplySettings(updated);
             App::Instance().PropagateSettings(settings_, this);
             break;
@@ -571,10 +609,18 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
     const HWND        btnHwnd  = taskBtns[taskIdx].hwnd;
     bool isRunning = taskBtns[taskIdx].IsRunning();
 
-    // Check if this running app is also pinned
+    // Check if this running app is also pinned on this taskbar
     bool isPinned = false;
-    for (const auto& p : settings_.pinnedExePaths)
-        if (!exePath.empty() && _wcsicmp(p.c_str(), exePath.c_str()) == 0) { isPinned = true; break; }
+    if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
+        auto it = settings_.pinnedExePathsPerMonitor.find(monitorDeviceName_);
+        if (it != settings_.pinnedExePathsPerMonitor.end()) {
+            for (const auto& p : it->second)
+                if (!exePath.empty() && _wcsicmp(p.c_str(), exePath.c_str()) == 0) { isPinned = true; break; }
+        }
+    } else {
+        for (const auto& p : settings_.pinnedExePaths)
+            if (!exePath.empty() && _wcsicmp(p.c_str(), exePath.c_str()) == 0) { isPinned = true; break; }
+    }
 
     std::vector<MenuItem> items = {
         { L"Open new window",       IDM_OPEN_NEW_WINDOW, false, false, exePath.empty() },
@@ -595,16 +641,23 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
 
     case IDM_PIN_UNPIN: {
         Settings updated = settings_;
-        if (!isPinned) {
-            // Pin: add to pinnedExePaths
-            if (!exePath.empty())
-                updated.pinnedExePaths.push_back(exePath);
+        if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
+            auto& vec = updated.pinnedExePathsPerMonitor[monitorDeviceName_];
+            if (!isPinned) {
+                if (!exePath.empty()) vec.push_back(exePath);
+            } else {
+                vec.erase(std::remove_if(vec.begin(), vec.end(),
+                    [&](const auto& p) { return _wcsicmp(p.c_str(), exePath.c_str()) == 0; }),
+                    vec.end());
+            }
         } else {
-            // Unpin: remove from pinnedExePaths
-            updated.pinnedExePaths.clear();
-            for (const auto& p : settings_.pinnedExePaths)
-                if (_wcsicmp(p.c_str(), exePath.c_str()) != 0)
-                    updated.pinnedExePaths.push_back(p);
+            if (!isPinned) {
+                if (!exePath.empty()) updated.pinnedExePaths.push_back(exePath);
+            } else {
+                updated.pinnedExePaths.erase(std::remove_if(updated.pinnedExePaths.begin(), updated.pinnedExePaths.end(),
+                    [&](const auto& p) { return _wcsicmp(p.c_str(), exePath.c_str()) == 0; }),
+                    updated.pinnedExePaths.end());
+            }
         }
         ApplySettings(updated);
         App::Instance().PropagateSettings(settings_, this);
@@ -713,13 +766,24 @@ void TaskbarWindow::StartIconLoadThread()
 {
     HWND hwnd = hwnd_;
     int  sizePx = Scale(48, dpi_);
+
+    // Determine which pinned paths this taskbar shows
+    static const std::vector<std::wstring> kEmptyPinned;
+    const std::vector<std::wstring>* pinnedPaths = nullptr;
+    if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
+        auto it = settings_.pinnedExePathsPerMonitor.find(monitorDeviceName_);
+        pinnedPaths = (it != settings_.pinnedExePathsPerMonitor.end()) ? &it->second : &kEmptyPinned;
+    } else {
+        pinnedPaths = &settings_.pinnedExePaths;
+    }
+
     std::vector<std::wstring> paths;
-    paths.reserve(appEntries_.size() + settings_.pinnedExePaths.size());
+    paths.reserve(appEntries_.size() + pinnedPaths->size());
     for (const auto& e : appEntries_) {
         paths.push_back(e.iconPath.empty() ? e.exePath : e.iconPath);
     }
     // Also include pinned exe paths (may not be in the scanned app list)
-    for (const auto& p : settings_.pinnedExePaths) {
+    for (const auto& p : *pinnedPaths) {
         bool alreadyIn = false;
         for (const auto& ex : paths)
             if (_wcsicmp(ex.c_str(), p.c_str()) == 0) { alreadyIn = true; break; }
@@ -977,8 +1041,18 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 if (origPinned && dropPinned) {
                     // Swap within pinned zone and persist the new order
                     std::swap(pinnedButtons_[origIdx], pinnedButtons_[dropIdx]);
-                    std::swap(settings_.pinnedExePaths[origIdx],
-                              settings_.pinnedExePaths[dropIdx]);
+                    if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
+                        auto it = settings_.pinnedExePathsPerMonitor.find(monitorDeviceName_);
+                        if (it != settings_.pinnedExePathsPerMonitor.end() &&
+                            origIdx < (int)it->second.size() &&
+                            dropIdx < (int)it->second.size()) {
+                            std::swap(it->second[origIdx], it->second[dropIdx]);
+                        }
+                    } else if (origIdx < (int)settings_.pinnedExePaths.size() &&
+                               dropIdx < (int)settings_.pinnedExePaths.size()) {
+                        std::swap(settings_.pinnedExePaths[origIdx],
+                                  settings_.pinnedExePaths[dropIdx]);
+                    }
                     SaveSettings(settings_);
                     LayoutButtons();
                 } else if (!origPinned && !dropPinned) {

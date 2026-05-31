@@ -63,6 +63,9 @@ BEGIN
     CONTROL         "Show buttons for current monitor apps only", IDC_CHECK_CURRENT_MONITOR_APPS,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 114, 192, 10
 
+    CONTROL         "Pinned apps: separate per monitor", IDC_CHECK_PINNED_PER_MONITOR,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 128, 192, 10
+
     /* App Buttons tab */
     LTEXT           "Max btn width (px):", IDC_LBL_MAXBTNW,   12,  30,  82, 10
     EDITTEXT        IDC_EDIT_MAXBTNW,                         96,  28,  28, 12,

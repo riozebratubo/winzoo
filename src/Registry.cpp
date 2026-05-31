@@ -290,6 +290,15 @@ Settings LoadSettings()
     if (key.ReadDword(L"AppMenuFlattenMode", amVal) && amVal <= 2)
         s.appMenuFlattenMode = static_cast<AppMenuFlattenMode>(amVal);
 
+    // Settings dialog geometry
+    if (key.ReadDword(L"SettingsDlgX", val)) s.settingsDlgX = static_cast<int>(val);
+    if (key.ReadDword(L"SettingsDlgY", val)) s.settingsDlgY = static_cast<int>(val);
+    if (key.ReadDword(L"SettingsDlgW", val)) s.settingsDlgW = static_cast<int>(val);
+    if (key.ReadDword(L"SettingsDlgH", val)) s.settingsDlgH = static_cast<int>(val);
+
+    DWORD bval = 0;
+    if (key.ReadDword(L"OpenAppsOnSameMonitor", bval)) s.openAppsOnSameMonitor = (bval != 0);
+
     // Clamp App Menu values
     if (s.appMenuWidth        < 120)  s.appMenuWidth        = 120;
     if (s.appMenuWidth        > 800)  s.appMenuWidth        = 800;
@@ -372,4 +381,11 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"AppMenuSidebarShowSettings",    s.appMenuSidebarShowSettings    ? 1u : 0u);
     key.WriteDword(L"AppMenuSidebarShowPower",       s.appMenuSidebarShowPower       ? 1u : 0u);
     key.WriteDword(L"AppMenuFlattenMode",            static_cast<DWORD>(s.appMenuFlattenMode));
+
+    // Settings dialog geometry
+    key.WriteDword(L"SettingsDlgX", static_cast<DWORD>(s.settingsDlgX));
+    key.WriteDword(L"SettingsDlgY", static_cast<DWORD>(s.settingsDlgY));
+    key.WriteDword(L"SettingsDlgW", static_cast<DWORD>(s.settingsDlgW));
+    key.WriteDword(L"SettingsDlgH", static_cast<DWORD>(s.settingsDlgH));
+    key.WriteDword(L"OpenAppsOnSameMonitor", s.openAppsOnSameMonitor ? 1u : 0u);
 }

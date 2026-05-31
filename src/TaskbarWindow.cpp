@@ -4,6 +4,7 @@
 #include "SettingsFile.h"
 #include "resource.h"
 #include "SystemStatus.h"
+#include "LaunchHelper.h"
 #include <algorithm>
 #include <atomic>
 #include <commctrl.h>
@@ -653,6 +654,15 @@ int TaskbarWindow::HitTestButton(POINT pt) const
     return -1;
 }
 
+void TaskbarWindow::LaunchApp(const wchar_t* exe, const wchar_t* args, int nShow)
+{
+    if (settings_.openAppsOnSameMonitor && hMonitor_) {
+        LaunchOnMonitor(hInst_, hMonitor_, exe, args, nShow);
+        return;
+    }
+    ShellExecuteW(nullptr, L"open", exe, args, nullptr, nShow);
+}
+
 void TaskbarWindow::ActivateButton(int combinedIdx)
 {
     if (combinedIdx < 0 || combinedIdx >= TotalCount()) return;
@@ -661,8 +671,7 @@ void TaskbarWindow::ActivateButton(int combinedIdx)
         // Pinned button: always spawn a new window
         const TaskButton& btn = pinnedButtons_[combinedIdx];
         if (!btn.exePath.empty())
-            ShellExecuteW(nullptr, L"open", btn.exePath.c_str(),
-                          nullptr, nullptr, SW_SHOWNORMAL);
+            LaunchApp(btn.exePath.c_str());
         return;
     }
 
@@ -675,8 +684,7 @@ void TaskbarWindow::ActivateButton(int combinedIdx)
 
     if (!btn.IsRunning()) {
         if (!btn.exePath.empty())
-            ShellExecuteW(nullptr, L"open", btn.exePath.c_str(),
-                          nullptr, nullptr, SW_SHOWNORMAL);
+            LaunchApp(btn.exePath.c_str());
         return;
     }
 
@@ -723,12 +731,10 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
         switch (id) {
         case IDM_OPEN_NEW_WINDOW:
             if (!exePath.empty())
-                ShellExecuteW(nullptr, L"open", exePath.c_str(),
-                              nullptr, nullptr, SW_SHOWNORMAL);
+                LaunchApp(exePath.c_str());
             break;
 
         case IDM_PIN_UNPIN: {
-            // Unpin: remove from the effective pinned list for this taskbar
             Settings updated = settings_;
             if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
                 auto it = updated.pinnedExePathsPerMonitor.find(monitorDeviceName_);
@@ -793,8 +799,7 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
     switch (id) {
     case IDM_OPEN_NEW_WINDOW:
         if (!exePath.empty())
-            ShellExecuteW(nullptr, L"open", exePath.c_str(),
-                          nullptr, nullptr, SW_SHOWNORMAL);
+            LaunchApp(exePath.c_str());
         break;
 
     case IDM_PIN_UNPIN: {
@@ -897,13 +902,13 @@ void TaskbarWindow::ShowStatusIconMenu(int which, POINT ptScreen)
         UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
         switch (id) {
         case IDM_VOL_MIXER:
-            ShellExecuteW(nullptr, L"open", L"sndvol.exe", nullptr, nullptr, SW_SHOWNORMAL);
+            LaunchApp(L"sndvol.exe");
             break;
         case IDM_VOL_SOUNDS:
-            ShellExecuteW(nullptr, L"open", L"mmsys.cpl", nullptr, nullptr, SW_SHOWNORMAL);
+            LaunchApp(L"mmsys.cpl");
             break;
         case IDM_VOL_SETTINGS:
-            ShellExecuteW(nullptr, L"open", L"ms-settings:sound", nullptr, nullptr, SW_SHOWNORMAL);
+            LaunchApp(L"ms-settings:sound");
             break;
         }
     } else if (which == 2) {   // Network
@@ -914,11 +919,10 @@ void TaskbarWindow::ShowStatusIconMenu(int which, POINT ptScreen)
         UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
         switch (id) {
         case IDM_NET_SETTINGS:
-            ShellExecuteW(nullptr, L"open", L"ms-settings:network-status", nullptr, nullptr, SW_SHOWNORMAL);
+            LaunchApp(L"ms-settings:network-status");
             break;
         case IDM_NET_SHARING:
-            ShellExecuteW(nullptr, L"open", L"control.exe",
-                          L"/name Microsoft.NetworkAndSharingCenter", nullptr, SW_SHOWNORMAL);
+            LaunchApp(L"control.exe", L"/name Microsoft.NetworkAndSharingCenter");
             break;
         }
     } else if (which == 3) {   // Battery
@@ -930,13 +934,13 @@ void TaskbarWindow::ShowStatusIconMenu(int which, POINT ptScreen)
         UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
         switch (id) {
         case IDM_BAT_BRIGHTNESS:
-            ShellExecuteW(nullptr, L"open", L"ms-settings:display", nullptr, nullptr, SW_SHOWNORMAL);
+            LaunchApp(L"ms-settings:display");
             break;
         case IDM_BAT_POWER:
-            ShellExecuteW(nullptr, L"open", L"powercfg.cpl", nullptr, nullptr, SW_SHOWNORMAL);
+            LaunchApp(L"powercfg.cpl");
             break;
         case IDM_BAT_SETTINGS:
-            ShellExecuteW(nullptr, L"open", L"ms-settings:batterysaver", nullptr, nullptr, SW_SHOWNORMAL);
+            LaunchApp(L"ms-settings:batterysaver");
             break;
         }
     }
@@ -1439,18 +1443,18 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                     // Open volume flyout: sndvol.exe -f <hwnd> positions it near our window
                     wchar_t arg[32];
                     swprintf_s(arg, L"-f %Iu", reinterpret_cast<UINT_PTR>(hwnd));
-                    ShellExecuteW(nullptr, L"open", L"sndvol.exe", arg, nullptr, SW_SHOWNORMAL);
+                    LaunchApp(L"sndvol.exe", arg);
                     InvalidateRect(hwnd, nullptr, FALSE);
                     return 0;
                 }
                 if (statusData_.netAvailable && PtInRect(&netIconRect_, pt)) {
                     // Open available networks flyout
-                    ShellExecuteW(nullptr, L"open", L"ms-availablenetworks:", nullptr, nullptr, SW_SHOWNORMAL);
+                    LaunchApp(L"ms-availablenetworks:");
                     InvalidateRect(hwnd, nullptr, FALSE);
                     return 0;
                 }
                 if (statusData_.batAvailable && PtInRect(&batIconRect_, pt)) {
-                    ShellExecuteW(nullptr, L"open", L"ms-settings:batterysaver", nullptr, nullptr, SW_SHOWNORMAL);
+                    LaunchApp(L"ms-settings:batterysaver");
                     InvalidateRect(hwnd, nullptr, FALSE);
                     return 0;
                 }

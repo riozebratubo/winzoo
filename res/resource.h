@@ -135,6 +135,9 @@
 #define IDC_EDIT_TRAY_ICON_MARGIN           1157
 #define IDC_SPIN_TRAY_ICON_MARGIN           1158
 
+// General tab — multi-monitor launch
+#define IDC_CHECK_OPEN_SAME_MONITOR         1160
+
 // Volume icon context menu
 #define IDM_VOL_MIXER       501
 #define IDM_VOL_SOUNDS      502

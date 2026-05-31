@@ -1,4 +1,5 @@
 #include "AppMenuWindow.h"
+#include "LaunchHelper.h"
 #include "Dpi.h"
 #include <windowsx.h>
 #include <shellapi.h>
@@ -9,6 +10,17 @@
 #pragma comment(lib, "PowrProf.lib")
 
 static constexpr wchar_t kAppMenuClass[] = L"WinzooAppMenu";
+
+// Helper to launch an app with optional same-monitor hint
+static void LaunchMenuApp(HWND hwndHint, bool useHint, const wchar_t* exe, const wchar_t* args = nullptr, int nShow = SW_SHOWNORMAL)
+{
+    if (useHint && hwndHint) {
+        HMONITOR hMon = MonitorFromWindow(hwndHint, MONITOR_DEFAULTTONEAREST);
+        LaunchOnMonitor(GetModuleHandleW(nullptr), hMon, exe, args, nShow);
+        return;
+    }
+    ShellExecuteW(nullptr, L"open", exe, args, nullptr, nShow);
+}
 
 // ---------- cached power options ----------
 
@@ -449,7 +461,7 @@ void AppMenuWindow::ActivateNode(int idx)
     } else {
         const std::wstring& path = node.exePath.empty() ? node.iconPath : node.exePath;
         if (!path.empty())
-            ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            LaunchMenuApp(hwnd_, settings_->openAppsOnSameMonitor, path.c_str());
         closeReason_ = AppMenuCloseReason::Selection;
         done_ = true;
         DestroyWindow(hwnd_);
@@ -494,13 +506,13 @@ void AppMenuWindow::ActivateSidebarBtn(int idx)
 {
     if (idx == 0) {
         // Open Windows Explorer
-        ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL);
+        LaunchMenuApp(hwnd_, settings_->openAppsOnSameMonitor, L"explorer.exe");
         closeReason_ = AppMenuCloseReason::Selection;
         done_ = true;
         DestroyWindow(hwnd_);
     } else if (idx == 1) {
         // Open Windows Settings
-        ShellExecuteW(nullptr, L"open", L"ms-settings:", nullptr, nullptr, SW_SHOWNORMAL);
+        LaunchMenuApp(hwnd_, settings_->openAppsOnSameMonitor, L"ms-settings:");
         closeReason_ = AppMenuCloseReason::Selection;
         done_ = true;
         DestroyWindow(hwnd_);

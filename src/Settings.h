@@ -72,4 +72,12 @@ struct Settings {
     bool appMenuSidebarShowExplorer    = true;
     bool appMenuSidebarShowSettings    = true;
     bool appMenuSidebarShowPower       = true;
+
+    bool openAppsOnSameMonitor = false;  // open launched apps/dialogs on the taskbar's monitor
+
+    // Settings dialog geometry (0 = not yet saved, use default centering)
+    int settingsDlgX = 0;
+    int settingsDlgY = 0;
+    int settingsDlgW = 0;  // window width in pixels
+    int settingsDlgH = 0;  // window height in pixels
 };

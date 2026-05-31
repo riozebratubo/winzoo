@@ -3,6 +3,7 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <uxtheme.h>
+#include "Registry.h"
 #include "resource.h"
 
 static constexpr const wchar_t* kPositions[] = {
@@ -24,6 +25,22 @@ static constexpr const wchar_t* kTaskbarMonitorModes[] = {
 struct DlgData {
     Settings* settings;
     HWND      hScrollHosts[4] = {};
+    // Layout metrics (dialog client coordinates, set in WM_INITDIALOG, used by WM_SIZE)
+    bool layoutReady    = false;
+    int  tabL           = 0;  // tab control left
+    int  tabT           = 0;  // tab control top
+    int  tabRightGap    = 0;  // client right  - tab right
+    int  tabBotGap      = 0;  // client bottom - tab bottom
+    int  btnH           = 0;  // button height
+    int  btnBotGap      = 0;  // client bottom - button bottom
+    int  btnDefL        = 0;  // Defaults button left
+    int  btnDefW        = 0;  // Defaults button width
+    int  btnOKRightGap  = 0;  // client right  - OK right edge
+    int  btnOKW         = 0;  // OK button width
+    int  btnCxlRightGap = 0;  // client right  - Cancel right edge
+    int  btnCxlW        = 0;  // Cancel button width
+    int  minW           = 0;  // minimum tracking window width  (px)
+    int  minH           = 0;  // minimum tracking window height (px)
 };
 
 // Scrollable panel used for every settings tab — scrolls its children vertically
@@ -196,6 +213,7 @@ static const int kGeneralControls[] = {
     IDC_LBL_TRAY_ICON_SIZE,    IDC_EDIT_TRAY_ICON_SIZE,    IDC_SPIN_TRAY_ICON_SIZE,
     IDC_LBL_TRAY_ICON_PADDING, IDC_EDIT_TRAY_ICON_PADDING, IDC_SPIN_TRAY_ICON_PADDING,
     IDC_LBL_TRAY_ICON_MARGIN,  IDC_EDIT_TRAY_ICON_MARGIN,  IDC_SPIN_TRAY_ICON_MARGIN,
+    IDC_CHECK_OPEN_SAME_MONITOR,
     0
 };
 static const int kAppBtnControls[] = {
@@ -343,6 +361,8 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
     SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_SIZE),    UDM_SETPOS32, 0, s.trayIconSize);
     SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_PADDING), UDM_SETPOS32, 0, s.trayIconPadding);
     SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_MARGIN),  UDM_SETPOS32, 0, s.trayIconMargin);
+    CheckDlgButton(hGen, IDC_CHECK_OPEN_SAME_MONITOR,
+                   s.openAppsOnSameMonitor ? BST_CHECKED : BST_UNCHECKED);
     SetAllMonitorsControlsEnabled(hGen, s.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
 
     // App Buttons tab
@@ -468,6 +488,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 setupSpin(IDC_SPIN_TRAY_ICON_MARGIN,  IDC_EDIT_TRAY_ICON_MARGIN,   0, 20,
                           data->settings->trayIconMargin);
             }
+            CheckDlgButton(hwnd, IDC_CHECK_OPEN_SAME_MONITOR,
+                           data->settings->openAppsOnSameMonitor ? BST_CHECKED : BST_UNCHECKED);
             SetAllMonitorsControlsEnabled(hwnd, allMonitors);
         }
 
@@ -559,6 +581,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             IDC_CHECK_APPMENU_ALL_MONITORS, IDC_CHECK_CURRENT_MONITOR_APPS,
             IDC_CHECK_PINNED_PER_MONITOR,
             IDC_CHECK_STATUS_ZONE, IDC_CHECK_TRAY_ICONS, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
+            IDC_CHECK_OPEN_SAME_MONITOR,
             IDC_CHECK_APPMENU_SIDEBAR,
             IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
             IDC_CHECK_APPMENU_SIDEBAR_SETTINGS,
@@ -633,11 +656,174 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                     content.left, content.top, panelW, panelH);
         }
 
+        // Capture layout metrics for WM_SIZE
+        {
+            RECT cr;
+            GetClientRect(hwnd, &cr);
+            int cW = cr.right, cH = cr.bottom;
+
+            HWND hTabForMetrics = GetDlgItem(hwnd, IDC_TAB_SETTINGS);
+            RECT tabR;
+            GetWindowRect(hTabForMetrics, &tabR);
+            MapWindowPoints(HWND_DESKTOP, hwnd, reinterpret_cast<LPPOINT>(&tabR), 2);
+            data->tabL        = tabR.left;
+            data->tabT        = tabR.top;
+            data->tabRightGap = cW - tabR.right;
+            data->tabBotGap   = cH - tabR.bottom;
+
+            auto measureBtn = [&](int id, int& outL, int& outW, int& outRightGap, int& outH, int& outBotGap) {
+                HWND hB = GetDlgItem(hwnd, id);
+                RECT bR;
+                GetWindowRect(hB, &bR);
+                MapWindowPoints(HWND_DESKTOP, hwnd, reinterpret_cast<LPPOINT>(&bR), 2);
+                outL        = bR.left;
+                outW        = bR.right - bR.left;
+                outRightGap = cW - bR.right;
+                outH        = bR.bottom - bR.top;
+                outBotGap   = cH - bR.bottom;
+            };
+
+            int dummy;
+            measureBtn(IDC_BTN_RESET_DEFAULTS, data->btnDefL,  data->btnDefW,  dummy, data->btnH, data->btnBotGap);
+            measureBtn(IDOK,             dummy, data->btnOKW,  data->btnOKRightGap,  dummy, dummy);
+            measureBtn(IDCANCEL,         dummy, data->btnCxlW, data->btnCxlRightGap, dummy, dummy);
+
+            // Minimum size: original dialog size (in window coords)
+            RECT wr;
+            GetWindowRect(hwnd, &wr);
+            data->minW = wr.right - wr.left;
+            data->minH = wr.bottom - wr.top;
+            data->layoutReady = true;
+        }
+
+        // Restore persisted size/position if valid
+        {
+            Settings* s = data->settings;
+            if (s->settingsDlgW > 0) {
+                RECT r{ s->settingsDlgX, s->settingsDlgY,
+                        s->settingsDlgX + s->settingsDlgW,
+                        s->settingsDlgY + s->settingsDlgH };
+                if (MonitorFromRect(&r, MONITOR_DEFAULTTONULL)) {
+                    SetWindowPos(hwnd, nullptr,
+                                 s->settingsDlgX, s->settingsDlgY,
+                                 s->settingsDlgW, s->settingsDlgH,
+                                 SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+            }
+        }
+
         // ShowTab must run last so that UDM_SETBUDDY calls (which make edit buddies
         // visible) are all done before we hide controls belonging to inactive tabs.
         ShowTab(hwnd, 0, data);
 
         return TRUE;
+    }
+
+    case WM_GETMINMAXINFO: {
+        if (data && data->layoutReady) {
+            auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+            mmi->ptMinTrackSize = { data->minW, data->minH };
+        }
+        break;
+    }
+
+    case WM_SIZE: {
+        if (!data || !data->layoutReady) break;
+
+        RECT cr;
+        GetClientRect(hwnd, &cr);
+        int cW = cr.right, cH = cr.bottom;
+
+        HWND hTabCtrl2 = GetDlgItem(hwnd, IDC_TAB_SETTINGS);
+        int newTabW = cW - data->tabL - data->tabRightGap;
+        int newTabH = cH - data->tabT - data->tabBotGap;
+
+        // Compute scroll-host content rect inside the resized tab control
+        RECT tabR{ data->tabL, data->tabT, data->tabL + newTabW, data->tabT + newTabH };
+        RECT content = tabR;
+        TabCtrl_AdjustRect(hTabCtrl2, FALSE, &content);
+        int panelW = content.right  - content.left;
+        int panelH = content.bottom - content.top;
+
+        HDWP hdwp = BeginDeferWindowPos(4 + 4 + 3);  // 1 tab + 4 hosts + 3 buttons
+
+        // Resize tab control
+        hdwp = DeferWindowPos(hdwp, hTabCtrl2, nullptr,
+                              data->tabL, data->tabT, newTabW, newTabH,
+                              SWP_NOZORDER | SWP_NOACTIVATE);
+
+        // Resize each scroll host
+        for (int g = 0; g < 4; ++g) {
+            if (data->hScrollHosts[g])
+                hdwp = DeferWindowPos(hdwp, data->hScrollHosts[g], nullptr,
+                                      content.left, content.top, panelW, panelH,
+                                      SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+
+        // Move buttons (keep their sizes, move by anchoring to bottom/right/left)
+        int btnY = cH - data->btnBotGap - data->btnH;
+        hdwp = DeferWindowPos(hdwp, GetDlgItem(hwnd, IDC_BTN_RESET_DEFAULTS), nullptr,
+                              data->btnDefL, btnY, data->btnDefW, data->btnH,
+                              SWP_NOZORDER | SWP_NOACTIVATE);
+        hdwp = DeferWindowPos(hdwp, GetDlgItem(hwnd, IDOK), nullptr,
+                              cW - data->btnOKRightGap - data->btnOKW, btnY,
+                              data->btnOKW, data->btnH,
+                              SWP_NOZORDER | SWP_NOACTIVATE);
+        hdwp = DeferWindowPos(hdwp, GetDlgItem(hwnd, IDCANCEL), nullptr,
+                              cW - data->btnCxlRightGap - data->btnCxlW, btnY,
+                              data->btnCxlW, data->btnH,
+                              SWP_NOZORDER | SWP_NOACTIVATE);
+        EndDeferWindowPos(hdwp);
+
+        // Update scrollbar page size and clamp scroll position for each host
+        for (int g = 0; g < 4; ++g) {
+            HWND hH = data->hScrollHosts[g];
+            if (!hH) continue;
+            SCROLLINFO si{ sizeof(si) };
+            si.fMask = SIF_ALL;
+            GetScrollInfo(hH, SB_VERT, &si);
+            si.nPage = static_cast<UINT>(panelH);
+            if (si.nPage >= static_cast<UINT>(si.nMax + 1)) {
+                // Everything fits: scroll back to top
+                int delta = -si.nPos;
+                if (delta != 0) {
+                    RECT hcr;
+                    GetClientRect(hH, &hcr);
+                    ScrollWindow(hH, 0, delta, nullptr, nullptr);
+                }
+                si.nPos = 0;
+            } else {
+                int maxPos = si.nMax - static_cast<int>(si.nPage) + 1;
+                if (si.nPos > maxPos) {
+                    int delta = maxPos - si.nPos;
+                    ScrollWindow(hH, 0, delta, nullptr, nullptr);
+                    si.nPos = maxPos;
+                }
+            }
+            si.fMask = SIF_PAGE | SIF_POS | SIF_DISABLENOSCROLL;
+            SetScrollInfo(hH, SB_VERT, &si, TRUE);
+        }
+        return 0;
+    }
+
+    case WM_DESTROY: {
+        if (data) {
+            RECT wr;
+            GetWindowRect(hwnd, &wr);
+            data->settings->settingsDlgX = wr.left;
+            data->settings->settingsDlgY = wr.top;
+            data->settings->settingsDlgW = wr.right  - wr.left;
+            data->settings->settingsDlgH = wr.bottom - wr.top;
+            // Write directly — Cancel path never calls SaveSettings
+            RegistryKey key = RegistryKey::OpenAppKey(KEY_WRITE);
+            if (key.IsOpen()) {
+                key.WriteDword(L"SettingsDlgX", static_cast<DWORD>(data->settings->settingsDlgX));
+                key.WriteDword(L"SettingsDlgY", static_cast<DWORD>(data->settings->settingsDlgY));
+                key.WriteDword(L"SettingsDlgW", static_cast<DWORD>(data->settings->settingsDlgW));
+                key.WriteDword(L"SettingsDlgH", static_cast<DWORD>(data->settings->settingsDlgH));
+            }
+        }
+        break;
     }
 
     case WM_NOTIFY: {
@@ -825,6 +1011,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                         SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_MARGIN), UDM_GETPOS32, 0, 0));
                     if (tmar >= 0 && tmar <= 20) data->settings->trayIconMargin = tmar;
                 }
+                data->settings->openAppsOnSameMonitor =
+                    IsDlgButtonChecked(hGen, IDC_CHECK_OPEN_SAME_MONITOR) == BST_CHECKED;
             }
 
             int maxW = static_cast<int>(

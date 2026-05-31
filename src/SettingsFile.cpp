@@ -362,6 +362,11 @@ bool ExportSettingsToFile(const Settings& s)
     wBool("appMenuSidebarShowPower",       s.appMenuSidebarShowPower);
     wBool("pinnedAppsAsButtonsWhenOpen",   s.pinnedAppsAsButtonsWhenOpen);
     wBool("pinnedAppsPerMonitor",          s.pinnedAppsPerMonitor);
+    wInt("settingsDlgX", s.settingsDlgX);
+    wInt("settingsDlgY", s.settingsDlgY);
+    wInt("settingsDlgW", s.settingsDlgW);
+    wInt("settingsDlgH", s.settingsDlgH);
+    wBool("openAppsOnSameMonitor", s.openAppsOnSameMonitor);
 
     // pinnedExePaths
     j += "  \"pinnedExePaths\": [";
@@ -555,6 +560,11 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     rb("appMenuSidebarShowPower",       ns.appMenuSidebarShowPower);
     rb("pinnedAppsAsButtonsWhenOpen",   ns.pinnedAppsAsButtonsWhenOpen);
     rb("pinnedAppsPerMonitor",          ns.pinnedAppsPerMonitor);
+    ri("settingsDlgX", ns.settingsDlgX);
+    ri("settingsDlgY", ns.settingsDlgY);
+    ri("settingsDlgW", ns.settingsDlgW);
+    ri("settingsDlgH", ns.settingsDlgH);
+    rb("openAppsOnSameMonitor", ns.openAppsOnSameMonitor);
 
     { size_t p = FindValue(content, "pinnedExePaths");
       if (p != std::string::npos) ParseStringArray(content, p, ns.pinnedExePaths); }

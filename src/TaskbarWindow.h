@@ -45,6 +45,7 @@ private:
     void ShowAppMenu();
     void StartScanThread(bool isFirstScan);
     void StartIconLoadThread();
+    void LaunchApp(const wchar_t* exe, const wchar_t* args = nullptr, int nShow = SW_SHOWNORMAL);
     RECT CalculateWindowRect() const;
     RECT GetStartBtnScreenRect() const;
 

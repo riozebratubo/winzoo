@@ -2,6 +2,7 @@
 #include "Registry.h"
 #include "SettingsFile.h"
 #include "AppMenuWindow.h"
+#include "LaunchHelper.h"
 #include <objbase.h>
 
 struct MonitorEnumData {
@@ -72,6 +73,7 @@ bool App::Init(HINSTANCE hInst)
     }
 
     AppMenuWindow::CachePowerOptions();
+    RegisterLaunchHelperClass(hInst);
 
     // Hide the native Windows taskbar
     HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);

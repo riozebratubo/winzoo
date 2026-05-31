@@ -30,7 +30,7 @@ BEGIN
 END
 
 IDD_SETTINGS DIALOGEX 0, 0, 220, 248
-STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+STYLE DS_SETFONT | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 CAPTION "Winzoo Settings"
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
@@ -102,6 +102,9 @@ BEGIN
     CONTROL         "", IDC_SPIN_TRAY_ICON_MARGIN, "msctls_updown32",
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
                     144, 234, 12, 12
+
+    CONTROL         "Open launched apps/dialogs on same monitor", IDC_CHECK_OPEN_SAME_MONITOR,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 252, 192, 10
 
     /* App Buttons tab */
     LTEXT           "Max btn width (px):", IDC_LBL_MAXBTNW,   12,  30,  82, 10

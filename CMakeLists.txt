@@ -36,6 +36,7 @@ set(SOURCES
     src/SettingsFile.cpp
     src/SystemStatus.cpp
     src/TrayIconProvider.cpp
+    src/LaunchHelper.cpp
     res/winzoo.rc
 )
 

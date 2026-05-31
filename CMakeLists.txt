@@ -9,12 +9,23 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(ENABLE_MSVC_ANALYZE OFF)
+
 if(MSVC)
     add_compile_options(/W4 /permissive- /Zc:preprocessor /MP /utf-8)
     add_compile_definitions(
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
         _WIN32_WINNT=0x0A00 WINVER=0x0A00
     )
+endif()
+
+# Optional MSVC PREfast static analysis. Enable with:
+#   cmake -B build -DENABLE_MSVC_ANALYZE=ON -G "Visual Studio 18 2026" -A x64
+#   cmake --build build --config Release
+# Results appear in the build output and in .analyze XML files next to each .obj.
+option(ENABLE_MSVC_ANALYZE "Enable MSVC /analyze static analysis (PREfast)" OFF)
+if(MSVC AND ENABLE_MSVC_ANALYZE)
+    add_compile_options(/analyze)
 endif()
 
 set(SOURCES

@@ -44,7 +44,8 @@ public:
                const ClockInfo& clock,
                const ScrollInfo& scroll,
                const StartButtonInfo& startBtn,
-               const MinimizedIndicatorOptions& indicator = {});
+               const MinimizedIndicatorOptions& indicator = {},
+               int pinnedSepX = 0);
 
     ~Renderer();
 

@@ -92,7 +92,8 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
                      const ClockInfo& clock,
                      const ScrollInfo& scroll,
                      const StartButtonInfo& startBtn,
-                     const MinimizedIndicatorOptions& indicator)
+                     const MinimizedIndicatorOptions& indicator,
+                     int pinnedSepX)
 {
     if (!hdcMem_) return;
 
@@ -107,9 +108,11 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
     FillRect(hdcMem_, &rc, bgBrush);
     DeleteObject(bgBrush);
 
-    // Task buttons (skip the one being dragged)
+    // Task buttons (skip the one being dragged and hidden buttons with zero rect)
     for (int i = 0; i < static_cast<int>(buttons.size()); ++i) {
         if (i == dragIdx) continue;
+        const RECT& r = buttons[i].rect;
+        if (r.left == 0 && r.right == 0 && r.top == 0 && r.bottom == 0) continue;
         buttons[i].Draw(hdcMem_, colors,
                         i == hoveredIdx, i == pressedIdx,
                         false, dpi, indicator);
@@ -127,11 +130,18 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
         };
         ghost.Draw(hdcMem_, colors, false, false, true, dpi, indicator);
 
-        // Drop indicator line
+        // Drop indicator line — skip hidden buttons (rect={})
         for (int i = 0; i <= static_cast<int>(buttons.size()); ++i) {
-            int cx = (i < static_cast<int>(buttons.size()))
-                     ? buttons[i].rect.left
-                     : buttons[i - 1].rect.right;
+            int cx;
+            if (i < static_cast<int>(buttons.size())) {
+                const RECT& r = buttons[i].rect;
+                if (r.left == 0 && r.right == 0 && r.top == 0 && r.bottom == 0) continue;
+                cx = r.left;
+            } else {
+                const RECT& r = buttons[i - 1].rect;
+                if (r.left == 0 && r.right == 0 && r.top == 0 && r.bottom == 0) continue;
+                cx = r.right;
+            }
             if (std::abs(cx - ghostPt.x) < bw / 2) {
                 HPEN linePen = CreatePen(PS_SOLID, Scale(2, dpi), colors.buttonActive);
                 HPEN old = static_cast<HPEN>(SelectObject(hdcMem_, linePen));
@@ -223,6 +233,21 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
         // Vertical separator (assuming horizontal bar; works for vertical too)
         MoveToEx(hdcMem_, startBtn.rect.right, startBtn.rect.top,    nullptr);
         LineTo(  hdcMem_, startBtn.rect.right, startBtn.rect.bottom);
+        SelectObject(hdcMem_, oldPen);
+        DeleteObject(sepPen);
+    }
+
+    // Pinned zone separator
+    if (pinnedSepX > 0) {
+        HPEN sepPen = CreatePen(PS_SOLID, 1, colors.separator);
+        HPEN oldPen = static_cast<HPEN>(SelectObject(hdcMem_, sepPen));
+        if (scroll.isHoriz) {
+            MoveToEx(hdcMem_, pinnedSepX, 0, nullptr);
+            LineTo  (hdcMem_, pinnedSepX, h);
+        } else {
+            MoveToEx(hdcMem_, 0,          pinnedSepX, nullptr);
+            LineTo  (hdcMem_, w,          pinnedSepX);
+        }
         SelectObject(hdcMem_, oldPen);
         DeleteObject(sepPen);
     }

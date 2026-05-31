@@ -158,6 +158,8 @@ void TaskbarWindow::Destroy()
 
 void TaskbarWindow::ApplySettings(const Settings& s)
 {
+    bool pinnedPathsChanged = (s.pinnedExePaths != settings_.pinnedExePaths);
+
     settings_ = s;
     colors_   = GetThemeColors(s.theme);
     showStartButton_ = isPrimary_
@@ -185,8 +187,82 @@ void TaskbarWindow::ApplySettings(const Settings& s)
                      SWP_NOACTIVATE);
     }
 
+    RebuildPinnedButtons();
+
+    // If pinned paths changed and any icon is not yet cached, kick off icon loading.
+    if (pinnedPathsChanged) {
+        for (const auto& btn : pinnedButtons_) {
+            if (!btn.icon) { StartIconLoadThread(); break; }
+        }
+    }
+
     LayoutButtons();
     InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+// ─── Combined-index helpers ──────────────────────────────────────────────────
+
+int TaskbarWindow::TotalCount() const
+{
+    return (int)pinnedButtons_.size() + (int)tracker_.Buttons().size();
+}
+
+bool TaskbarWindow::IsPinnedIdx(int i) const
+{
+    return i >= 0 && i < (int)pinnedButtons_.size();
+}
+
+const TaskButton& TaskbarWindow::GetButtonByIdx(int i) const
+{
+    if (IsPinnedIdx(i)) return pinnedButtons_[i];
+    return tracker_.Buttons()[i - (int)pinnedButtons_.size()];
+}
+
+TaskButton& TaskbarWindow::GetMutableButtonByIdx(int i)
+{
+    if (IsPinnedIdx(i)) return pinnedButtons_[i];
+    return tracker_.MutableButtons()[i - (int)pinnedButtons_.size()];
+}
+
+HWND TaskbarWindow::FindHwndByExePath(const std::wstring& exePath) const
+{
+    for (const auto& btn : tracker_.Buttons()) {
+        if (!btn.exePath.empty() &&
+            _wcsicmp(btn.exePath.c_str(), exePath.c_str()) == 0)
+            return btn.hwnd;
+    }
+    return nullptr;
+}
+
+bool TaskbarWindow::IsExeRunning(const std::wstring& exePath) const
+{
+    return FindHwndByExePath(exePath) != nullptr;
+}
+
+/*static*/ std::wstring TaskbarWindow::ExeBaseName(const std::wstring& exePath)
+{
+    size_t pos = exePath.rfind(L'\\');
+    std::wstring name = (pos != std::wstring::npos) ? exePath.substr(pos + 1) : exePath;
+    size_t ext = name.rfind(L'.');
+    if (ext != std::wstring::npos) name = name.substr(0, ext);
+    return name;
+}
+
+void TaskbarWindow::RebuildPinnedButtons()
+{
+    int iconSz = Scale(48, dpi_);
+    std::vector<TaskButton> newPinned;
+    newPinned.reserve(settings_.pinnedExePaths.size());
+    for (const auto& path : settings_.pinnedExePaths) {
+        TaskButton btn;
+        btn.exePath  = path;
+        btn.isPinned = true;
+        btn.iconOnly = true;
+        btn.title    = ExeBaseName(path);
+        btn.icon     = appIconCache_.TryGet(path, iconSz);
+        newPinned.push_back(std::move(btn));
+    }
+    pinnedButtons_ = std::move(newPinned);
 }
 
 void TaskbarWindow::LayoutButtons()
@@ -198,18 +274,16 @@ void TaskbarWindow::LayoutButtons()
     int w = client.right  - client.left;
     int h = client.bottom - client.top;
 
-    auto& buttons = tracker_.MutableButtons();
+    auto& taskBtns = tracker_.MutableButtons();
 
-    // Determine visible buttons. When filtering by current monitor, buttons whose
-    // window is on a different monitor are hidden (rect zeroed). Pinned-only buttons
-    // (no running HWND) appear only on the primary taskbar when filtering is active.
+    // Determine visible task buttons (monitor filter)
     bool filterByMonitor = settings_.showCurrentMonitorAppsOnly
                         && settings_.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors
                         && hMonitor_ != nullptr;
 
-    std::vector<TaskButton*> visible;
-    visible.reserve(buttons.size());
-    for (auto& btn : buttons) {
+    std::vector<TaskButton*> visibleTask;
+    visibleTask.reserve(taskBtns.size());
+    for (auto& btn : taskBtns) {
         bool show = true;
         if (filterByMonitor) {
             if (btn.hwnd)
@@ -218,19 +292,35 @@ void TaskbarWindow::LayoutButtons()
                 show = isPrimary_;
         }
         if (show)
-            visible.push_back(&btn);
+            visibleTask.push_back(&btn);
         else
             btn.rect = {};
     }
 
-    int count = static_cast<int>(visible.size());
+    // Determine which pinned buttons are visible
+    std::vector<TaskButton*> visiblePinned;
+    visiblePinned.reserve(pinnedButtons_.size());
+    for (auto& btn : pinnedButtons_) {
+        bool show = true;
+        if (!settings_.pinnedAppsAsButtonsWhenOpen && IsExeRunning(btn.exePath))
+            show = false;
+        if (filterByMonitor && !isPrimary_)
+            show = false;
+        if (show)
+            visiblePinned.push_back(&btn);
+        else
+            btn.rect = {};
+    }
+
+    int pCount = static_cast<int>(visiblePinned.size());
+    int tCount = static_cast<int>(visibleTask.size());
 
     clockRect_       = {};
     scrollNeeded_    = false;
     scrollLeftRect_  = scrollRightRect_ = {};
     maxScrollOffset_ = 0;
+    pinnedSepX_      = 0;
 
-    // Start button: a square on the leading edge (hidden if showStartButton_ is false)
     int startSz  = showStartButton_ ? Scale(settings_.thickness, dpi_) : 0;
     bool isHoriz = (settings_.position != TaskbarPosition::Left &&
                     settings_.position != TaskbarPosition::Right);
@@ -245,8 +335,6 @@ void TaskbarWindow::LayoutButtons()
         startBtnRect_ = {};
     }
 
-    if (count == 0) return;
-    int arrowW  = Scale(20, dpi_);
     int maxBtnW = Scale(settings_.maxButtonWidth, dpi_);
     int minBtnW = Scale(settings_.minButtonWidth, dpi_);
     if (minBtnW > maxBtnW) minBtnW = maxBtnW;
@@ -263,88 +351,141 @@ void TaskbarWindow::LayoutButtons()
     }
 
     if (isHoriz) {
-        // Available area starts after start button
-        int start     = startSz;
-        int available = w - start - tail;
+        int arrowW = Scale(20, dpi_);
 
-        int totalMin = count * minBtnW + (count - 1) * pad + 2 * pad;
-
-        if (totalMin <= available) {
-            scrollOffset_ = 0;
-            int area = available - 2 * pad;
-            int btnW = std::min(maxBtnW,
-                                std::max(minBtnW,
-                                         (area - (count - 1) * pad) / count));
-            int x = start + pad;
-            for (auto* btn : visible) {
-                btn->rect = { x, pad, x + btnW, h - pad };
-                x += btnW + pad;
-            }
-        } else {
-            scrollNeeded_    = true;
-            scrollLeftRect_  = { start,                      0, start + arrowW,    h };
-            scrollRightRect_ = { start + available - arrowW, 0, start + available, h };
-
-            int inner    = available - 2 * arrowW - 2 * pad;
-            int visCount = std::max(1, (inner + pad) / (minBtnW + pad));
-            maxScrollOffset_ = std::max(0, count - visCount);
-            scrollOffset_    = std::min(scrollOffset_, maxScrollOffset_);
-
-            for (auto* btn : visible) btn->rect = {};
-            int x = start + arrowW + pad;
-            for (int i = scrollOffset_; i < scrollOffset_ + visCount && i < count; ++i) {
-                visible[i]->rect = { x, pad, x + minBtnW, h - pad };
+        // --- Pinned zone ---
+        int pinnedZoneEnd = startSz; // default: no pinned buttons
+        if (pCount > 0) {
+            int x = startSz + pad;
+            for (auto* btn : visiblePinned) {
+                btn->rect = { x, pad, x + minBtnW, h - pad };
                 x += minBtnW + pad;
             }
+            pinnedZoneEnd = x;
+            pinnedSepX_   = pinnedZoneEnd + Scale(2, dpi_);
         }
-    } else {
-        int start     = startSz;
-        int btnH      = Scale(36, dpi_);
-        int available = h - start - tail;
-        int totalMin  = count * minBtnW + (count - 1) * pad + 2 * pad;
 
-        if (totalMin <= available) {
-            scrollOffset_ = 0;
-            int y = start + pad;
-            for (auto* btn : visible) {
+        // --- Task zone ---
+        int taskStart = (pCount > 0) ? pinnedZoneEnd + Scale(5, dpi_) : startSz;
+        int taskAvail = w - taskStart - tail;
+
+        if (tCount > 0 && taskAvail > 0) {
+            int totalMin = tCount * minBtnW + (tCount - 1) * pad + 2 * pad;
+            if (totalMin <= taskAvail) {
+                scrollOffset_ = 0;
+                int area = taskAvail - 2 * pad;
+                int btnW = std::min(maxBtnW,
+                                    std::max(minBtnW,
+                                             (area - (tCount - 1) * pad) / tCount));
+                int x = taskStart + pad;
+                for (auto* btn : visibleTask) {
+                    btn->rect = { x, pad, x + btnW, h - pad };
+                    x += btnW + pad;
+                }
+            } else {
+                scrollNeeded_    = true;
+                scrollLeftRect_  = { taskStart,                       0, taskStart + arrowW,    h };
+                scrollRightRect_ = { taskStart + taskAvail - arrowW,  0, taskStart + taskAvail, h };
+                int inner    = taskAvail - 2 * arrowW - 2 * pad;
+                int visCount = std::max(1, (inner + pad) / (minBtnW + pad));
+                maxScrollOffset_ = std::max(0, tCount - visCount);
+                scrollOffset_    = std::min(scrollOffset_, maxScrollOffset_);
+                for (auto* btn : visibleTask) btn->rect = {};
+                int x = taskStart + arrowW + pad;
+                for (int i = scrollOffset_; i < scrollOffset_ + visCount && i < tCount; ++i) {
+                    visibleTask[i]->rect = { x, pad, x + minBtnW, h - pad };
+                    x += minBtnW + pad;
+                }
+            }
+        } else {
+            for (auto& btn : taskBtns) btn.rect = {};
+        }
+
+    } else {
+        // Vertical layout
+        int arrowW = Scale(20, dpi_);
+        int btnH   = Scale(36, dpi_);
+
+        // --- Pinned zone ---
+        int pinnedZoneEnd = startSz;
+        if (pCount > 0) {
+            int y = startSz + pad;
+            for (auto* btn : visiblePinned) {
                 btn->rect = { pad, y, w - pad, y + btnH };
                 y += btnH + pad;
             }
-        } else {
-            scrollNeeded_    = true;
-            scrollLeftRect_  = { 0, start,                      w, start + arrowW };
-            scrollRightRect_ = { 0, start + available - arrowW, w, start + available };
+            pinnedZoneEnd = y;
+            pinnedSepX_   = pinnedZoneEnd + Scale(2, dpi_); // Y position for horiz separator
+        }
 
-            int inner    = available - 2 * arrowW - 2 * pad;
-            int visCount = std::max(1, (inner + pad) / (minBtnW + pad));
-            maxScrollOffset_ = std::max(0, count - visCount);
-            scrollOffset_    = std::min(scrollOffset_, maxScrollOffset_);
+        // --- Task zone ---
+        int taskStart = (pCount > 0) ? pinnedZoneEnd + Scale(5, dpi_) : startSz;
+        int taskAvail = h - taskStart - tail;
 
-            for (auto* btn : visible) btn->rect = {};
-            int y = start + arrowW + pad;
-            for (int i = scrollOffset_; i < scrollOffset_ + visCount && i < count; ++i) {
-                visible[i]->rect = { pad, y, w - pad, y + minBtnW };
-                y += minBtnW + pad;
+        if (tCount > 0 && taskAvail > 0) {
+            int totalMin = tCount * minBtnW + (tCount - 1) * pad + 2 * pad;
+            if (totalMin <= taskAvail) {
+                scrollOffset_ = 0;
+                int y = taskStart + pad;
+                for (auto* btn : visibleTask) {
+                    btn->rect = { pad, y, w - pad, y + btnH };
+                    y += btnH + pad;
+                }
+            } else {
+                scrollNeeded_    = true;
+                scrollLeftRect_  = { 0, taskStart,                      w, taskStart + arrowW };
+                scrollRightRect_ = { 0, taskStart + taskAvail - arrowW, w, taskStart + taskAvail };
+                int inner    = taskAvail - 2 * arrowW - 2 * pad;
+                int visCount = std::max(1, (inner + pad) / (minBtnW + pad));
+                maxScrollOffset_ = std::max(0, tCount - visCount);
+                scrollOffset_    = std::min(scrollOffset_, maxScrollOffset_);
+                for (auto* btn : visibleTask) btn->rect = {};
+                int y = taskStart + arrowW + pad;
+                for (int i = scrollOffset_; i < scrollOffset_ + visCount && i < tCount; ++i) {
+                    visibleTask[i]->rect = { pad, y, w - pad, y + minBtnW };
+                    y += minBtnW + pad;
+                }
             }
+        } else {
+            for (auto& btn : taskBtns) btn.rect = {};
         }
     }
 }
 
 int TaskbarWindow::HitTestButton(POINT pt) const
 {
-    const auto& buttons = tracker_.Buttons();
-    for (int i = 0; i < static_cast<int>(buttons.size()); ++i) {
-        if (buttons[i].HitTest(pt)) return i;
+    // Check pinned buttons first
+    for (int i = 0; i < (int)pinnedButtons_.size(); ++i) {
+        if (pinnedButtons_[i].HitTest(pt)) return i;
+    }
+    // Then task buttons (combined index offset by pinned count)
+    const auto& taskBtns = tracker_.Buttons();
+    int offset = (int)pinnedButtons_.size();
+    for (int i = 0; i < (int)taskBtns.size(); ++i) {
+        if (taskBtns[i].HitTest(pt)) return offset + i;
     }
     return -1;
 }
 
-void TaskbarWindow::ActivateButton(int idx)
+void TaskbarWindow::ActivateButton(int combinedIdx)
 {
-    auto& buttons = tracker_.MutableButtons();
-    if (idx < 0 || idx >= static_cast<int>(buttons.size())) return;
+    if (combinedIdx < 0 || combinedIdx >= TotalCount()) return;
 
-    TaskButton& btn = buttons[idx];
+    if (IsPinnedIdx(combinedIdx)) {
+        // Pinned button: always spawn a new window
+        const TaskButton& btn = pinnedButtons_[combinedIdx];
+        if (!btn.exePath.empty())
+            ShellExecuteW(nullptr, L"open", btn.exePath.c_str(),
+                          nullptr, nullptr, SW_SHOWNORMAL);
+        return;
+    }
+
+    // Task button
+    auto& buttons = tracker_.MutableButtons();
+    int taskIdx = combinedIdx - (int)pinnedButtons_.size();
+    if (taskIdx < 0 || taskIdx >= (int)buttons.size()) return;
+
+    TaskButton& btn = buttons[taskIdx];
 
     if (!btn.IsRunning()) {
         if (!btn.exePath.empty())
@@ -354,8 +495,6 @@ void TaskbarWindow::ActivateButton(int idx)
     }
 
     // Minimize only if the window is already visible and in the foreground.
-    // Check this before any restore so a minimized window isn't immediately
-    // re-minimized after SW_RESTORE makes it the foreground window.
     if (!IsIconic(btn.hwnd) && GetForegroundWindow() == btn.hwnd) {
         ShowWindow(btn.hwnd, SW_MINIMIZE);
         return;
@@ -377,16 +516,65 @@ void TaskbarWindow::ActivateButton(int idx)
         AttachThreadInput(ourTid, targetTid, FALSE);
 }
 
-void TaskbarWindow::ShowTaskButtonMenu(int idx, POINT ptScreen)
+void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
 {
-    const auto& buttons = tracker_.Buttons();
-    if (idx < 0 || idx >= static_cast<int>(buttons.size())) return;
+    if (combinedIdx < 0 || combinedIdx >= TotalCount()) return;
 
-    // Copy values we need before the modal message loop can invalidate the reference.
-    const std::wstring exePath  = buttons[idx].exePath;
-    const HWND        btnHwnd  = buttons[idx].hwnd;
-    bool isPinned  = buttons[idx].isPinned;
-    bool isRunning = buttons[idx].IsRunning();
+    if (IsPinnedIdx(combinedIdx)) {
+        // --- Pinned button menu ---
+        const std::wstring exePath = pinnedButtons_[combinedIdx].exePath;
+        HWND runningHwnd = FindHwndByExePath(exePath);
+
+        std::vector<MenuItem> items = {
+            { L"Open new window",    IDM_OPEN_NEW_WINDOW, false, false, exePath.empty() },
+            { L"",                   0,                   true,  false, false },
+            { L"Unpin from taskbar", IDM_PIN_UNPIN,       false, true,  false },
+            { L"Close window",       IDM_CLOSE_WINDOW,    false, false, !runningHwnd },
+        };
+
+        UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
+
+        switch (id) {
+        case IDM_OPEN_NEW_WINDOW:
+            if (!exePath.empty())
+                ShellExecuteW(nullptr, L"open", exePath.c_str(),
+                              nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+
+        case IDM_PIN_UNPIN: {
+            // Unpin: remove from pinnedButtons_ and pinnedExePaths
+            Settings updated = settings_;
+            updated.pinnedExePaths.clear();
+            for (const auto& p : settings_.pinnedExePaths)
+                if (_wcsicmp(p.c_str(), exePath.c_str()) != 0)
+                    updated.pinnedExePaths.push_back(p);
+            ApplySettings(updated);
+            App::Instance().PropagateSettings(settings_, this);
+            break;
+        }
+
+        case IDM_CLOSE_WINDOW:
+            if (runningHwnd)
+                PostMessage(runningHwnd, WM_CLOSE, 0, 0);
+            break;
+        }
+        return;
+    }
+
+    // --- Task button menu ---
+    const auto& taskBtns = tracker_.Buttons();
+    int taskIdx = combinedIdx - (int)pinnedButtons_.size();
+    if (taskIdx < 0 || taskIdx >= (int)taskBtns.size()) return;
+
+    // Copy values before modal message loop can invalidate the reference
+    const std::wstring exePath  = taskBtns[taskIdx].exePath;
+    const HWND        btnHwnd  = taskBtns[taskIdx].hwnd;
+    bool isRunning = taskBtns[taskIdx].IsRunning();
+
+    // Check if this running app is also pinned
+    bool isPinned = false;
+    for (const auto& p : settings_.pinnedExePaths)
+        if (!exePath.empty() && _wcsicmp(p.c_str(), exePath.c_str()) == 0) { isPinned = true; break; }
 
     std::vector<MenuItem> items = {
         { L"Open new window",       IDM_OPEN_NEW_WINDOW, false, false, exePath.empty() },
@@ -406,17 +594,20 @@ void TaskbarWindow::ShowTaskButtonMenu(int idx, POINT ptScreen)
         break;
 
     case IDM_PIN_UNPIN: {
-        auto& mutableBtns = tracker_.MutableButtons();
-        if (idx < static_cast<int>(mutableBtns.size())) {
-            mutableBtns[idx].isPinned = !mutableBtns[idx].isPinned;
-            // Sync pinned paths in settings
-            Settings updated = settings_;
+        Settings updated = settings_;
+        if (!isPinned) {
+            // Pin: add to pinnedExePaths
+            if (!exePath.empty())
+                updated.pinnedExePaths.push_back(exePath);
+        } else {
+            // Unpin: remove from pinnedExePaths
             updated.pinnedExePaths.clear();
-            for (const auto& b : mutableBtns)
-                if (b.isPinned && !b.exePath.empty())
-                    updated.pinnedExePaths.push_back(b.exePath);
-            ApplySettings(updated);
+            for (const auto& p : settings_.pinnedExePaths)
+                if (_wcsicmp(p.c_str(), exePath.c_str()) != 0)
+                    updated.pinnedExePaths.push_back(p);
         }
+        ApplySettings(updated);
+        App::Instance().PropagateSettings(settings_, this);
         break;
     }
 
@@ -523,9 +714,17 @@ void TaskbarWindow::StartIconLoadThread()
     HWND hwnd = hwnd_;
     int  sizePx = Scale(48, dpi_);
     std::vector<std::wstring> paths;
-    paths.reserve(appEntries_.size());
+    paths.reserve(appEntries_.size() + settings_.pinnedExePaths.size());
     for (const auto& e : appEntries_) {
         paths.push_back(e.iconPath.empty() ? e.exePath : e.iconPath);
+    }
+    // Also include pinned exe paths (may not be in the scanned app list)
+    for (const auto& p : settings_.pinnedExePaths) {
+        bool alreadyIn = false;
+        for (const auto& ex : paths)
+            if (_wcsicmp(ex.c_str(), p.c_str()) == 0) { alreadyIn = true; break; }
+        if (!alreadyIn)
+            paths.push_back(p);
     }
     std::thread([hwnd, sizePx, paths = std::move(paths)]() {
         using Pair = std::pair<std::wstring, HICON>;
@@ -608,6 +807,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                                 InvalidateRect(hwnd_, nullptr, FALSE);
                             });
 
+        RebuildPinnedButtons();
         LayoutButtons();
         SetTimer(hwnd, kTimerActiveWindow, kTimerIntervalMs, nullptr);
         SetTimer(hwnd, kTimerAppScanFirst, 500, nullptr);
@@ -649,8 +849,14 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         scroll.canRight  = scrollOffset_ < maxScrollOffset_;
         scroll.hovered   = hoveredScroll_;
 
+        // Build combined buttons vector for rendering (pinned first, then task)
+        std::vector<TaskButton> allButtons;
+        allButtons.reserve(pinnedButtons_.size() + tracker_.Buttons().size());
+        for (const auto& b : pinnedButtons_)       allButtons.push_back(b);
+        for (const auto& b : tracker_.Buttons())   allButtons.push_back(b);
+
         renderer_.Paint(hdc, client.right, client.bottom,
-                        tracker_.Buttons(),
+                        allButtons,
                         hoveredIdx_,
                         drag_.State() == DragState::Pressed  ? drag_.DragIndex() : -1,
                         drag_.State() == DragState::Dragging ? drag_.DragIndex() : -1,
@@ -661,7 +867,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                             settings_.showMinimizedIndicator,
                             settings_.minimizedIndicatorW,
                             settings_.minimizedIndicatorH
-                        });
+                        },
+                        pinnedSepX_);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -762,12 +969,27 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         int  origIdx     = drag_.DragIndex();
 
         if (wasDragging) {
-            // Perform the drop: swap dragged button to hovered position
+            // Perform the drop — only swap within the same zone
             int dropIdx = HitTestButton(pt);
             if (dropIdx >= 0 && dropIdx != origIdx) {
-                auto& buttons = tracker_.MutableButtons();
-                std::swap(buttons[origIdx], buttons[dropIdx]);
-                LayoutButtons();
+                bool origPinned = IsPinnedIdx(origIdx);
+                bool dropPinned = IsPinnedIdx(dropIdx);
+                if (origPinned && dropPinned) {
+                    // Swap within pinned zone and persist the new order
+                    std::swap(pinnedButtons_[origIdx], pinnedButtons_[dropIdx]);
+                    std::swap(settings_.pinnedExePaths[origIdx],
+                              settings_.pinnedExePaths[dropIdx]);
+                    SaveSettings(settings_);
+                    LayoutButtons();
+                } else if (!origPinned && !dropPinned) {
+                    // Swap within task zone
+                    int pi = origIdx - (int)pinnedButtons_.size();
+                    int pj = dropIdx - (int)pinnedButtons_.size();
+                    auto& buttons = tracker_.MutableButtons();
+                    std::swap(buttons[pi], buttons[pj]);
+                    LayoutButtons();
+                }
+                // Cross-zone drops are silently ignored
             }
         }
 
@@ -791,9 +1013,14 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (settings_.middleClickClose) {
             POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             int idx = HitTestButton(pt);
-            if (idx >= 0 && idx < static_cast<int>(tracker_.Buttons().size())) {
-                HWND target = tracker_.Buttons()[idx].hwnd;
-                if (target) PostMessage(target, WM_CLOSE, 0, 0);
+            // Middle-click close only applies to task buttons, not pinned buttons
+            if (idx >= 0 && !IsPinnedIdx(idx)) {
+                int taskIdx = idx - (int)pinnedButtons_.size();
+                const auto& btns = tracker_.Buttons();
+                if (taskIdx < (int)btns.size()) {
+                    HWND target = btns[taskIdx].hwnd;
+                    if (target) PostMessage(target, WM_CLOSE, 0, 0);
+                }
             }
         }
         return 0;
@@ -805,7 +1032,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         ClientToScreen(hwnd, &screenPt);
         int idx = HitTestButton(pt);
         if (idx >= 0)
-            ShowTaskButtonMenu(idx, screenPt);
+            ShowButtonMenu(idx, screenPt);
         else
             ShowBackgroundMenu(screenPt);
         return 0;
@@ -872,6 +1099,9 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                     const std::wstring& p = e.iconPath.empty() ? e.exePath : e.iconPath;
                     e.icon = appIconCache_.TryGet(p, iconSz);
                 }
+                // Also update pinned button icons
+                for (auto& btn : pinnedButtons_)
+                    btn.icon = appIconCache_.TryGet(btn.exePath, iconSz);
                 InvalidateRect(hwnd_, nullptr, FALSE);
             }
         } else {

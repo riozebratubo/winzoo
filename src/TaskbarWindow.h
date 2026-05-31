@@ -36,14 +36,31 @@ private:
 
     void LayoutButtons();
     int  HitTestButton(POINT pt) const;
-    void ActivateButton(int idx);
-    void ShowTaskButtonMenu(int idx, POINT ptScreen);
+    void ActivateButton(int combinedIdx);
+    void ShowButtonMenu(int combinedIdx, POINT ptScreen);
     void ShowBackgroundMenu(POINT ptScreen);
     void ShowAppMenu();
     void StartScanThread(bool isFirstScan);
     void StartIconLoadThread();
     RECT CalculateWindowRect() const;
     RECT GetStartBtnScreenRect() const;
+
+    // Pinned buttons management
+    void RebuildPinnedButtons();
+
+    // Combined-index helpers (0..P-1 = pinned, P..P+T-1 = task)
+    int             TotalCount()        const;
+    bool            IsPinnedIdx(int i)  const;
+    const TaskButton& GetButtonByIdx(int i) const;
+    TaskButton&       GetMutableButtonByIdx(int i);
+
+    // Returns the HWND of the first task button whose exePath matches (case-insensitive)
+    HWND            FindHwndByExePath(const std::wstring& exePath) const;
+    // Returns true if any task button has a matching exePath
+    bool            IsExeRunning(const std::wstring& exePath) const;
+
+    // Returns exe file name without extension (for pinned button titles)
+    static std::wstring ExeBaseName(const std::wstring& exePath);
 
     HWND            hwnd_           = nullptr;
     HINSTANCE       hInst_          = nullptr;
@@ -53,7 +70,7 @@ private:
     HMONITOR        hMonitor_       = nullptr;
     bool            isPrimary_      = true;
     bool            showStartButton_= true;
-    int             hoveredIdx_     = -1;
+    int             hoveredIdx_     = -1;  // combined index
     int             hoveredScroll_  = 0;
     bool            hoveredStart_   = false;
     RECT            clockRect_      = {};
@@ -63,12 +80,15 @@ private:
     RECT            scrollLeftRect_ = {};
     RECT            scrollRightRect_= {};
     RECT            startBtnRect_   = {};
+    int             pinnedSepX_     = 0;  // x position of pinned/task zone separator
 
     AppBar          appBar_;
     WindowTracker   tracker_;
     DragController  drag_;
     Renderer        renderer_;
     IconCache       iconCache_;
+
+    std::vector<TaskButton> pinnedButtons_;  // rebuilt from settings_.pinnedExePaths
 
     std::vector<AppEntry> appEntries_;
     AppIconCache          appIconCache_;

@@ -152,6 +152,7 @@ static const int kAppBtnControls[] = {
     IDC_CHECK_MINIMIZED_INDICATOR,
     IDC_LBL_MINIMIZED_INDICATOR_W, IDC_EDIT_MINIMIZED_INDICATOR_W, IDC_SPIN_MINIMIZED_INDICATOR_W,
     IDC_LBL_MINIMIZED_INDICATOR_H, IDC_EDIT_MINIMIZED_INDICATOR_H, IDC_SPIN_MINIMIZED_INDICATOR_H,
+    IDC_CHECK_PINNED_AS_BUTTONS,
     0
 };
 static const int kClockControls[] = {
@@ -288,6 +289,8 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
     SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_W), UDM_SETPOS32, 0, s.minimizedIndicatorW);
     SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_H), UDM_SETPOS32, 0, s.minimizedIndicatorH);
     SetMinimizedIndicatorControlsEnabled(hwnd, s.showMinimizedIndicator);
+    CheckDlgButton(hwnd, IDC_CHECK_PINNED_AS_BUTTONS,
+                   s.pinnedAppsAsButtonsWhenOpen ? BST_CHECKED : BST_UNCHECKED);
 
     // Clock tab
     CheckDlgButton(hwnd, IDC_CHECK_SHOWCLOCK, s.showClock ? BST_CHECKED : BST_UNCHECKED);
@@ -406,6 +409,9 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 
         SetMinimizedIndicatorControlsEnabled(hwnd, data->settings->showMinimizedIndicator);
 
+        CheckDlgButton(hwnd, IDC_CHECK_PINNED_AS_BUTTONS,
+                       data->settings->pinnedAppsAsButtonsWhenOpen ? BST_CHECKED : BST_UNCHECKED);
+
         // System Clock
         CheckDlgButton(hwnd, IDC_CHECK_SHOWCLOCK,
                        data->settings->showClock ? BST_CHECKED : BST_UNCHECKED);
@@ -452,7 +458,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         // background brush from WM_CTLCOLORBTN instead of painting their own.
         static const int kCheckIds[] = {
             IDC_CHECK_MIDDLECLICK, IDC_CHECK_RIGHTCLICKGAP, IDC_CHECK_SHOWCLOCK,
-            IDC_CHECK_MINIMIZED_INDICATOR,
+            IDC_CHECK_MINIMIZED_INDICATOR, IDC_CHECK_PINNED_AS_BUTTONS,
             IDC_CHECK_APPMENU_ALL_MONITORS, IDC_CHECK_CURRENT_MONITOR_APPS,
             IDC_CHECK_APPMENU_SIDEBAR,
             IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
@@ -736,6 +742,9 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_H), UDM_GETPOS32, 0, 0));
             if (indW >= 2 && indW <= 40) data->settings->minimizedIndicatorW = indW;
             if (indH >= 1 && indH <= 20) data->settings->minimizedIndicatorH = indH;
+
+            data->settings->pinnedAppsAsButtonsWhenOpen =
+                IsDlgButtonChecked(hwnd, IDC_CHECK_PINNED_AS_BUTTONS) == BST_CHECKED;
 
             data->settings->showClock =
                 IsDlgButtonChecked(hwnd, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;

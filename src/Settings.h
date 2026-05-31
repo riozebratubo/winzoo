@@ -33,6 +33,7 @@ struct Settings {
     int             clockDateFontSize = 8;
     COLORREF        clockTimeColor    = RGB(240, 240, 240);
     COLORREF        clockDateColor    = RGB(110, 110, 110);
+    bool pinnedAppsAsButtonsWhenOpen = true;
     std::vector<std::wstring> pinnedExePaths;
 
     // App Menu

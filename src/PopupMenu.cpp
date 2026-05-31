@@ -200,9 +200,11 @@ UINT PopupMenu::Show(HWND hwndOwner, POINT ptScreen,
     int menuW = Scale(200, dpi);
     int menuH = static_cast<int>(menu.items_.size()) * itemH;
 
-    // Clamp to work area
-    RECT workArea = {};
-    SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0);
+    // Clamp to the work area of the monitor the point is on
+    HMONITOR hMon = MonitorFromPoint(ptScreen, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = { sizeof(mi) };
+    GetMonitorInfo(hMon, &mi);
+    RECT workArea = mi.rcWork;
     POINT pt = ptScreen;
     if (pt.x + menuW > workArea.right)  pt.x = workArea.right  - menuW;
     if (pt.y + menuH > workArea.bottom) pt.y = workArea.bottom - menuH;

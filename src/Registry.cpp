@@ -164,6 +164,7 @@ Settings LoadSettings()
     if (s.clockDateFontSize > 36) s.clockDateFontSize = 36;
 
     key.ReadMultiString(L"PinnedPaths", s.pinnedExePaths);
+    if (key.ReadDword(L"PinnedAppsAsButtonsWhenOpen", val)) s.pinnedAppsAsButtonsWhenOpen = val != 0;
 
     DWORD amVal;
     if (key.ReadDword(L"AppMenuLayout",       amVal)) s.appMenuLayout       = static_cast<AppMenuLayout>(amVal);
@@ -241,6 +242,7 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"ClockTimeColor",    static_cast<DWORD>(s.clockTimeColor));
     key.WriteDword(L"ClockDateColor",    static_cast<DWORD>(s.clockDateColor));
     key.WriteMultiString(L"PinnedPaths", s.pinnedExePaths);
+    key.WriteDword(L"PinnedAppsAsButtonsWhenOpen", s.pinnedAppsAsButtonsWhenOpen ? 1u : 0u);
     key.WriteDword(L"AppMenuLayout",       static_cast<DWORD>(s.appMenuLayout));
     key.WriteDword(L"AppMenuWidth",        static_cast<DWORD>(s.appMenuWidth));
     key.WriteDword(L"AppMenuMaxHeight",    static_cast<DWORD>(s.appMenuMaxHeight));

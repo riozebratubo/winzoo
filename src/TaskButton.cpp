@@ -44,27 +44,37 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
     DeleteObject(borderPen);
 
     int h = rect.bottom - rect.top;
+    int w = rect.right  - rect.left;
     int iconSz = Scale(16, dpi);
     int pad    = Scale(4, dpi);
 
-    if (icon) {
-        int iconY = rect.top + (h - iconSz) / 2;
-        DrawIconEx(hdc, rect.left + pad, iconY,
-                   icon, iconSz, iconSz, 0, nullptr, DI_NORMAL);
-    }
+    if (iconOnly) {
+        // Center icon horizontally and vertically
+        if (icon) {
+            int iconX = rect.left + (w - iconSz) / 2;
+            int iconY = rect.top  + (h - iconSz) / 2;
+            DrawIconEx(hdc, iconX, iconY, icon, iconSz, iconSz, 0, nullptr, DI_NORMAL);
+        }
+    } else {
+        if (icon) {
+            int iconY = rect.top + (h - iconSz) / 2;
+            DrawIconEx(hdc, rect.left + pad, iconY,
+                       icon, iconSz, iconSz, 0, nullptr, DI_NORMAL);
+        }
 
-    RECT textRect = {
-        rect.left + pad + iconSz + pad,
-        rect.top,
-        rect.right - pad,
-        rect.bottom
-    };
+        RECT textRect = {
+            rect.left + pad + iconSz + pad,
+            rect.top,
+            rect.right - pad,
+            rect.bottom
+        };
 
-    if (textRect.left < textRect.right) {
-        SetTextColor(hdc, textColor);
-        SetBkMode(hdc, TRANSPARENT);
-        DrawTextW(hdc, title.c_str(), -1, &textRect,
-                  DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+        if (textRect.left < textRect.right) {
+            SetTextColor(hdc, textColor);
+            SetBkMode(hdc, TRANSPARENT);
+            DrawTextW(hdc, title.c_str(), -1, &textRect,
+                      DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+        }
     }
 
     // Minimized indicator: small accent-colored rectangle at bottom-right

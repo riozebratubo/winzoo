@@ -112,6 +112,9 @@
 // Reset to defaults button
 #define IDC_BTN_RESET_DEFAULTS              1142
 
+// App Buttons — pinned apps behavior
+#define IDC_CHECK_PINNED_AS_BUTTONS         1143
+
 // App Menu Sidebar controls
 #define IDC_CHECK_APPMENU_SIDEBAR           1129
 #define IDC_LBL_APPMENU_SIDEBARW           1130

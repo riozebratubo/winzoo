@@ -319,6 +319,7 @@ bool ExportSettingsToFile(const Settings& s)
     wBool("appMenuSidebarShowExplorer",    s.appMenuSidebarShowExplorer);
     wBool("appMenuSidebarShowSettings",    s.appMenuSidebarShowSettings);
     wBool("appMenuSidebarShowPower",       s.appMenuSidebarShowPower);
+    wBool("pinnedAppsAsButtonsWhenOpen",   s.pinnedAppsAsButtonsWhenOpen);
 
     // pinnedExePaths — last field, no trailing comma
     j += "  \"pinnedExePaths\": [";
@@ -462,6 +463,7 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     rb("appMenuSidebarShowExplorer",    ns.appMenuSidebarShowExplorer);
     rb("appMenuSidebarShowSettings",    ns.appMenuSidebarShowSettings);
     rb("appMenuSidebarShowPower",       ns.appMenuSidebarShowPower);
+    rb("pinnedAppsAsButtonsWhenOpen",   ns.pinnedAppsAsButtonsWhenOpen);
 
     { size_t p = FindValue(content, "pinnedExePaths");
       if (p != std::string::npos) ParseStringArray(content, p, ns.pinnedExePaths); }

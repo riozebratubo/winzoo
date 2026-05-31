@@ -18,6 +18,7 @@ struct TaskButton {
     RECT         rect     = {};
     bool         isPinned = false;
     bool         isActive = false;
+    bool         iconOnly = false;  // draw only icon, centered (no text)
 
     bool IsRunning() const { return hwnd != nullptr; }
 

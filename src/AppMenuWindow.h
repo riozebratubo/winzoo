@@ -57,6 +57,10 @@ private:
     void BuildEntryRects(int menuW);
     RECT GetNodeScreenRect(int idx) const; // returns screen coords of entry i
 
+    // Search
+    void ApplyFilter();
+    int  SearchBoxHeight() const;
+
     const std::vector<AppTreeNode>* nodes_    = nullptr;
     const Settings*                 settings_ = nullptr;
     ThemeColors                     colors_   = {};
@@ -87,6 +91,12 @@ private:
     int  sidebarW_          = 0;  // 0 if disabled
     int  sidebarHoveredBtn_ = -1; // 0=Explorer, 1=Settings, 2=Power
     bool suppressKillFocus_ = false;
+
+    // Search box
+    bool                     searchEnabled_ = false;  // resolved from settings + isSubmenu
+    std::wstring             searchText_;
+    std::vector<AppTreeNode> filteredNodes_;
+    int                      searchBoxH_ = 0;  // pixel height reserved for the search area
 
     // Cached folder icons (loaded lazily in Paint, destroyed in WM_DESTROY).
     HICON folderIconList_ = nullptr;

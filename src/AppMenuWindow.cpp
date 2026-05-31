@@ -218,6 +218,56 @@ RECT AppMenuWindow::GetNodeScreenRect(int idx) const
     return { tl.x, tl.y, br.x, br.y };
 }
 
+// ---------- search ----------
+
+int AppMenuWindow::SearchBoxHeight() const
+{
+    if (!searchEnabled_) return 0;
+    return Scale(28, dpi_);
+}
+
+static void CollectLeaves(const std::vector<AppTreeNode>& nodes,
+                           const std::wstring& lowerQuery,
+                           std::vector<AppTreeNode>& out)
+{
+    for (const auto& n : nodes) {
+        if (n.isFolder) {
+            CollectLeaves(n.children, lowerQuery, out);
+        } else {
+            // Case-insensitive substring match on name
+            std::wstring lowerName = n.name;
+            for (auto& ch : lowerName) ch = towlower(ch);
+            if (lowerName.find(lowerQuery) != std::wstring::npos)
+                out.push_back(n);
+        }
+    }
+}
+
+void AppMenuWindow::ApplyFilter()
+{
+    if (searchText_.empty()) {
+        // Restore original node list
+        nodes_ = &ownedNodes_;
+    } else {
+        std::wstring lowerQuery = searchText_;
+        for (auto& ch : lowerQuery) ch = towlower(ch);
+        filteredNodes_.clear();
+        CollectLeaves(ownedNodes_, lowerQuery, filteredNodes_);
+        std::sort(filteredNodes_.begin(), filteredNodes_.end(),
+                  [](const AppTreeNode& a, const AppTreeNode& b) {
+                      return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
+                  });
+        nodes_ = &filteredNodes_;
+    }
+    BuildEntryRects(menuW_);
+    int padPx    = Scale(settings_ ? settings_->appMenuPadding : 6, dpi_);
+    int contentH = ContentHeight(entryRects_) + padPx;
+    int clientH  = menuH_ - searchBoxH_;
+    UpdateMaxScroll(contentH, clientH);
+    hoveredIdx_ = -1;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
 // ---------- painting ----------
 
 void AppMenuWindow::Paint(HDC hdc, int w, int h)
@@ -249,13 +299,21 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
 
     int pad    = Scale(6, dpi_);
     int iconPx = isList ? Scale(20, dpi_) : Scale(48, dpi_);
+    int contentAreaH = h - searchBoxH_;  // area available for entries (above search box)
+
+    // Clip drawing to the content area (above the search box)
+    HRGN clipRgn = nullptr;
+    if (searchBoxH_ > 0) {
+        clipRgn = CreateRectRgn(0, 0, menuW_, contentAreaH);
+        SelectClipRgn(hdc, clipRgn);
+    }
 
     for (int i = 0; std::cmp_less(i, nodes_->size()); ++i) {
         const AppTreeNode& node = (*nodes_)[i];
         RECT r = entryRects_[i];
         OffsetRect(&r, 0, -scrollOffset_);
 
-        if (r.bottom <= 0 || r.top >= h) continue;
+        if (r.bottom <= 0 || r.top >= contentAreaH) continue;
 
         // Hover highlight
         if (i == hoveredIdx_) {
@@ -310,12 +368,83 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
     // Scroll indicator (only in content area)
     if (maxScrollOffset_ > 0) {
         double ratio = static_cast<double>(scrollOffset_) / maxScrollOffset_;
-        int barH = std::max(Scale(20, dpi_), h * h / (h + maxScrollOffset_));
-        int barY = static_cast<int>(ratio * (h - barH));
+        int barH = std::max(Scale(20, dpi_), contentAreaH * contentAreaH / (contentAreaH + maxScrollOffset_));
+        int barY = static_cast<int>(ratio * (contentAreaH - barH));
         RECT barR = { menuW_ - Scale(3, dpi_), barY, menuW_, barY + barH };
         HBRUSH barBr = CreateSolidBrush(colors_.separator);
         FillRect(hdc, &barR, barBr);
         DeleteObject(barBr);
+    }
+
+    // Remove clip region before drawing search box and sidebar
+    if (clipRgn) {
+        SelectClipRgn(hdc, nullptr);
+        DeleteObject(clipRgn);
+    }
+
+    // Search box at the bottom of the content area
+    if (searchBoxH_ > 0) {
+        int sbY = h - searchBoxH_;
+        int sbPad = Scale(4, dpi_);
+
+        // Separator line above search box
+        RECT sepLine = { 0, sbY, menuW_, sbY + 1 };
+        HBRUSH sepBr = CreateSolidBrush(colors_.separator);
+        FillRect(hdc, &sepLine, sepBr);
+        DeleteObject(sepBr);
+
+        // Search box background (slightly different from main bg)
+        RECT sbBg = { sbPad, sbY + Scale(3, dpi_), menuW_ - sbPad, h - Scale(3, dpi_) };
+        COLORREF searchBg = RGB(
+            std::min(255, GetRValue(colors_.menuBg) + 18),
+            std::min(255, GetGValue(colors_.menuBg) + 18),
+            std::min(255, GetBValue(colors_.menuBg) + 18));
+        HBRUSH searchBgBr = CreateSolidBrush(searchBg);
+        FillRect(hdc, &sbBg, searchBgBr);
+        DeleteObject(searchBgBr);
+
+        // Border around search box
+        HPEN borderPen = CreatePen(PS_SOLID, 1, colors_.separator);
+        HPEN oldPen = static_cast<HPEN>(SelectObject(hdc, borderPen));
+        HBRUSH nullBr = static_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
+        HBRUSH prevBrush = static_cast<HBRUSH>(SelectObject(hdc, nullBr));
+        Rectangle(hdc, sbBg.left, sbBg.top, sbBg.right, sbBg.bottom);
+        SelectObject(hdc, prevBrush);
+        SelectObject(hdc, oldPen);
+        DeleteObject(borderPen);
+
+        // Magnifying glass icon
+        LOGFONTW lfIcon = {};
+        lfIcon.lfHeight  = -Scale(12, dpi_);
+        lfIcon.lfQuality = CLEARTYPE_QUALITY;
+        wcscpy_s(lfIcon.lfFaceName, L"Segoe MDL2 Assets");
+        HFONT iconFont  = CreateFontIndirectW(&lfIcon);
+        HFONT prevFont2 = static_cast<HFONT>(SelectObject(hdc, iconFont));
+        SetTextColor(hdc, colors_.textDimmed);
+        RECT iconR = { sbBg.left + sbPad, sbBg.top, sbBg.left + sbPad + Scale(16, dpi_), sbBg.bottom };
+        DrawTextW(hdc, L"\uE721", 1, &iconR, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        SelectObject(hdc, prevFont2);
+        DeleteObject(iconFont);
+
+        // Search text or placeholder
+        LOGFONTW lfSearch = {};
+        lfSearch.lfHeight  = -MulDiv(9, dpi_, 72);
+        lfSearch.lfQuality = CLEARTYPE_QUALITY;
+        wcscpy_s(lfSearch.lfFaceName, L"Segoe UI");
+        HFONT searchFont  = CreateFontIndirectW(&lfSearch);
+        HFONT prevFont3   = static_cast<HFONT>(SelectObject(hdc, searchFont));
+        RECT textR2 = { iconR.right + Scale(2, dpi_), sbBg.top, sbBg.right - sbPad, sbBg.bottom };
+        if (searchText_.empty()) {
+            SetTextColor(hdc, colors_.textDimmed);
+            DrawTextW(hdc, L"Search...", -1, &textR2,
+                      DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        } else {
+            SetTextColor(hdc, colors_.menuText);
+            DrawTextW(hdc, searchText_.c_str(), -1, &textR2,
+                      DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        }
+        SelectObject(hdc, prevFont3);
+        DeleteObject(searchFont);
     }
 
     // Sidebar strip
@@ -389,6 +518,7 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
 int AppMenuWindow::HitTestEntry(POINT ptClient) const
 {
     if (ptClient.x >= menuW_) return -1;  // in sidebar
+    if (searchBoxH_ > 0 && ptClient.y >= menuH_ - searchBoxH_) return -1;  // in search box
     int contentY = ptClient.y + scrollOffset_;
     for (int i = 0; std::cmp_less(i, entryRects_.size()); ++i) {
         POINT cp = { ptClient.x, contentY };
@@ -632,9 +762,21 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     case WM_KEYDOWN:
         switch (wParam) {
         case VK_ESCAPE:
-            closeReason_ = AppMenuCloseReason::Escape;
-            done_ = true;
-            DestroyWindow(hwnd);
+            if (searchEnabled_ && !searchText_.empty()) {
+                // First Escape clears search; second closes menu.
+                searchText_.clear();
+                ApplyFilter();
+            } else {
+                closeReason_ = AppMenuCloseReason::Escape;
+                done_ = true;
+                DestroyWindow(hwnd);
+            }
+            break;
+        case VK_BACK:
+            if (searchEnabled_ && !searchText_.empty()) {
+                searchText_.pop_back();
+                ApplyFilter();
+            }
             break;
         case VK_LEFT:
             // Navigate back to parent when inside a submenu.
@@ -669,7 +811,8 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 ++hoveredIdx_;
                 if (!entryRects_.empty()) {
                     int bot = entryRects_[hoveredIdx_].bottom;
-                    if (bot - scrollOffset_ > menuH_) scrollOffset_ = bot - menuH_;
+                    if (bot - scrollOffset_ > menuH_ - searchBoxH_)
+                        scrollOffset_ = bot - (menuH_ - searchBoxH_);
                 }
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
@@ -679,6 +822,13 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 ActivateNode(hoveredIdx_);
             break;
         default: break;
+        }
+        return 0;
+
+    case WM_CHAR:
+        if (searchEnabled_ && wParam >= 0x20) {
+            searchText_ += static_cast<wchar_t>(wParam);
+            ApplyFilter();
         }
         return 0;
 
@@ -727,6 +877,10 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
     menu.position_      = position;
     menu.isSubmenu_     = isSubmenu;
 
+    // Search: only on root menu when enabled in settings
+    menu.searchEnabled_ = !isSubmenu && settings.appMenuSearchEnabled;
+    menu.searchBoxH_    = menu.SearchBoxHeight();
+
     int menuW = Scale(settings.appMenuWidth, dpi);
     menu.menuW_ = menuW;
 
@@ -754,9 +908,10 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
         maxH = Scale(settings.appMenuMaxHeight, dpi);
     }
 
-    int menuH = std::min(contentH, maxH);
+    // Add search box height to total menu height
+    int menuH = std::min(contentH + menu.searchBoxH_, maxH + menu.searchBoxH_);
     menu.menuH_ = menuH;
-    menu.UpdateMaxScroll(contentH, menuH);
+    menu.UpdateMaxScroll(contentH, menuH - menu.searchBoxH_);
 
     HMONITOR hMon = MonitorFromRect(&anchorRect, MONITOR_DEFAULTTONEAREST);
     MONITORINFO mi = {};

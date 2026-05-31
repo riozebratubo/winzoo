@@ -355,6 +355,7 @@ bool ExportSettingsToFile(const Settings& s)
     wInt("appMenuMargin",       s.appMenuMargin);
     wInt("appMenuPadding",      s.appMenuPadding);
     wInt("appMenuFlattenMode",  static_cast<int>(s.appMenuFlattenMode));
+    wBool("appMenuSearchEnabled",          s.appMenuSearchEnabled);
     wBool("appMenuSidebarEnabled",         s.appMenuSidebarEnabled);
     wInt("appMenuSidebarWidth",            s.appMenuSidebarWidth);
     wBool("appMenuSidebarShowExplorer",    s.appMenuSidebarShowExplorer);
@@ -553,6 +554,7 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     ri("appMenuGridFontSize", ns.appMenuGridFontSize);
     ri("appMenuMargin",       ns.appMenuMargin);
     ri("appMenuPadding",      ns.appMenuPadding);
+    rb("appMenuSearchEnabled",          ns.appMenuSearchEnabled);
     rb("appMenuSidebarEnabled",         ns.appMenuSidebarEnabled);
     ri("appMenuSidebarWidth",           ns.appMenuSidebarWidth);
     rb("appMenuSidebarShowExplorer",    ns.appMenuSidebarShowExplorer);

@@ -263,6 +263,7 @@ static const int kAppMenuControls[] = {
     IDC_CHECK_APPMENU_SIDEBAR_POWER,
     IDC_CHECK_APPMENU_FLATTEN_SUBMENUS,
     IDC_CHECK_APPMENU_FLATTEN_ALL,
+    IDC_CHECK_APPMENU_SEARCH,
     0
 };
 
@@ -426,6 +427,8 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
                    s.appMenuFlattenMode == AppMenuFlattenMode::Submenus ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hAm, IDC_CHECK_APPMENU_FLATTEN_ALL,
                    s.appMenuFlattenMode == AppMenuFlattenMode::All ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hAm, IDC_CHECK_APPMENU_SEARCH,
+                   s.appMenuSearchEnabled ? BST_CHECKED : BST_UNCHECKED);
 }
 
 INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -593,6 +596,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             IDC_CHECK_APPMENU_SIDEBAR_POWER,
             IDC_CHECK_APPMENU_FLATTEN_SUBMENUS,
             IDC_CHECK_APPMENU_FLATTEN_ALL,
+            IDC_CHECK_APPMENU_SEARCH,
             0
         };
         for (const int* id = kCheckIds; *id; ++id)
@@ -640,6 +644,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             CheckDlgButton(hwnd, IDC_CHECK_APPMENU_FLATTEN_ALL,
                            data->settings->appMenuFlattenMode == AppMenuFlattenMode::All
                            ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_SEARCH,
+                           data->settings->appMenuSearchEnabled ? BST_CHECKED : BST_UNCHECKED);
         }
 
         // Build scrollable hosts for all tabs
@@ -1122,6 +1128,9 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                     flatAll      ? AppMenuFlattenMode::All     :
                     flatSubmenus ? AppMenuFlattenMode::Submenus :
                                    AppMenuFlattenMode::None;
+
+                data->settings->appMenuSearchEnabled =
+                    IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SEARCH) == BST_CHECKED;
             }
 
             EndDialog(hwnd, IDOK);

@@ -66,6 +66,9 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     // App Menu Behavior
     AppMenuFlattenMode appMenuFlattenMode      = AppMenuFlattenMode::Submenus;
 
+    // App Menu Search
+    bool appMenuSearchEnabled          = true;
+
     // App Menu Sidebar
     bool appMenuSidebarEnabled         = true;
     int  appMenuSidebarWidth           = 40;

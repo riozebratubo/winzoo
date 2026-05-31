@@ -15,7 +15,8 @@ static BOOL CALLBACK CollectMonitors(HMONITOR hMon, HDC, LPRECT, LPARAM lParam)
     auto* d = reinterpret_cast<MonitorEnumData*>(lParam);
     d->monitors->push_back(hMon);
 
-    MONITORINFO mi = { sizeof(mi) };
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
     GetMonitorInfo(hMon, &mi);
     if (mi.dwFlags & MONITORINFOF_PRIMARY)
         d->primary = hMon;

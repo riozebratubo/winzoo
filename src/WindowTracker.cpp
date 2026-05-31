@@ -1,5 +1,6 @@
 #include "WindowTracker.h"
 #include <dwmapi.h>
+#include <utility>
 
 bool WindowTracker::Initialize(HWND hwndSink, IconCache* cache, ChangeCallback onChange)
 {
@@ -84,7 +85,7 @@ bool WindowTracker::ShouldTrack(HWND hwnd) const
 
 int WindowTracker::FindByHwnd(HWND hwnd) const
 {
-    for (int i = 0; i < static_cast<int>(buttons_.size()); ++i)
+    for (int i = 0; std::cmp_less(i, buttons_.size()); ++i)
         if (buttons_[i].hwnd == hwnd) return i;
     return -1;
 }

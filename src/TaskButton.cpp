@@ -4,17 +4,13 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
                       bool hovered, bool pressed, bool isDragGhost, int dpi,
                       const MinimizedIndicatorOptions& indicator) const
 {
-    COLORREF bgColor;
-    if (!IsRunning())
-        bgColor = colors.buttonNormal;
-    else if (isActive)
-        bgColor = colors.buttonActive;
-    else if (pressed)
-        bgColor = colors.buttonHover;
-    else if (hovered)
-        bgColor = colors.buttonHover;
-    else
-        bgColor = colors.buttonNormal;
+    COLORREF bgColor = colors.buttonNormal;
+    if (IsRunning()) {
+        if (isActive)
+            bgColor = colors.buttonActive;
+        else if (pressed || hovered)
+            bgColor = colors.buttonHover;
+    }
 
     COLORREF textColor = IsRunning() ? colors.text : colors.textDimmed;
 

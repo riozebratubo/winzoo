@@ -7,7 +7,7 @@ static constexpr wchar_t kRegPath[] = L"Software\\Winzoo";
 RegistryKey RegistryKey::OpenAppKey(REGSAM access)
 {
     RegistryKey key;
-    DWORD disp;
+    DWORD disp = 0;
     RegCreateKeyExW(HKEY_CURRENT_USER, kRegPath, 0, nullptr,
                     REG_OPTION_NON_VOLATILE, access, nullptr, &key.hKey_, &disp);
     return key;
@@ -30,25 +30,25 @@ RegistryKey& RegistryKey::operator=(RegistryKey&& o) noexcept
     return *this;
 }
 
-bool RegistryKey::ReadDword(std::wstring_view name, DWORD& out) const
+bool RegistryKey::ReadDword(const wchar_t* name, DWORD& out) const
 {
     if (!hKey_) return false;
-    DWORD size = sizeof(DWORD), type;
-    return RegQueryValueExW(hKey_, name.data(), nullptr, &type,
+    DWORD size = sizeof(DWORD), type = 0;
+    return RegQueryValueExW(hKey_, name, nullptr, &type,
                             reinterpret_cast<BYTE*>(&out), &size) == ERROR_SUCCESS
            && type == REG_DWORD;
 }
 
-bool RegistryKey::ReadString(std::wstring_view name, std::wstring& out) const
+bool RegistryKey::ReadString(const wchar_t* name, std::wstring& out) const
 {
     if (!hKey_) return false;
-    DWORD size = 0, type;
-    if (RegQueryValueExW(hKey_, name.data(), nullptr, &type, nullptr, &size) != ERROR_SUCCESS)
+    DWORD size = 0, type = 0;
+    if (RegQueryValueExW(hKey_, name, nullptr, &type, nullptr, &size) != ERROR_SUCCESS)
         return false;
     if (type != REG_SZ) return false;
 
     std::wstring buf(size / sizeof(wchar_t), L'\0');
-    if (RegQueryValueExW(hKey_, name.data(), nullptr, &type,
+    if (RegQueryValueExW(hKey_, name, nullptr, &type,
                          reinterpret_cast<BYTE*>(buf.data()), &size) != ERROR_SUCCESS)
         return false;
     while (!buf.empty() && buf.back() == L'\0') buf.pop_back();
@@ -56,24 +56,24 @@ bool RegistryKey::ReadString(std::wstring_view name, std::wstring& out) const
     return true;
 }
 
-bool RegistryKey::WriteString(std::wstring_view name, std::wstring_view val)
+bool RegistryKey::WriteString(const wchar_t* name, std::wstring_view val)
 {
     if (!hKey_) return false;
-    return RegSetValueExW(hKey_, name.data(), 0, REG_SZ,
+    return RegSetValueExW(hKey_, name, 0, REG_SZ,
                           reinterpret_cast<const BYTE*>(val.data()),
                           static_cast<DWORD>((val.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
 }
 
-bool RegistryKey::ReadMultiString(std::wstring_view name, std::vector<std::wstring>& out) const
+bool RegistryKey::ReadMultiString(const wchar_t* name, std::vector<std::wstring>& out) const
 {
     if (!hKey_) return false;
-    DWORD size = 0, type;
-    if (RegQueryValueExW(hKey_, name.data(), nullptr, &type, nullptr, &size) != ERROR_SUCCESS)
+    DWORD size = 0, type = 0;
+    if (RegQueryValueExW(hKey_, name, nullptr, &type, nullptr, &size) != ERROR_SUCCESS)
         return false;
     if (type != REG_MULTI_SZ) return false;
 
     std::wstring buf(size / sizeof(wchar_t), L'\0');
-    if (RegQueryValueExW(hKey_, name.data(), nullptr, &type,
+    if (RegQueryValueExW(hKey_, name, nullptr, &type,
                          reinterpret_cast<BYTE*>(buf.data()), &size) != ERROR_SUCCESS)
         return false;
 
@@ -86,20 +86,20 @@ bool RegistryKey::ReadMultiString(std::wstring_view name, std::vector<std::wstri
     return true;
 }
 
-bool RegistryKey::WriteDword(std::wstring_view name, DWORD val)
+bool RegistryKey::WriteDword(const wchar_t* name, DWORD val)
 {
     if (!hKey_) return false;
-    return RegSetValueExW(hKey_, name.data(), 0, REG_DWORD,
+    return RegSetValueExW(hKey_, name, 0, REG_DWORD,
                           reinterpret_cast<const BYTE*>(&val), sizeof(val)) == ERROR_SUCCESS;
 }
 
-bool RegistryKey::WriteMultiString(std::wstring_view name, const std::vector<std::wstring>& vals)
+bool RegistryKey::WriteMultiString(const wchar_t* name, const std::vector<std::wstring>& vals)
 {
     if (!hKey_) return false;
     std::wstring buf;
     for (const auto& s : vals) { buf += s; buf += L'\0'; }
     buf += L'\0';
-    return RegSetValueExW(hKey_, name.data(), 0, REG_MULTI_SZ,
+    return RegSetValueExW(hKey_, name, 0, REG_MULTI_SZ,
                           reinterpret_cast<const BYTE*>(buf.data()),
                           static_cast<DWORD>(buf.size() * sizeof(wchar_t))) == ERROR_SUCCESS;
 }
@@ -194,7 +194,7 @@ Settings LoadSettings()
     auto key = RegistryKey::OpenAppKey(KEY_READ);
     if (!key.IsOpen()) return s;
 
-    DWORD val;
+    DWORD val = 0;
     if (key.ReadDword(L"Position", val))  s.position  = static_cast<TaskbarPosition>(val);
     if (key.ReadDword(L"Theme", val))     s.theme     = static_cast<ThemePreset>(val);
     if (key.ReadDword(L"Thickness", val)) s.thickness = static_cast<int>(val);
@@ -269,7 +269,7 @@ Settings LoadSettings()
     if (key.ReadDword(L"PinnedAppsPerMonitor",        val)) s.pinnedAppsPerMonitor        = val != 0;
     LoadPerMonitorPins(key.GetHKey(), s.pinnedExePathsPerMonitor);
 
-    DWORD amVal;
+    DWORD amVal = 0;
     if (key.ReadDword(L"AppMenuLayout",       amVal)) s.appMenuLayout       = static_cast<AppMenuLayout>(amVal);
     if (key.ReadDword(L"AppMenuWidth",        amVal)) s.appMenuWidth        = static_cast<int>(amVal);
     if (key.ReadDword(L"AppMenuMaxHeight",    amVal)) s.appMenuMaxHeight    = static_cast<int>(amVal);

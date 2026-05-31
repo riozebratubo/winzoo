@@ -17,12 +17,12 @@ public:
     bool IsOpen() const { return hKey_ != nullptr; }
     HKEY GetHKey() const { return hKey_; }
 
-    bool ReadDword(std::wstring_view name, DWORD& out) const;
-    bool ReadString(std::wstring_view name, std::wstring& out) const;
-    bool ReadMultiString(std::wstring_view name, std::vector<std::wstring>& out) const;
-    bool WriteDword(std::wstring_view name, DWORD val);
-    bool WriteString(std::wstring_view name, std::wstring_view val);
-    bool WriteMultiString(std::wstring_view name, const std::vector<std::wstring>& vals);
+    bool ReadDword(const wchar_t* name, DWORD& out) const;
+    bool ReadString(const wchar_t* name, std::wstring& out) const;
+    bool ReadMultiString(const wchar_t* name, std::vector<std::wstring>& out) const;
+    bool WriteDword(const wchar_t* name, DWORD val);
+    bool WriteString(const wchar_t* name, std::wstring_view val);
+    bool WriteMultiString(const wchar_t* name, const std::vector<std::wstring>& vals);
 
 private:
     RegistryKey() = default;

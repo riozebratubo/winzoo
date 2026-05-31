@@ -1,4 +1,5 @@
 #include "Renderer.h"
+#include <utility>
 
 Renderer::~Renderer()
 {
@@ -265,7 +266,7 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
     DeleteObject(bgBrush);
 
     // Task buttons (skip the one being dragged and hidden buttons with zero rect)
-    for (int i = 0; i < static_cast<int>(buttons.size()); ++i) {
+    for (int i = 0; std::cmp_less(i, buttons.size()); ++i) {
         if (i == dragIdx) continue;
         const RECT& r = buttons[i].rect;
         if (r.left == 0 && r.right == 0 && r.top == 0 && r.bottom == 0) continue;
@@ -275,7 +276,7 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
     }
 
     // Drag ghost
-    if (dragIdx >= 0 && dragIdx < static_cast<int>(buttons.size())) {
+    if (dragIdx >= 0 && std::cmp_less(dragIdx, buttons.size())) {
         const auto& btn = buttons[dragIdx];
         int bw = btn.rect.right  - btn.rect.left;
         int bh = btn.rect.bottom - btn.rect.top;
@@ -287,9 +288,9 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
         ghost.Draw(hdcMem_, colors, false, false, true, dpi, indicator);
 
         // Drop indicator line — skip hidden buttons (rect={})
-        for (int i = 0; i <= static_cast<int>(buttons.size()); ++i) {
-            int cx;
-            if (i < static_cast<int>(buttons.size())) {
+        for (int i = 0; std::cmp_less_equal(i, buttons.size()); ++i) {
+            int cx = 0;
+            if (std::cmp_less(i, buttons.size())) {
                 const RECT& r = buttons[i].rect;
                 if (r.left == 0 && r.right == 0 && r.top == 0 && r.bottom == 0) continue;
                 cx = r.left;
@@ -449,7 +450,7 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
 
     // Tray zone (notification-area icons)
     if (tray.visible && !tray.icons.empty()) {
-        for (int i = 0; i < static_cast<int>(tray.icons.size()); ++i) {
+        for (int i = 0; std::cmp_less(i, tray.icons.size()); ++i) {
             if (i == tray.dragGhostIdx) continue; // drawn separately as ghost
             const auto& ti = tray.icons[i];
             if (!ti.hIcon) continue;
@@ -466,7 +467,7 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
 
         // Ghost icon while dragging
         if (tray.dragGhostIdx >= 0 &&
-            tray.dragGhostIdx < static_cast<int>(tray.icons.size()))
+            std::cmp_less(tray.dragGhostIdx, tray.icons.size()))
         {
             const auto& ti = tray.icons[tray.dragGhostIdx];
             if (ti.hIcon) {

@@ -14,7 +14,8 @@ UINT AppBar::EdgeForPosition(TaskbarPosition p)
 RECT AppBar::MonitorRectForWindow() const
 {
     HMONITOR hMon = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY);
-    MONITORINFO mi = { sizeof(mi) };
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
     GetMonitorInfo(hMon, &mi);
     return mi.rcMonitor;
 }
@@ -62,6 +63,7 @@ bool AppBar::SetPosition(TaskbarPosition position, int thicknessPx)
     case ABE_TOP:    abd_.rc.bottom = abd_.rc.top    + thicknessPx; break;
     case ABE_LEFT:   abd_.rc.right  = abd_.rc.left   + thicknessPx; break;
     case ABE_RIGHT:  abd_.rc.left   = abd_.rc.right  - thicknessPx; break;
+    default: break;
     }
 
     SHAppBarMessage(ABM_QUERYPOS, &abd_);

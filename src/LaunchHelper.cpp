@@ -1,5 +1,6 @@
 #include "LaunchHelper.h"
 #include <shellapi.h>
+#include <memory>
 #include <vector>
 
 void RegisterLaunchHelperClass(HINSTANCE /*hInst*/) {}
@@ -40,12 +41,12 @@ static int ScoreCandidate(HWND h, const std::vector<HWND>& snapshot, DWORD prefe
 
 static DWORD WINAPI MoveToMonitorThread(LPVOID pv)
 {
-    auto* ctx = static_cast<LaunchMoveCtx*>(pv);
+    auto ctx = std::unique_ptr<LaunchMoveCtx>(static_cast<LaunchMoveCtx*>(pv));
     HANDLE            hProc    = ctx->hProc;
     HMONITOR          hMon     = ctx->hMon;
     std::vector<HWND> snapshot = std::move(ctx->snapshot);
     DWORD             pid      = ctx->pid;
-    delete ctx;
+    ctx.reset();
 
     // Poll every 10 ms for up to 5 s.  Polling at 10 ms means we catch the
     // window within one screen refresh (~16 ms at 60 Hz), which is effectively
@@ -70,7 +71,8 @@ static DWORD WINAPI MoveToMonitorThread(LPVOID pv)
     if (!best) return 0;
     if (MonitorFromWindow(best, MONITOR_DEFAULTTONEAREST) == hMon) return 0;
 
-    MONITORINFO mi = { sizeof(mi) };
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
     if (!GetMonitorInfo(hMon, &mi)) return 0;
 
     RECT wr;
@@ -81,7 +83,8 @@ static DWORD WINAPI MoveToMonitorThread(LPVOID pv)
     if (x < mi.rcWork.left) x = mi.rcWork.left;
     if (y < mi.rcWork.top)  y = mi.rcWork.top;
 
-    WINDOWPLACEMENT wp = { sizeof(wp) };
+    WINDOWPLACEMENT wp = {};
+    wp.length = sizeof(wp);
     GetWindowPlacement(best, &wp);
     if (wp.showCmd == SW_SHOWMAXIMIZED) {
         ShowWindow(best, SW_RESTORE);
@@ -106,7 +109,8 @@ void LaunchOnMonitor(HINSTANCE /*hInst*/, HMONITOR hMon,
         return TRUE;
     }, reinterpret_cast<LPARAM>(&snapshot));
 
-    SHELLEXECUTEINFOW sei = { sizeof(sei) };
+    SHELLEXECUTEINFOW sei = {};
+    sei.cbSize       = sizeof(sei);
     sei.fMask        = SEE_MASK_NOCLOSEPROCESS;
     sei.lpVerb       = L"open";
     sei.lpFile       = exe;
@@ -116,14 +120,14 @@ void LaunchOnMonitor(HINSTANCE /*hInst*/, HMONITOR hMon,
     if (!ShellExecuteExW(&sei)) return;
 
     DWORD pid = sei.hProcess ? GetProcessId(sei.hProcess) : 0;
-    auto* ctx = new LaunchMoveCtx{ sei.hProcess, hMon, std::move(snapshot), pid };
+    auto ctxOwner = std::make_unique<LaunchMoveCtx>(LaunchMoveCtx{sei.hProcess, hMon, std::move(snapshot), pid});
 
-    HANDLE hThread = CreateThread(nullptr, 0, MoveToMonitorThread, ctx, 0, nullptr);
+    HANDLE hThread = CreateThread(nullptr, 0, MoveToMonitorThread, ctxOwner.get(), 0, nullptr);
     if (hThread) {
+        ctxOwner.release();  // ownership transferred to thread
         CloseHandle(hThread);
     } else {
-        if (ctx->hProc) CloseHandle(ctx->hProc);
-        delete ctx;
+        if (ctxOwner->hProc) CloseHandle(ctxOwner->hProc);
     }
 }
 

@@ -7,6 +7,8 @@
 #include "LaunchHelper.h"
 #include <algorithm>
 #include <atomic>
+#include <memory>
+#include <utility>
 #include <commctrl.h>
 #include <windowsx.h>
 #include <objbase.h>
@@ -43,10 +45,12 @@ static constexpr wchar_t kClassName[] = L"WinzooTaskbar";
 
 bool TaskbarWindow::RegisterWndClass(HINSTANCE hInst)
 {
-    WNDCLASSEXW existing = { sizeof(existing) };
+    WNDCLASSEXW existing = {};
+    existing.cbSize = sizeof(existing);
     if (GetClassInfoExW(hInst, kClassName, &existing)) return true;
 
-    WNDCLASSEXW wc = { sizeof(wc) };
+    WNDCLASSEXW wc = {};
+    wc.cbSize        = sizeof(wc);
     wc.style         = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc   = TaskbarWindow::WndProc;
     wc.hInstance     = hInst;
@@ -124,7 +128,8 @@ RECT TaskbarWindow::CalculateWindowRect() const
     HMONITOR hMon = hMonitor_
                   ? hMonitor_
                   : MonitorFromPoint({ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
-    MONITORINFO mi = { sizeof(mi) };
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
     GetMonitorInfo(hMon, &mi);
     RECT mon = mi.rcMonitor;
 
@@ -216,7 +221,7 @@ int TaskbarWindow::TotalCount() const
 
 bool TaskbarWindow::IsPinnedIdx(int i) const
 {
-    return i >= 0 && i < (int)pinnedButtons_.size();
+    return i >= 0 && std::cmp_less(i, pinnedButtons_.size());
 }
 
 const TaskButton& TaskbarWindow::GetButtonByIdx(int i) const
@@ -642,13 +647,13 @@ void TaskbarWindow::LayoutButtons()
 int TaskbarWindow::HitTestButton(POINT pt) const
 {
     // Check pinned buttons first
-    for (int i = 0; i < (int)pinnedButtons_.size(); ++i) {
+    for (int i = 0; std::cmp_less(i, pinnedButtons_.size()); ++i) {
         if (pinnedButtons_[i].HitTest(pt)) return i;
     }
     // Then task buttons (combined index offset by pinned count)
     const auto& taskBtns = tracker_.Buttons();
     int offset = (int)pinnedButtons_.size();
-    for (int i = 0; i < (int)taskBtns.size(); ++i) {
+    for (int i = 0; std::cmp_less(i, taskBtns.size()); ++i) {
         if (taskBtns[i].HitTest(pt)) return offset + i;
     }
     return -1;
@@ -678,7 +683,7 @@ void TaskbarWindow::ActivateButton(int combinedIdx)
     // Task button
     auto& buttons = tracker_.MutableButtons();
     int taskIdx = combinedIdx - (int)pinnedButtons_.size();
-    if (taskIdx < 0 || taskIdx >= (int)buttons.size()) return;
+    if (taskIdx < 0 || std::cmp_greater_equal(taskIdx, buttons.size())) return;
 
     TaskButton& btn = buttons[taskIdx];
 
@@ -759,6 +764,7 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
             if (runningHwnd)
                 PostMessage(runningHwnd, WM_CLOSE, 0, 0);
             break;
+        default: break;
         }
         return;
     }
@@ -766,7 +772,7 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
     // --- Task button menu ---
     const auto& taskBtns = tracker_.Buttons();
     int taskIdx = combinedIdx - (int)pinnedButtons_.size();
-    if (taskIdx < 0 || taskIdx >= (int)taskBtns.size()) return;
+    if (taskIdx < 0 || std::cmp_greater_equal(taskIdx, taskBtns.size())) return;
 
     // Copy values before modal message loop can invalidate the reference
     const std::wstring exePath  = taskBtns[taskIdx].exePath;
@@ -831,6 +837,7 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
         if (btnHwnd && isRunning)
             PostMessage(btnHwnd, WM_CLOSE, 0, 0);
         break;
+    default: break;
     }
 }
 
@@ -888,6 +895,7 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
     case IDM_CLOSE_TASKBAR:
         PostQuitMessage(0);
         break;
+    default: break;
     }
 }
 
@@ -910,6 +918,7 @@ void TaskbarWindow::ShowStatusIconMenu(int which, POINT ptScreen)
         case IDM_VOL_SETTINGS:
             LaunchApp(L"ms-settings:sound");
             break;
+        default: break;
         }
     } else if (which == 2) {   // Network
         std::vector<MenuItem> items = {
@@ -924,6 +933,7 @@ void TaskbarWindow::ShowStatusIconMenu(int which, POINT ptScreen)
         case IDM_NET_SHARING:
             LaunchApp(L"control.exe", L"/name Microsoft.NetworkAndSharingCenter");
             break;
+        default: break;
         }
     } else if (which == 3) {   // Battery
         std::vector<MenuItem> items = {
@@ -942,6 +952,7 @@ void TaskbarWindow::ShowStatusIconMenu(int which, POINT ptScreen)
         case IDM_BAT_SETTINGS:
             LaunchApp(L"ms-settings:batterysaver");
             break;
+        default: break;
         }
     }
 }
@@ -974,9 +985,11 @@ void TaskbarWindow::StartScanThread(bool isFirstScan)
     HWND hwnd = hwnd_;
     WPARAM wp = isFirstScan ? 0 : 1;
     std::thread([hwnd, wp]() {
-        auto* pEntries = new std::vector<AppEntry>(AppScanner::Scan());
-        PostMessageW(hwnd, WM_APP_SCAN_DONE, wp,
-                     reinterpret_cast<LPARAM>(pEntries));
+        auto pEntries = std::make_unique<std::vector<AppEntry>>(AppScanner::Scan());
+        if (!PostMessageW(hwnd, WM_APP_SCAN_DONE, wp,
+                          reinterpret_cast<LPARAM>(pEntries.get())))
+            return;  // on failure, unique_ptr auto-deletes
+        pEntries.release();  // ownership transferred to WM_APP_SCAN_DONE handler
     }).detach();
 }
 
@@ -1010,23 +1023,23 @@ void TaskbarWindow::StartIconLoadThread()
     }
     std::thread([hwnd, sizePx, paths = std::move(paths)]() {
         using Pair = std::pair<std::wstring, HICON>;
-        auto* pResults = new std::vector<Pair>(paths.size());
+        auto pResults = std::make_unique<std::vector<Pair>>(paths.size());
         for (size_t i = 0; i < paths.size(); ++i)
             (*pResults)[i].first = paths[i];
 
         // Load icons in parallel: up to 4 workers each grab paths via an atomic counter.
         // MTA avoids STA message-pump blocking; each worker owns its COM apartment.
-        const int kWorkers = std::min((int)paths.size(), 4);
+        const int kWorkers = std::min(static_cast<int>(paths.size()), 4);
         if (kWorkers > 0) {
             std::atomic<int> nextIdx{ 0 };
             std::vector<std::thread> workers;
             workers.reserve(kWorkers);
             for (int w = 0; w < kWorkers; ++w) {
-                workers.emplace_back([&paths, pResults, &nextIdx, sizePx]() {
+                workers.emplace_back([&paths, pRaw = pResults.get(), &nextIdx, sizePx]() {
                     HRESULT hrCom = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-                    int idx;
-                    while ((idx = nextIdx.fetch_add(1)) < (int)paths.size())
-                        (*pResults)[idx].second = AppIconCache::LoadStatic(paths[idx], sizePx);
+                    int idx = 0;
+                    while ((idx = nextIdx.fetch_add(1)) < static_cast<int>(paths.size()))
+                        (*pRaw)[idx].second = AppIconCache::LoadStatic(paths[idx], sizePx);
                     if (SUCCEEDED(hrCom)) CoUninitialize();
                 });
             }
@@ -1034,11 +1047,12 @@ void TaskbarWindow::StartIconLoadThread()
         }
 
         if (!PostMessageW(hwnd, WM_APP_ICONS_DONE, static_cast<WPARAM>(sizePx),
-                          reinterpret_cast<LPARAM>(pResults))) {
+                          reinterpret_cast<LPARAM>(pResults.get()))) {
             for (auto& [p, icon] : *pResults)
                 if (icon) DestroyIcon(icon);
-            delete pResults;
+            return;  // unique_ptr auto-deletes
         }
+        pResults.release();  // ownership transferred to WM_APP_ICONS_DONE handler
     }).detach();
 }
 
@@ -1171,7 +1185,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             tray.icons.resize(n);
             for (int i = 0; i < n; ++i) {
                 tray.icons[i].hIcon   = trayIcons_[i].hIcon;
-                tray.icons[i].rect    = (i < (int)trayIconRects_.size()) ? trayIconRects_[i] : RECT{};
+                tray.icons[i].rect    = std::cmp_less(i, trayIconRects_.size()) ? trayIconRects_[i] : RECT{};
                 tray.icons[i].hovered = (i == hoveredTrayIdx_);
             }
             if (trayDragging_) {
@@ -1253,7 +1267,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         // Tray icon hover
         int newHovTray = -1;
         if (settings_.showTrayIcons) {
-            for (int i = 0; i < (int)trayIconRects_.size(); ++i) {
+            for (int i = 0; std::cmp_less(i, trayIconRects_.size()); ++i) {
                 if (PtInRect(&trayIconRects_[i], pt)) { newHovTray = i; break; }
             }
         }
@@ -1322,7 +1336,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
         // Tray icon drag/click start
         if (settings_.showTrayIcons) {
-            for (int i = 0; i < (int)trayIconRects_.size(); ++i) {
+            for (int i = 0; std::cmp_less(i, trayIconRects_.size()); ++i) {
                 if (PtInRect(&trayIconRects_[i], pt)) {
                     trayDragStart_ = i;
                     trayDragPt_    = pt;
@@ -1354,7 +1368,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             if (trayDragging_) {
                 // Find drop target icon slot
                 int dropIdx = -1;
-                for (int i = 0; i < (int)trayIconRects_.size(); ++i) {
+                for (int i = 0; std::cmp_less(i, trayIconRects_.size()); ++i) {
                     RECT r = trayIconRects_[i];
                     int cx = (r.left + r.right) / 2;
                     if (pt.x < cx) { dropIdx = i; break; }
@@ -1364,8 +1378,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
                 int from = trayDragStart_;
                 int to   = dropIdx;
-                if (from != to && from < (int)trayIcons_.size() &&
-                    to < (int)trayIcons_.size())
+                if (from != to && std::cmp_less(from, trayIcons_.size()) &&
+                    std::cmp_less(to, trayIcons_.size()))
                 {
                     // Reorder trayIcons_ and settings_.trayIconOrder
                     TrayIconEntry moved = std::move(trayIcons_[from]);
@@ -1383,7 +1397,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             } else {
                 // Plain left click — forward notification to the icon's owner
                 int i = trayDragStart_;
-                if (i < (int)trayIcons_.size() && trayIcons_[i].hWnd &&
+                if (std::cmp_less(i, trayIcons_.size()) && trayIcons_[i].hWnd &&
                     trayIcons_[i].uCallbackMsg)
                 {
                     POINT screenPt = pt;
@@ -1410,12 +1424,12 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                     if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
                         auto it = settings_.pinnedExePathsPerMonitor.find(monitorDeviceName_);
                         if (it != settings_.pinnedExePathsPerMonitor.end() &&
-                            origIdx < (int)it->second.size() &&
-                            dropIdx < (int)it->second.size()) {
+                            std::cmp_less(origIdx, it->second.size()) &&
+                            std::cmp_less(dropIdx, it->second.size())) {
                             std::swap(it->second[origIdx], it->second[dropIdx]);
                         }
-                    } else if (origIdx < (int)settings_.pinnedExePaths.size() &&
-                               dropIdx < (int)settings_.pinnedExePaths.size()) {
+                    } else if (std::cmp_less(origIdx, settings_.pinnedExePaths.size()) &&
+                               std::cmp_less(dropIdx, settings_.pinnedExePaths.size())) {
                         std::swap(settings_.pinnedExePaths[origIdx],
                                   settings_.pinnedExePaths[dropIdx]);
                     }
@@ -1481,7 +1495,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             if (idx >= 0 && !IsPinnedIdx(idx)) {
                 int taskIdx = idx - (int)pinnedButtons_.size();
                 const auto& btns = tracker_.Buttons();
-                if (taskIdx < (int)btns.size()) {
+                if (std::cmp_less(taskIdx, btns.size())) {
                     HWND target = btns[taskIdx].hwnd;
                     if (target) PostMessage(target, WM_CLOSE, 0, 0);
                 }
@@ -1497,9 +1511,9 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
         // Tray icon right click — forward notification to the icon's owner
         if (settings_.showTrayIcons) {
-            for (int i = 0; i < (int)trayIconRects_.size(); ++i) {
+            for (int i = 0; std::cmp_less(i, trayIconRects_.size()); ++i) {
                 if (PtInRect(&trayIconRects_[i], pt)) {
-                    if (i < (int)trayIcons_.size() && trayIcons_[i].hWnd &&
+                    if (std::cmp_less(i, trayIcons_.size()) && trayIcons_[i].hWnd &&
                         trayIcons_[i].uCallbackMsg)
                     {
                         ForwardTrayNotification(trayIcons_[i].hWnd, trayIcons_[i].uCallbackMsg,
@@ -1569,16 +1583,15 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         return 0;
 
     case WM_APP_SCAN_DONE: {
-        auto* pEntries = reinterpret_cast<std::vector<AppEntry>*>(lParam);
+        auto pEntries = std::unique_ptr<std::vector<AppEntry>>(
+            reinterpret_cast<std::vector<AppEntry>*>(lParam));
         if (!shutdownPending_) {
             int iconSz = Scale(48, dpi_);
             if (wParam == 0) {
-                // First scan: icons not yet cached; leave them null until icon thread finishes.
                 appEntries_ = std::move(*pEntries);
                 SetTimer(hwnd_, kTimerAppScan, kTimerAppScanMs, nullptr);
                 StartIconLoadThread();
             } else {
-                // Periodic re-scan: assign whatever is already in cache (no I/O).
                 for (auto& e : *pEntries) {
                     const std::wstring& p = e.iconPath.empty() ? e.exePath : e.iconPath;
                     e.icon = appIconCache_.TryGet(p, iconSz);
@@ -1587,35 +1600,29 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 InvalidateRect(hwnd_, nullptr, FALSE);
             }
         }
-        delete pEntries;
         return 0;
     }
 
     case WM_APP_ICONS_DONE: {
-        auto* pIcons = reinterpret_cast<std::vector<std::pair<std::wstring, HICON>>*>(lParam);
+        auto pIcons = std::unique_ptr<std::vector<std::pair<std::wstring, HICON>>>(
+            reinterpret_cast<std::vector<std::pair<std::wstring, HICON>>*>(lParam));
         if (!shutdownPending_) {
             int iconSz = static_cast<int>(wParam);
             for (auto& [path, icon] : *pIcons)
                 appIconCache_.Store(path, iconSz, icon);
-            // Only bind icons to entries if they match the current desired size,
-            // preventing a stale load thread (e.g. from before a DPI change) from
-            // assigning wrong-sized icons to the live entry list.
             if (iconSz == Scale(48, dpi_)) {
                 for (auto& e : appEntries_) {
                     const std::wstring& p = e.iconPath.empty() ? e.exePath : e.iconPath;
                     e.icon = appIconCache_.TryGet(p, iconSz);
                 }
-                // Also update pinned button icons
                 for (auto& btn : pinnedButtons_)
                     btn.icon = appIconCache_.TryGet(btn.exePath, iconSz);
                 InvalidateRect(hwnd_, nullptr, FALSE);
             }
         } else {
-            // App is shutting down — free HICON resources that won't be stored.
             for (auto& [path, icon] : *pIcons)
                 if (icon) DestroyIcon(icon);
         }
-        delete pIcons;
         return 0;
     }
 
@@ -1668,7 +1675,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         appBar_.Unregister();
         PostQuitMessage(0);
         return 0;
+    default: break;
     }
-
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 }

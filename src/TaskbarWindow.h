@@ -70,65 +70,58 @@ private:
     // Returns exe file name without extension (for pinned button titles)
     static std::wstring ExeBaseName(const std::wstring& exePath);
 
+    // Pointer-sized and container fields first (8-byte aligned on 64-bit)
     HWND            hwnd_           = nullptr;
     HINSTANCE       hInst_          = nullptr;
-    Settings        settings_;
-    ThemeColors     colors_         = {};
-    int             dpi_            = 96;
     HMONITOR        hMonitor_       = nullptr;
-    bool            isPrimary_      = true;
+    std::vector<TaskButton>        pinnedButtons_;   // rebuilt from settings_.pinnedExePaths
+    std::vector<AppEntry>          appEntries_;
+    std::vector<TrayIconEntry>     trayIcons_;       // owns the HICONs
+    std::vector<RECT>              trayIconRects_;
     std::wstring    monitorDeviceName_;  // e.g. "DISPLAY1", stripped of "\\.\\" prefix
-    bool            showStartButton_= true;
+    ThemeColors     colors_         = {};
+    Renderer        renderer_;
+    IconCache       iconCache_;
+    AppIconCache    appIconCache_;
+    AppBar          appBar_;
+    WindowTracker   tracker_;
+    Settings        settings_;
+    DragController  drag_;
+    SystemStatusData statusData_    = {};
+    POINT           trayDragPt_     = {}; // client coords
+
+    // 4-byte aligned fields
+    int             dpi_            = 96;
     int             hoveredIdx_     = -1;  // combined index
     int             hoveredScroll_  = 0;
-    bool            hoveredStart_   = false;
+    int             hoveredStatus_  = 0;   // 0=none 1=vol 2=net 3=bat
+    int             scrollOffset_   = 0;
+    int             maxScrollOffset_= 0;
+    int             pinnedSepX_     = 0;   // x position of pinned/task zone separator
+    UINT            shellHookMsg_      = 0;
+    UINT            taskbarCreatedMsg_ = 0;
+    UINT            appBarCallbackMsg_ = 0;
+    DWORD           menuLastClosedTick_= 0;
+    int             hoveredTrayIdx_ = -1;
+    int             trayDragStart_  = -1;  // index pressed
     RECT            clockRect_      = {};
     RECT            statusZoneRect_ = {};
     RECT            volIconRect_    = {};
     RECT            netIconRect_    = {};
     RECT            batIconRect_    = {};
-    int             hoveredStatus_  = 0;  // 0=none 1=vol 2=net 3=bat
-    SystemStatusData statusData_    = {};
-    bool            scrollNeeded_   = false;
-    int             scrollOffset_   = 0;
-    int             maxScrollOffset_= 0;
     RECT            scrollLeftRect_ = {};
     RECT            scrollRightRect_= {};
     RECT            startBtnRect_   = {};
-    int             pinnedSepX_     = 0;  // x position of pinned/task zone separator
+    RECT            trayZoneRect_   = {};
 
-    AppBar          appBar_;
-    WindowTracker   tracker_;
-    DragController  drag_;
-    Renderer        renderer_;
-    IconCache       iconCache_;
-
-    std::vector<TaskButton> pinnedButtons_;  // rebuilt from settings_.pinnedExePaths
-
-    std::vector<AppEntry> appEntries_;
-    AppIconCache          appIconCache_;
-
-    UINT            shellHookMsg_      = 0;
-    UINT            taskbarCreatedMsg_ = 0;
-    UINT            appBarCallbackMsg_ = 0;
-
-    // Start-button toggle debounce: set true while menu is open to block
-    // re-entrant ShowAppMenu() calls from the nested message loop;
-    // menuLastClosedTick_ provides an extra 200ms guard after close.
-    bool  menuOpen_             = false;
-    DWORD menuLastClosedTick_   = 0;
-
-    // Tray icon (notification area) state
-    RECT                       trayZoneRect_   = {};
-    std::vector<TrayIconEntry> trayIcons_;          // owns the HICONs
-    std::vector<RECT>          trayIconRects_;
-    int                        hoveredTrayIdx_ = -1;
-    int                        trayDragStart_  = -1; // index pressed
-    bool                       trayDragging_   = false;
-    POINT                      trayDragPt_     = {}; // client coords
-
-    // Shutdown guard: set in WM_DESTROY so late WM_APP messages free heap and exit
-    bool            shutdownPending_ = false;
+    // 1-byte aligned bools last
+    bool            isPrimary_      = true;
+    bool            showStartButton_= true;
+    bool            hoveredStart_   = false;
+    bool            scrollNeeded_   = false;
+    bool            menuOpen_       = false;
+    bool            trayDragging_   = false;
+    bool            shutdownPending_= false;
 
     static constexpr UINT_PTR kTimerActiveWindow = 1;
     static constexpr UINT_PTR kTimerAppScanFirst = 2;

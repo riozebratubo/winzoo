@@ -1,5 +1,6 @@
 #include "SettingsDialog.h"
 #include <algorithm>
+#include <utility>
 #include <commctrl.h>
 #include <commdlg.h>
 #include <uxtheme.h>
@@ -116,6 +117,7 @@ static LRESULT CALLBACK AppMenuScrollHostProc(HWND hwnd, UINT uMsg, WPARAM wPara
             newPos = si2.nTrackPos;
             break;
         }
+        default: break;
         }
         ScrollHostApplyPos(hwnd, si, newPos);
         return 0;
@@ -135,16 +137,19 @@ static LRESULT CALLBACK AppMenuScrollHostProc(HWND hwnd, UINT uMsg, WPARAM wPara
     case WM_DRAWITEM:
     case WM_NOTIFY:
         return SendMessageW(GetParent(hwnd), uMsg, wParam, lParam);
+    default: break;
     }
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 }
 
 static void RegisterScrollHostClass()
 {
-    WNDCLASSEXW existing = { sizeof(existing) };
+    WNDCLASSEXW existing = {};
+    existing.cbSize = sizeof(existing);
     HINSTANCE hInst = GetModuleHandleW(nullptr);
     if (GetClassInfoExW(hInst, kScrollHostClass, &existing)) return;
-    WNDCLASSEXW wc    = { sizeof(wc) };
+    WNDCLASSEXW wc    = {};
+    wc.cbSize         = sizeof(wc);
     wc.lpfnWndProc    = AppMenuScrollHostProc;
     wc.hInstance      = hInst;
     wc.hCursor        = LoadCursorW(nullptr, IDC_ARROW);
@@ -683,7 +688,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 outBotGap   = cH - bR.bottom;
             };
 
-            int dummy;
+            int dummy = 0;
             measureBtn(IDC_BTN_RESET_DEFAULTS, data->btnDefL,  data->btnDefW,  dummy, data->btnH, data->btnBotGap);
             measureBtn(IDOK,             dummy, data->btnOKW,  data->btnOKRightGap,  dummy, dummy);
             measureBtn(IDCANCEL,         dummy, data->btnCxlW, data->btnCxlRightGap, dummy, dummy);
@@ -779,11 +784,12 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         for (int g = 0; g < 4; ++g) {
             HWND hH = data->hScrollHosts[g];
             if (!hH) continue;
-            SCROLLINFO si{ sizeof(si) };
+            SCROLLINFO si = {};
+            si.cbSize = sizeof(si);
             si.fMask = SIF_ALL;
             GetScrollInfo(hH, SB_VERT, &si);
             si.nPage = static_cast<UINT>(panelH);
-            if (si.nPage >= static_cast<UINT>(si.nMax + 1)) {
+            if (std::cmp_greater_equal(si.nPage, si.nMax + 1)) {
                 // Everything fits: scroll back to top
                 int delta = -si.nPos;
                 if (delta != 0) {
@@ -1126,6 +1132,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             return TRUE;
         }
         break;
+    default: break;
     }
     return FALSE;
 }

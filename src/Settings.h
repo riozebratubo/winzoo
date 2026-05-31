@@ -9,7 +9,7 @@ enum class AppMenuLayout      { List = 0, Grid = 1 };
 enum class AppMenuFlattenMode { None = 0, Submenus = 1, All = 2 };
 enum class TaskbarMonitorMode { AllMonitors = 0, Primary = 1 };
 
-struct Settings {
+struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can throw (wstring inits); no noexcept contract exists
     TaskbarPosition position  = TaskbarPosition::Bottom;
     ThemePreset     theme     = ThemePreset::Dark;
     int             thickness = 48;

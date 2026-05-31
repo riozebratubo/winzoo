@@ -1,12 +1,14 @@
 #include "PopupMenu.h"
 #include <windowsx.h>
 #include <algorithm>
+#include <utility>
 
 static constexpr wchar_t kClassName[] = L"WinzooPopupMenu";
 
 bool PopupMenu::RegisterWndClass(HINSTANCE hInst)
 {
-    WNDCLASSEXW wc = { sizeof(wc) };
+    WNDCLASSEXW wc = {};
+    wc.cbSize        = sizeof(wc);
     wc.style         = CS_HREDRAW | CS_VREDRAW | CS_DROPSHADOW;
     wc.lpfnWndProc   = PopupMenu::WndProc;
     wc.hInstance     = hInst;
@@ -14,7 +16,8 @@ bool PopupMenu::RegisterWndClass(HINSTANCE hInst)
     wc.hbrBackground = nullptr;
     wc.lpszClassName = kClassName;
 
-    WNDCLASSEXW existing = { sizeof(existing) };
+    WNDCLASSEXW existing = {};
+    existing.cbSize = sizeof(existing);
     if (GetClassInfoExW(hInst, kClassName, &existing))
         return true;
 
@@ -85,7 +88,7 @@ LRESULT PopupMenu::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
             InvalidateRect(hwnd, nullptr, FALSE);
             break;
         case VK_DOWN:
-            for (int i = hovered_ + 1; i < static_cast<int>(items_.size()); ++i) {
+            for (int i = hovered_ + 1; std::cmp_less(i, items_.size()); ++i) {
                 if (!items_[i].isSeparator) { hovered_ = i; break; }
             }
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -100,6 +103,7 @@ LRESULT PopupMenu::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
             done_ = true;
             DestroyWindow(hwnd);
             break;
+        default: break;
         }
         return 0;
 
@@ -111,6 +115,7 @@ LRESULT PopupMenu::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
     case WM_DESTROY:
         done_ = true;
         return 0;
+    default: break;
     }
 
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
@@ -134,7 +139,7 @@ void PopupMenu::Paint(HDC hdc, int w, int h)
     int y = 0;
     int pad = Scale(8, dpi_);
 
-    for (int i = 0; i < static_cast<int>(items_.size()); ++i) {
+    for (int i = 0; std::cmp_less(i, items_.size()); ++i) {
         const auto& item = items_[i];
 
         if (item.isSeparator) {
@@ -180,7 +185,7 @@ int PopupMenu::HitTestItem(POINT ptClient) const
 {
     int itemH = ItemHeight();
     int idx   = ptClient.y / itemH;
-    if (idx < 0 || idx >= static_cast<int>(items_.size())) return -1;
+    if (idx < 0 || std::cmp_greater_equal(idx, items_.size())) return -1;
     return idx;
 }
 
@@ -202,7 +207,8 @@ UINT PopupMenu::Show(HWND hwndOwner, POINT ptScreen,
 
     // Clamp to the work area of the monitor the point is on
     HMONITOR hMon = MonitorFromPoint(ptScreen, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi = { sizeof(mi) };
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
     GetMonitorInfo(hMon, &mi);
     RECT workArea = mi.rcWork;
     POINT pt = ptScreen;

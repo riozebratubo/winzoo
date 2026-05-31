@@ -6,6 +6,7 @@
 #include <shlobj.h>
 #include <powrprof.h>
 #include <algorithm>
+#include <utility>
 
 #pragma comment(lib, "PowrProf.lib")
 
@@ -105,7 +106,8 @@ static std::vector<AppTreeNode> BuildAppTree(const std::vector<AppEntry>& entrie
 
 static HICON LoadFolderIcon(bool large)
 {
-    SHSTOCKICONINFO sii = { sizeof(sii) };
+    SHSTOCKICONINFO sii = {};
+    sii.cbSize = sizeof(sii);
     UINT flags = SHGSI_ICON | (large ? SHGSI_LARGEICON : SHGSI_SMALLICON);
     if (SUCCEEDED(SHGetStockIconInfo(SIID_FOLDER, flags, &sii)))
         return sii.hIcon;
@@ -116,10 +118,12 @@ static HICON LoadFolderIcon(bool large)
 
 bool AppMenuWindow::RegisterWndClass(HINSTANCE hInst)
 {
-    WNDCLASSEXW existing = { sizeof(existing) };
+    WNDCLASSEXW existing = {};
+    existing.cbSize = sizeof(existing);
     if (GetClassInfoExW(hInst, kAppMenuClass, &existing)) return true;
 
-    WNDCLASSEXW wc = { sizeof(wc) };
+    WNDCLASSEXW wc = {};
+    wc.cbSize        = sizeof(wc);
     wc.style         = CS_DROPSHADOW;
     wc.lpfnWndProc   = AppMenuWindow::WndProc;
     wc.hInstance     = hInst;
@@ -204,7 +208,7 @@ static int ContentHeight(const std::vector<RECT>& rects)
 
 RECT AppMenuWindow::GetNodeScreenRect(int idx) const
 {
-    if (idx < 0 || idx >= static_cast<int>(entryRects_.size())) return {};
+    if (idx < 0 || std::cmp_greater_equal(idx, entryRects_.size())) return {};
     RECT r = entryRects_[idx];
     OffsetRect(&r, 0, -scrollOffset_);
     POINT tl = { r.left, r.top };
@@ -246,7 +250,7 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
     int pad    = Scale(6, dpi_);
     int iconPx = isList ? Scale(20, dpi_) : Scale(48, dpi_);
 
-    for (int i = 0; i < static_cast<int>(nodes_->size()); ++i) {
+    for (int i = 0; std::cmp_less(i, nodes_->size()); ++i) {
         const AppTreeNode& node = (*nodes_)[i];
         RECT r = entryRects_[i];
         OffsetRect(&r, 0, -scrollOffset_);
@@ -386,7 +390,7 @@ int AppMenuWindow::HitTestEntry(POINT ptClient) const
 {
     if (ptClient.x >= menuW_) return -1;  // in sidebar
     int contentY = ptClient.y + scrollOffset_;
-    for (int i = 0; i < static_cast<int>(entryRects_.size()); ++i) {
+    for (int i = 0; std::cmp_less(i, entryRects_.size()); ++i) {
         POINT cp = { ptClient.x, contentY };
         if (PtInRect(&entryRects_[i], cp)) return i;
     }
@@ -421,7 +425,7 @@ int AppMenuWindow::HitTestSidebarBtn(POINT ptClient) const
 
 void AppMenuWindow::ActivateNode(int idx)
 {
-    if (!nodes_ || idx < 0 || idx >= static_cast<int>(nodes_->size())) return;
+    if (!nodes_ || idx < 0 || std::cmp_greater_equal(idx, nodes_->size())) return;
     const AppTreeNode& node = (*nodes_)[idx];
 
     if (node.isFolder) {
@@ -439,6 +443,7 @@ void AppMenuWindow::ActivateNode(int idx)
         }
 
         RECT nodeScreenRect = GetNodeScreenRect(idx);
+        if (!settings_) return;
         AppMenuCloseReason reason = ShowNodes(
             hwnd_, nodeScreenRect, /*isSubmenu=*/true, position_,
             std::move(childNodes),
@@ -521,7 +526,7 @@ void AppMenuWindow::ActivateSidebarBtn(int idx)
         if (s_powerOptions.empty()) return;
 
         HMENU hMenu = CreatePopupMenu();
-        for (int i = 0; i < static_cast<int>(s_powerOptions.size()); ++i)
+        for (int i = 0; std::cmp_less(i, s_powerOptions.size()); ++i)
             AppendMenuW(hMenu, MF_STRING, i + 1, s_powerOptions[i].label.c_str());
 
         // Position popup at the top-right of the power button
@@ -609,12 +614,12 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_MOUSEWHEEL: {
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-        int step;
+        int step = 0;
         if (settings_ && settings_->appMenuLayout == AppMenuLayout::Grid &&
             settings_->appMenuGridCols > 0 && !entryRects_.empty())
         {
             int cols = std::max(1, settings_->appMenuGridCols);
-            step = (static_cast<int>(entryRects_.size()) >= cols)
+            step = std::cmp_greater_equal(entryRects_.size(), cols)
                        ? entryRects_[cols - 1].bottom
                        : entryRects_.back().bottom;
         } else {
@@ -642,7 +647,7 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         case VK_RIGHT:
             // Open submenu if the hovered item is a folder.
             if (hoveredIdx_ >= 0 && nodes_ &&
-                hoveredIdx_ < static_cast<int>(nodes_->size()) &&
+                std::cmp_less(hoveredIdx_, nodes_->size()) &&
                 (*nodes_)[hoveredIdx_].isFolder)
             {
                 ActivateNode(hoveredIdx_);
@@ -659,7 +664,8 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             }
             break;
         case VK_DOWN:
-            if (nodes_ && hoveredIdx_ < static_cast<int>(nodes_->size()) - 1) {
+            if (nodes_ && hoveredIdx_ >= 0 &&
+                std::cmp_less(hoveredIdx_ + 1, nodes_->size())) {
                 ++hoveredIdx_;
                 if (!entryRects_.empty()) {
                     int bot = entryRects_[hoveredIdx_].bottom;
@@ -672,6 +678,7 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             if (hoveredIdx_ >= 0)
                 ActivateNode(hoveredIdx_);
             break;
+        default: break;
         }
         return 0;
 
@@ -689,6 +696,7 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (folderIconList_) { DestroyIcon(folderIconList_); folderIconList_ = nullptr; }
         if (folderIconGrid_) { DestroyIcon(folderIconGrid_); folderIconGrid_ = nullptr; }
         return 0;
+    default: break;
     }
 
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
@@ -732,13 +740,12 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
     int padPx    = Scale(settings.appMenuPadding, dpi);
     int contentH = ContentHeight(menu.entryRects_) + padPx;
 
-    int maxH;
+    int maxH = 0;
     if (settings.appMenuLayout == AppMenuLayout::Grid &&
         !menu.entryRects_.empty() && settings.appMenuGridCols > 0)
     {
         int cols  = std::max(1, settings.appMenuGridCols);
-        // Row height = distance between tops of consecutive rows (exclude top padding).
-        int cellH = (static_cast<int>(menu.entryRects_.size()) >= cols)
+        int cellH = std::cmp_greater_equal(menu.entryRects_.size(), cols)
                         ? menu.entryRects_[cols - 1].bottom - padPx
                         : menu.entryRects_.back().bottom    - padPx;
         int maxRows = std::max(1, settings.appMenuGridRows);
@@ -752,11 +759,12 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
     menu.UpdateMaxScroll(contentH, menuH);
 
     HMONITOR hMon = MonitorFromRect(&anchorRect, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi = { sizeof(mi) };
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
     GetMonitorInfo(hMon, &mi);
     RECT workArea = mi.rcWork;
 
-    int x, y;
+    int x = 0, y = 0;
     int margin = Scale(settings.appMenuMargin, dpi);
     if (!isSubmenu) {
         // Root menu: anchor to start button / taskbar edge.

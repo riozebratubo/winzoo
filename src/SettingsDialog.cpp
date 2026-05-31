@@ -257,6 +257,82 @@ static void SetAllMonitorsControlsEnabled(HWND hwnd, bool enabled)
     EnableWindow(GetDlgItem(hwnd, IDC_CHECK_CURRENT_MONITOR_APPS),  enabled ? TRUE : FALSE);
 }
 
+// Pushes all current settings values into dialog controls.
+// Safe to call multiple times (structure like combo items / spin ranges
+// must already be set up by WM_INITDIALOG before this is called).
+static void ApplySettingsToControls(HWND hwnd, DlgData* data)
+{
+    const Settings& s = *data->settings;
+
+    // General tab
+    SendMessageW(GetDlgItem(hwnd, IDC_COMBO_POSITION), CB_SETCURSEL, static_cast<WPARAM>(s.position), 0);
+    SendMessageW(GetDlgItem(hwnd, IDC_COMBO_THEME),    CB_SETCURSEL, static_cast<WPARAM>(s.theme),    0);
+    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_THICKNESS), UDM_SETPOS32, 0, s.thickness);
+    SendMessageW(GetDlgItem(hwnd, IDC_COMBO_TASKBAR_MONITOR), CB_SETCURSEL,
+                 static_cast<WPARAM>(s.taskbarMonitorMode), 0);
+    CheckDlgButton(hwnd, IDC_CHECK_APPMENU_ALL_MONITORS,
+                   s.showAppMenuOnAllMonitors ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd, IDC_CHECK_CURRENT_MONITOR_APPS,
+                   s.showCurrentMonitorAppsOnly ? BST_CHECKED : BST_UNCHECKED);
+    SetAllMonitorsControlsEnabled(hwnd, s.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
+
+    // App Buttons tab
+    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MAXBTNW), UDM_SETPOS32, 0, s.maxButtonWidth);
+    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINBTNW), UDM_SETPOS32, 0, s.minButtonWidth);
+    CheckDlgButton(hwnd, IDC_CHECK_MIDDLECLICK,
+                   s.middleClickClose ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd, IDC_CHECK_RIGHTCLICKGAP,
+                   s.showRightClickGap ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd, IDC_CHECK_MINIMIZED_INDICATOR,
+                   s.showMinimizedIndicator ? BST_CHECKED : BST_UNCHECKED);
+    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_W), UDM_SETPOS32, 0, s.minimizedIndicatorW);
+    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_H), UDM_SETPOS32, 0, s.minimizedIndicatorH);
+    SetMinimizedIndicatorControlsEnabled(hwnd, s.showMinimizedIndicator);
+
+    // Clock tab
+    CheckDlgButton(hwnd, IDC_CHECK_SHOWCLOCK, s.showClock ? BST_CHECKED : BST_UNCHECKED);
+    SetDlgItemTextW(hwnd, IDC_EDIT_TIMEFMT, s.clockTimeFormat.c_str());
+    SetDlgItemTextW(hwnd, IDC_EDIT_DATEFMT, s.clockDateFormat.c_str());
+    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_CLOCKW),       UDM_SETPOS32, 0, s.clockWidth);
+    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_LINESPACING),  UDM_SETPOS32, 0, s.clockLineSpacing);
+    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_TIMEFONTSIZE), UDM_SETPOS32, 0, s.clockTimeFontSize);
+    SendMessageW(GetDlgItem(hwnd, IDC_SPIN_DATEFONTSIZE), UDM_SETPOS32, 0, s.clockDateFontSize);
+    InvalidateRect(GetDlgItem(hwnd, IDC_BTN_TIMECOLOR), nullptr, FALSE);
+    InvalidateRect(GetDlgItem(hwnd, IDC_BTN_DATECOLOR), nullptr, FALSE);
+    SetClockControlsEnabled(hwnd, s.showClock);
+
+    // App Menu tab — controls live in hScrollHost after WM_INITDIALOG reparents them
+    HWND hAm = data->hScrollHost ? data->hScrollHost : hwnd;
+    SendMessageW(GetDlgItem(hAm, IDC_COMBO_APPMENU_LAYOUT), CB_SETCURSEL,
+                 static_cast<WPARAM>(s.appMenuLayout), 0);
+    auto setPos = [&](int spinId, int val) {
+        SendMessageW(GetDlgItem(hAm, spinId), UDM_SETPOS32, 0, val);
+    };
+    setPos(IDC_SPIN_APPMENU_WIDTH,     s.appMenuWidth);
+    setPos(IDC_SPIN_APPMENU_MAXHEIGHT, s.appMenuMaxHeight);
+    setPos(IDC_SPIN_APPMENU_ENTRYH,    s.appMenuEntryHeight);
+    setPos(IDC_SPIN_APPMENU_GRIDCOLS,  s.appMenuGridCols);
+    setPos(IDC_SPIN_APPMENU_GRIDROWS,  s.appMenuGridRows);
+    setPos(IDC_SPIN_APPMENU_LISTFS,    s.appMenuListFontSize);
+    setPos(IDC_SPIN_APPMENU_GRIDFS,    s.appMenuGridFontSize);
+    setPos(IDC_SPIN_APPMENU_MARGIN,    s.appMenuMargin);
+    setPos(IDC_SPIN_APPMENU_PADDING,   s.appMenuPadding);
+    CheckDlgButton(hAm, IDC_CHECK_APPMENU_SIDEBAR,
+                   s.appMenuSidebarEnabled ? BST_CHECKED : BST_UNCHECKED);
+    setPos(IDC_SPIN_APPMENU_SIDEBARW,  s.appMenuSidebarWidth);
+    CheckDlgButton(hAm, IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
+                   s.appMenuSidebarShowExplorer ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hAm, IDC_CHECK_APPMENU_SIDEBAR_SETTINGS,
+                   s.appMenuSidebarShowSettings ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hAm, IDC_CHECK_APPMENU_SIDEBAR_POWER,
+                   s.appMenuSidebarShowPower ? BST_CHECKED : BST_UNCHECKED);
+    SetSidebarControlsEnabled(hAm, s.appMenuSidebarEnabled);
+    CheckDlgButton(hAm, IDC_CHECK_APPMENU_FLATTEN_SUBMENUS,
+                   s.appMenuFlattenMode == AppMenuFlattenMode::Submenus ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hAm, IDC_CHECK_APPMENU_FLATTEN_ALL,
+                   s.appMenuFlattenMode == AppMenuFlattenMode::All ? BST_CHECKED : BST_UNCHECKED);
+}
+
 INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     DlgData* data = reinterpret_cast<DlgData*>(GetWindowLongPtrW(hwnd, DWLP_USER));
@@ -598,6 +674,19 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             HWND hAm = data->hScrollHost ? data->hScrollHost : hwnd;
             if (IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_FLATTEN_ALL) == BST_CHECKED)
                 CheckDlgButton(hAm, IDC_CHECK_APPMENU_FLATTEN_SUBMENUS, BST_UNCHECKED);
+            return TRUE;
+        }
+        if (LOWORD(wParam) == IDC_BTN_RESET_DEFAULTS && data) {
+            if (MessageBoxW(hwnd,
+                            L"Reset all settings to their defaults?\n\nPinned apps will not be affected.",
+                            L"Reset to Defaults",
+                            MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES)
+            {
+                std::vector<std::wstring> pinned = data->settings->pinnedExePaths;
+                *data->settings = Settings{};
+                data->settings->pinnedExePaths = std::move(pinned);
+                ApplySettingsToControls(hwnd, data);
+            }
             return TRUE;
         }
         if (LOWORD(wParam) == IDOK && data) {

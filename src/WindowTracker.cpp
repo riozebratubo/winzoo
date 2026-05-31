@@ -107,6 +107,20 @@ void WindowTracker::AddWindow(HWND hwnd)
     btn.hwnd  = hwnd;
     btn.title = GetWindowTitle(hwnd);
     btn.icon  = iconCache_ ? iconCache_->GetIcon(hwnd, kIconSize) : nullptr;
+
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid) {
+        HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (hProc) {
+            wchar_t path[MAX_PATH] = {};
+            DWORD size = MAX_PATH;
+            if (QueryFullProcessImageNameW(hProc, 0, path, &size))
+                btn.exePath = path;
+            CloseHandle(hProc);
+        }
+    }
+
     buttons_.push_back(btn);
     if (onChange_) onChange_();
 }

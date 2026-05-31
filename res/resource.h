@@ -109,6 +109,9 @@
 #define IDC_CHECK_APPMENU_ALL_MONITORS      1140
 #define IDC_CHECK_CURRENT_MONITOR_APPS      1141
 
+// Reset to defaults button
+#define IDC_BTN_RESET_DEFAULTS              1142
+
 // App Menu Sidebar controls
 #define IDC_CHECK_APPMENU_SIDEBAR           1129
 #define IDC_LBL_APPMENU_SIDEBARW           1130

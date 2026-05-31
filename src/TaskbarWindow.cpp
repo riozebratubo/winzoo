@@ -382,12 +382,14 @@ void TaskbarWindow::ShowTaskButtonMenu(int idx, POINT ptScreen)
     const auto& buttons = tracker_.Buttons();
     if (idx < 0 || idx >= static_cast<int>(buttons.size())) return;
 
-    const auto& btn = buttons[idx];
-    bool isPinned = btn.isPinned;
-    bool isRunning = btn.IsRunning();
+    // Copy values we need before the modal message loop can invalidate the reference.
+    const std::wstring exePath  = buttons[idx].exePath;
+    const HWND        btnHwnd  = buttons[idx].hwnd;
+    bool isPinned  = buttons[idx].isPinned;
+    bool isRunning = buttons[idx].IsRunning();
 
     std::vector<MenuItem> items = {
-        { L"Open new window",       IDM_OPEN_NEW_WINDOW, false, false, !isRunning || btn.exePath.empty() },
+        { L"Open new window",       IDM_OPEN_NEW_WINDOW, false, false, exePath.empty() },
         { L"",                      0,                   true,  false, false },
         { isPinned ? L"Unpin from taskbar" : L"Pin to taskbar",
                                     IDM_PIN_UNPIN,       false, isPinned, false },
@@ -398,8 +400,8 @@ void TaskbarWindow::ShowTaskButtonMenu(int idx, POINT ptScreen)
 
     switch (id) {
     case IDM_OPEN_NEW_WINDOW:
-        if (!btn.exePath.empty())
-            ShellExecuteW(nullptr, L"open", btn.exePath.c_str(),
+        if (!exePath.empty())
+            ShellExecuteW(nullptr, L"open", exePath.c_str(),
                           nullptr, nullptr, SW_SHOWNORMAL);
         break;
 
@@ -419,9 +421,8 @@ void TaskbarWindow::ShowTaskButtonMenu(int idx, POINT ptScreen)
     }
 
     case IDM_CLOSE_WINDOW:
-        if (idx < static_cast<int>(tracker_.Buttons().size()) &&
-            tracker_.Buttons()[idx].IsRunning())
-            PostMessage(tracker_.Buttons()[idx].hwnd, WM_CLOSE, 0, 0);
+        if (btnHwnd && isRunning)
+            PostMessage(btnHwnd, WM_CLOSE, 0, 0);
         break;
     }
 }

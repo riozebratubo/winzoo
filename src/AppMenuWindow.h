@@ -97,6 +97,8 @@ private:
     std::wstring             searchText_;
     std::vector<AppTreeNode> filteredNodes_;
     int                      searchBoxH_ = 0;  // pixel height reserved for the search area
+    HWND                     searchEdit_  = nullptr;  // child EDIT control
+    HBRUSH                   editBgBrush_ = nullptr;  // background brush for the EDIT
 
     // Cached folder icons (loaded lazily in Paint, destroyed in WM_DESTROY).
     HICON folderIconList_ = nullptr;

@@ -226,18 +226,32 @@ int AppMenuWindow::SearchBoxHeight() const
     return Scale(28, dpi_);
 }
 
+// Fuzzy match: checks if all characters of the query appear in order in the name.
+// Returns true if the query chars are a subsequence of name (case-insensitive).
+static bool FuzzyMatch(const std::wstring& lowerName, const std::wstring& lowerQuery)
+{
+    size_t qi = 0;
+    for (size_t ni = 0; ni < lowerName.size() && qi < lowerQuery.size(); ++ni) {
+        if (lowerName[ni] == lowerQuery[qi])
+            ++qi;
+    }
+    return qi == lowerQuery.size();
+}
+
 static void CollectLeaves(const std::vector<AppTreeNode>& nodes,
                            const std::wstring& lowerQuery,
+                           bool fuzzy,
                            std::vector<AppTreeNode>& out)
 {
     for (const auto& n : nodes) {
         if (n.isFolder) {
-            CollectLeaves(n.children, lowerQuery, out);
+            CollectLeaves(n.children, lowerQuery, fuzzy, out);
         } else {
-            // Case-insensitive substring match on name
             std::wstring lowerName = n.name;
             for (auto& ch : lowerName) ch = towlower(ch);
-            if (lowerName.find(lowerQuery) != std::wstring::npos)
+            bool match = fuzzy ? FuzzyMatch(lowerName, lowerQuery)
+                               : lowerName.find(lowerQuery) != std::wstring::npos;
+            if (match)
                 out.push_back(n);
         }
     }
@@ -252,7 +266,8 @@ void AppMenuWindow::ApplyFilter()
         std::wstring lowerQuery = searchText_;
         for (auto& ch : lowerQuery) ch = towlower(ch);
         filteredNodes_.clear();
-        CollectLeaves(ownedNodes_, lowerQuery, filteredNodes_);
+        bool fuzzy = settings_ && settings_->appMenuSearchFuzzy;
+        CollectLeaves(ownedNodes_, lowerQuery, fuzzy, filteredNodes_);
         std::sort(filteredNodes_.begin(), filteredNodes_.end(),
                   [](const AppTreeNode& a, const AppTreeNode& b) {
                       return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
@@ -266,6 +281,35 @@ void AppMenuWindow::ApplyFilter()
     UpdateMaxScroll(contentH, clientH);
     hoveredIdx_ = -1;
     InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+// Subclass proc for the search EDIT control — forwards navigation keys to the menu.
+static LRESULT CALLBACK SearchEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    WNDPROC origProc = reinterpret_cast<WNDPROC>(
+        GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (!origProc) return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+
+    if (uMsg == WM_KEYDOWN) {
+        switch (wParam) {
+        case VK_ESCAPE:
+        case VK_UP:
+        case VK_DOWN:
+        case VK_RETURN:
+            // Forward these to the parent menu window
+            return SendMessageW(GetParent(hwnd), uMsg, wParam, lParam);
+        }
+    }
+
+    if (uMsg == WM_KILLFOCUS) {
+        HWND hNewFocus = reinterpret_cast<HWND>(wParam);
+        HWND hParent   = GetParent(hwnd);
+        // If focus is leaving to something other than our parent menu, close.
+        if (hNewFocus != hParent)
+            SendMessageW(hParent, WM_KILLFOCUS, wParam, lParam);
+    }
+
+    return CallWindowProcW(origProc, hwnd, uMsg, wParam, lParam);
 }
 
 // ---------- painting ----------
@@ -393,27 +437,13 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
         FillRect(hdc, &sepLine, sepBr);
         DeleteObject(sepBr);
 
-        // Search box background (slightly different from main bg)
-        RECT sbBg = { sbPad, sbY + Scale(3, dpi_), menuW_ - sbPad, h - Scale(3, dpi_) };
-        COLORREF searchBg = RGB(
-            std::min(255, GetRValue(colors_.menuBg) + 18),
-            std::min(255, GetGValue(colors_.menuBg) + 18),
-            std::min(255, GetBValue(colors_.menuBg) + 18));
-        HBRUSH searchBgBr = CreateSolidBrush(searchBg);
-        FillRect(hdc, &sbBg, searchBgBr);
-        DeleteObject(searchBgBr);
+        // Magnifying glass icon (left of the EDIT control)
+        int iconAreaW = Scale(20, dpi_);
+        RECT iconBg = { 0, sbY + 1, sbPad + iconAreaW, h };
+        HBRUSH iconBgBr = CreateSolidBrush(colors_.menuBg);
+        FillRect(hdc, &iconBg, iconBgBr);
+        DeleteObject(iconBgBr);
 
-        // Border around search box
-        HPEN borderPen = CreatePen(PS_SOLID, 1, colors_.separator);
-        HPEN oldPen = static_cast<HPEN>(SelectObject(hdc, borderPen));
-        HBRUSH nullBr = static_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
-        HBRUSH prevBrush = static_cast<HBRUSH>(SelectObject(hdc, nullBr));
-        Rectangle(hdc, sbBg.left, sbBg.top, sbBg.right, sbBg.bottom);
-        SelectObject(hdc, prevBrush);
-        SelectObject(hdc, oldPen);
-        DeleteObject(borderPen);
-
-        // Magnifying glass icon
         LOGFONTW lfIcon = {};
         lfIcon.lfHeight  = -Scale(12, dpi_);
         lfIcon.lfQuality = CLEARTYPE_QUALITY;
@@ -421,30 +451,10 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
         HFONT iconFont  = CreateFontIndirectW(&lfIcon);
         HFONT prevFont2 = static_cast<HFONT>(SelectObject(hdc, iconFont));
         SetTextColor(hdc, colors_.textDimmed);
-        RECT iconR = { sbBg.left + sbPad, sbBg.top, sbBg.left + sbPad + Scale(16, dpi_), sbBg.bottom };
+        RECT iconR = { sbPad, sbY + 1, sbPad + iconAreaW, h };
         DrawTextW(hdc, L"\uE721", 1, &iconR, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
         SelectObject(hdc, prevFont2);
         DeleteObject(iconFont);
-
-        // Search text or placeholder
-        LOGFONTW lfSearch = {};
-        lfSearch.lfHeight  = -MulDiv(9, dpi_, 72);
-        lfSearch.lfQuality = CLEARTYPE_QUALITY;
-        wcscpy_s(lfSearch.lfFaceName, L"Segoe UI");
-        HFONT searchFont  = CreateFontIndirectW(&lfSearch);
-        HFONT prevFont3   = static_cast<HFONT>(SelectObject(hdc, searchFont));
-        RECT textR2 = { iconR.right + Scale(2, dpi_), sbBg.top, sbBg.right - sbPad, sbBg.bottom };
-        if (searchText_.empty()) {
-            SetTextColor(hdc, colors_.textDimmed);
-            DrawTextW(hdc, L"Search...", -1, &textR2,
-                      DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        } else {
-            SetTextColor(hdc, colors_.menuText);
-            DrawTextW(hdc, searchText_.c_str(), -1, &textR2,
-                      DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        }
-        SelectObject(hdc, prevFont3);
-        DeleteObject(searchFont);
     }
 
     // Sidebar strip
@@ -717,6 +727,44 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     case WM_ERASEBKGND:
         return 1;
 
+    case WM_CREATE:
+        if (searchEnabled_) {
+            int sbPad    = Scale(4, dpi_);
+            int iconAreaW = Scale(20, dpi_);
+            int editX = sbPad + iconAreaW;
+            int editY = menuH_ - searchBoxH_ + Scale(3, dpi_);
+            int editW = menuW_ - editX - sbPad;
+            int editH = searchBoxH_ - Scale(6, dpi_);
+
+            searchEdit_ = CreateWindowExW(
+                0, L"EDIT", nullptr,
+                WS_CHILD | WS_VISIBLE | ES_LEFT | ES_AUTOHSCROLL,
+                editX, editY, editW, editH,
+                hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+
+            if (searchEdit_) {
+                // Set font
+                LOGFONTW lfEdit = {};
+                lfEdit.lfHeight  = -MulDiv(9, dpi_, 72);
+                lfEdit.lfQuality = CLEARTYPE_QUALITY;
+                wcscpy_s(lfEdit.lfFaceName, L"Segoe UI");
+                HFONT editFont = CreateFontIndirectW(&lfEdit);
+                SendMessageW(searchEdit_, WM_SETFONT, reinterpret_cast<WPARAM>(editFont), TRUE);
+
+                // Set placeholder text (cue banner)
+                SendMessageW(searchEdit_, EM_SETCUEBANNER, TRUE,
+                             reinterpret_cast<LPARAM>(L"Search..."));
+
+                // Subclass to forward navigation keys to the menu
+                WNDPROC origProc = reinterpret_cast<WNDPROC>(
+                    SetWindowLongPtrW(searchEdit_, GWLP_WNDPROC,
+                                     reinterpret_cast<LONG_PTR>(SearchEditSubclassProc)));
+                SetWindowLongPtrW(searchEdit_, GWLP_USERDATA,
+                                 reinterpret_cast<LONG_PTR>(origProc));
+            }
+        }
+        return 0;
+
     case WM_MOUSEMOVE: {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         int newIdx = HitTestEntry(pt);
@@ -765,17 +813,12 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             if (searchEnabled_ && !searchText_.empty()) {
                 // First Escape clears search; second closes menu.
                 searchText_.clear();
+                if (searchEdit_) SetWindowTextW(searchEdit_, L"");
                 ApplyFilter();
             } else {
                 closeReason_ = AppMenuCloseReason::Escape;
                 done_ = true;
                 DestroyWindow(hwnd);
-            }
-            break;
-        case VK_BACK:
-            if (searchEnabled_ && !searchText_.empty()) {
-                searchText_.pop_back();
-                ApplyFilter();
             }
             break;
         case VK_LEFT:
@@ -826,15 +869,50 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         return 0;
 
     case WM_CHAR:
-        if (searchEnabled_ && wParam >= 0x20) {
-            searchText_ += static_cast<wchar_t>(wParam);
+        // When the menu itself has focus and the user types a printable char,
+        // redirect focus and the keystroke into the search EDIT control.
+        if (searchEnabled_ && searchEdit_ && wParam >= 0x20) {
+            SetFocus(searchEdit_);
+            SendMessageW(searchEdit_, uMsg, wParam, lParam);
+        }
+        return 0;
+
+    case WM_COMMAND:
+        // EN_CHANGE from the search EDIT control
+        if (searchEdit_ && HIWORD(wParam) == EN_CHANGE &&
+            reinterpret_cast<HWND>(lParam) == searchEdit_)
+        {
+            int len = GetWindowTextLengthW(searchEdit_);
+            if (len > 0) {
+                searchText_.resize(static_cast<size_t>(len));
+                GetWindowTextW(searchEdit_, searchText_.data(), len + 1);
+            } else {
+                searchText_.clear();
+            }
             ApplyFilter();
         }
         return 0;
 
+    case WM_CTLCOLOREDIT:
+        // Theme the EDIT control to match the menu colors
+        if (searchEdit_ && reinterpret_cast<HWND>(lParam) == searchEdit_) {
+            HDC hdcEdit = reinterpret_cast<HDC>(wParam);
+            SetTextColor(hdcEdit, colors_.menuText);
+            COLORREF editBg = RGB(
+                std::min(255, GetRValue(colors_.menuBg) + 18),
+                std::min(255, GetGValue(colors_.menuBg) + 18),
+                std::min(255, GetBValue(colors_.menuBg) + 18));
+            SetBkColor(hdcEdit, editBg);
+            if (!editBgBrush_) editBgBrush_ = CreateSolidBrush(editBg);
+            return reinterpret_cast<LRESULT>(editBgBrush_);
+        }
+        break;
+
     case WM_KILLFOCUS:
         // Suppress if focus moved to our active child submenu.
         if (subMenuHwnd_ && (HWND)wParam == subMenuHwnd_) return 0;
+        // Suppress if focus moved to our search EDIT control.
+        if (searchEdit_ && (HWND)wParam == searchEdit_) return 0;
         // Suppress while power popup is open.
         if (suppressKillFocus_) return 0;
         done_ = true;
@@ -843,6 +921,14 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_DESTROY:
         done_ = true;
+        // Clean up the EDIT control's font and background brush
+        if (searchEdit_) {
+            HFONT editFont = reinterpret_cast<HFONT>(
+                SendMessageW(searchEdit_, WM_GETFONT, 0, 0));
+            if (editFont) DeleteObject(editFont);
+            searchEdit_ = nullptr;
+        }
+        if (editBgBrush_) { DeleteObject(editBgBrush_); editBgBrush_ = nullptr; }
         if (folderIconList_) { DestroyIcon(folderIconList_); folderIconList_ = nullptr; }
         if (folderIconGrid_) { DestroyIcon(folderIconGrid_); folderIconGrid_ = nullptr; }
         return 0;
@@ -968,7 +1054,7 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
     MSG msg = {};
     while (!menu.done_ && GetMessageW(&msg, nullptr, 0, 0) > 0) {
         if ((msg.message == WM_LBUTTONDOWN || msg.message == WM_RBUTTONDOWN) &&
-            msg.hwnd != hwnd)
+            msg.hwnd != hwnd && msg.hwnd != menu.searchEdit_)
         {
             // Click outside the current menu.
             bool clickedOnParent = isSubmenu && (msg.hwnd == hwndOwner);

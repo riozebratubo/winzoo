@@ -264,6 +264,7 @@ static const int kAppMenuControls[] = {
     IDC_CHECK_APPMENU_FLATTEN_SUBMENUS,
     IDC_CHECK_APPMENU_FLATTEN_ALL,
     IDC_CHECK_APPMENU_SEARCH,
+    IDC_CHECK_APPMENU_SEARCH_FUZZY,
     0
 };
 
@@ -313,6 +314,11 @@ static void SetSidebarControlsEnabled(HWND hwnd, bool enabled)
     };
     for (const int* id = kIds; *id; ++id)
         EnableWindow(GetDlgItem(hwnd, *id), enabled ? TRUE : FALSE);
+}
+
+static void SetSearchControlsEnabled(HWND hwnd, bool enabled)
+{
+    EnableWindow(GetDlgItem(hwnd, IDC_CHECK_APPMENU_SEARCH_FUZZY), enabled ? TRUE : FALSE);
 }
 
 static void SetMinimizedIndicatorControlsEnabled(HWND hwnd, bool enabled)
@@ -429,6 +435,9 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
                    s.appMenuFlattenMode == AppMenuFlattenMode::All ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hAm, IDC_CHECK_APPMENU_SEARCH,
                    s.appMenuSearchEnabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hAm, IDC_CHECK_APPMENU_SEARCH_FUZZY,
+                   s.appMenuSearchFuzzy ? BST_CHECKED : BST_UNCHECKED);
+    SetSearchControlsEnabled(hAm, s.appMenuSearchEnabled);
 }
 
 INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -597,6 +606,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             IDC_CHECK_APPMENU_FLATTEN_SUBMENUS,
             IDC_CHECK_APPMENU_FLATTEN_ALL,
             IDC_CHECK_APPMENU_SEARCH,
+            IDC_CHECK_APPMENU_SEARCH_FUZZY,
             0
         };
         for (const int* id = kCheckIds; *id; ++id)
@@ -646,6 +656,9 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                            ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(hwnd, IDC_CHECK_APPMENU_SEARCH,
                            data->settings->appMenuSearchEnabled ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_SEARCH_FUZZY,
+                           data->settings->appMenuSearchFuzzy ? BST_CHECKED : BST_UNCHECKED);
+            SetSearchControlsEnabled(hwnd, data->settings->appMenuSearchEnabled);
         }
 
         // Build scrollable hosts for all tabs
@@ -943,6 +956,12 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             SetSidebarControlsEnabled(hAm, checked);
             return TRUE;
         }
+        if (LOWORD(wParam) == IDC_CHECK_APPMENU_SEARCH) {
+            HWND hAm = TabHost(data, 3, hwnd);
+            bool checked = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SEARCH) == BST_CHECKED;
+            SetSearchControlsEnabled(hAm, checked);
+            return TRUE;
+        }
         if (LOWORD(wParam) == IDC_CHECK_APPMENU_FLATTEN_SUBMENUS && data) {
             HWND hAm = TabHost(data, 3, hwnd);
             if (IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_FLATTEN_SUBMENUS) == BST_CHECKED)
@@ -1131,6 +1150,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 
                 data->settings->appMenuSearchEnabled =
                     IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SEARCH) == BST_CHECKED;
+                data->settings->appMenuSearchFuzzy =
+                    IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SEARCH_FUZZY) == BST_CHECKED;
             }
 
             EndDialog(hwnd, IDOK);

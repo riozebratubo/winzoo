@@ -163,3 +163,4 @@
 
 // App Menu Search
 #define IDC_CHECK_APPMENU_SEARCH            1161
+#define IDC_CHECK_APPMENU_SEARCH_FUZZY      1162

@@ -68,6 +68,7 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
 
     // App Menu Search
     bool appMenuSearchEnabled          = true;
+    bool appMenuSearchFuzzy            = true;
 
     // App Menu Sidebar
     bool appMenuSidebarEnabled         = true;

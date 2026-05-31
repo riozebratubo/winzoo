@@ -489,15 +489,18 @@ void TaskbarWindow::LayoutButtons()
     int minBtnW = Scale(settings_.minButtonWidth, dpi_);
     if (minBtnW > maxBtnW) minBtnW = maxBtnW;
 
+    // Gap between the tray zone and the adjacent zone to its right (clock/status)
+    int trayGap = (trayZoneW > 0) ? Scale(6, dpi_) : 0;
+
     // Tail reservation
     int tail = 0;
     if (settings_.showClock) {
         int cw = Scale(settings_.clockWidth, dpi_);
-        tail = statusZoneW + trayZoneW + cw;
+        tail = statusZoneW + trayZoneW + trayGap + cw;
         clockRect_ = isHoriz ? RECT{ w - cw, pad, w - pad, h - pad }
                               : RECT{ pad, h - cw, w - pad, h - pad };
     } else {
-        tail = statusZoneW + trayZoneW + (settings_.showRightClickGap ? Scale(20, dpi_) : 0);
+        tail = statusZoneW + trayZoneW + trayGap + (settings_.showRightClickGap ? Scale(20, dpi_) : 0);
     }
 
     // Status icon rects (to the left of the clock, or at the right edge)
@@ -521,11 +524,11 @@ void TaskbarWindow::LayoutButtons()
         }
     }
 
-    // Tray icon rects (to the left of the status zone)
+    // Tray icon rects (to the left of the status zone, with gap to the right)
     if (trayZoneW > 0 && isHoriz) {
-        int tzRight  = statusZoneRect_.left > 0 ? statusZoneRect_.left
-                       : (settings_.showClock ? (w - Scale(settings_.clockWidth, dpi_))
-                          : w - (settings_.showRightClickGap ? Scale(20, dpi_) : 0));
+        int tzRight  = statusZoneRect_.left > 0 ? statusZoneRect_.left - trayGap
+                       : (settings_.showClock ? (w - Scale(settings_.clockWidth, dpi_) - trayGap)
+                          : w - (settings_.showRightClickGap ? Scale(20, dpi_) : 0) - trayGap);
         trayZoneRect_ = { tzRight - trayZoneW, pad, tzRight, h - pad };
 
         int iconPx = std::min(Scale(settings_.trayIconSize, dpi_), h - 2 * pad);
@@ -1204,6 +1207,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                         StartButtonInfo{ showStartButton_, startBtnRect_, hoveredStart_ },
                         MinimizedIndicatorOptions{
                             settings_.showMinimizedIndicator,
+                            settings_.minimizedIndicatorType,
                             settings_.minimizedIndicatorW,
                             settings_.minimizedIndicatorH
                         },
@@ -1626,6 +1630,13 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         return 0;
     }
 
+    case WM_APP_SHOW_MENU: {
+        POINT pt;
+        GetCursorPos(&pt);
+        ShowBackgroundMenu(pt);
+        return 0;
+    }
+
     case WM_DPICHANGED: {
         dpi_ = HIWORD(wParam);
         auto* prc = reinterpret_cast<RECT*>(lParam);
@@ -1661,6 +1672,45 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         LayoutButtons();
         return 0;
     }
+
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case IDM_SETTINGS:
+            if (SettingsDialog::Show(hwnd_, settings_)) {
+                App::Instance().PropagateSettings(settings_, this);
+                ApplySettings(settings_);
+            }
+            return 0;
+        case IDM_EXPORT_SETTINGS:
+            if (ExportSettingsToFile(settings_))
+                MessageBoxW(hwnd_,
+                            L"Settings exported to winzoo-settings.json in the application folder.",
+                            L"Export successful", MB_OK | MB_ICONINFORMATION);
+            else
+                MessageBoxW(hwnd_,
+                            L"Failed to write winzoo-settings.json.\n"
+                            L"Check that the application folder is writable.",
+                            L"Export failed", MB_OK | MB_ICONERROR);
+            return 0;
+        case IDM_ABOUT:
+            MessageBoxW(hwnd_,
+                        L"Winzoo v0.1\n\nA lightweight taskbar replacement for Windows 10/11.",
+                        L"About Winzoo",
+                        MB_OK | MB_ICONINFORMATION);
+            return 0;
+        case IDM_REBUILD_ICON_CACHE:
+            appIconCache_.Clear();
+            StartIconLoadThread();
+            return 0;
+        case IDM_RESTART:
+            App::Instance().RequestRestart();
+            return 0;
+        case IDM_CLOSE_TASKBAR:
+            PostQuitMessage(0);
+            return 0;
+        default: break;
+        }
+        break;
 
     case WM_DESTROY:
         shutdownPending_ = true;

@@ -326,6 +326,7 @@ bool ExportSettingsToFile(const Settings& s)
     wBool("middleClickClose",  s.middleClickClose);
     wBool("showRightClickGap", s.showRightClickGap);
     wBool("showMinimizedIndicator", s.showMinimizedIndicator);
+    wInt("minimizedIndicatorType", static_cast<int>(s.minimizedIndicatorType));
     wInt("minimizedIndicatorW",    s.minimizedIndicatorW);
     wInt("minimizedIndicatorH",    s.minimizedIndicatorH);
     wBool("showStatusZone",   s.showStatusZone);
@@ -519,6 +520,9 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     rb("middleClickClose",  ns.middleClickClose);
     rb("showRightClickGap", ns.showRightClickGap);
     rb("showMinimizedIndicator", ns.showMinimizedIndicator);
+    { int v = static_cast<int>(ns.minimizedIndicatorType);
+      rEnum("minimizedIndicatorType", 0, 1, v);
+      ns.minimizedIndicatorType = static_cast<MinimizedIndicatorType>(v); }
     ri("minimizedIndicatorW", ns.minimizedIndicatorW);
     ri("minimizedIndicatorH", ns.minimizedIndicatorH);
     rb("showStatusZone",   ns.showStatusZone);

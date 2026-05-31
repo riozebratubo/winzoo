@@ -156,6 +156,17 @@ void WindowTracker::RefreshTitle(HWND hwnd)
     if (onChange_) onChange_();
 }
 
+void WindowTracker::RefreshIcon(HWND hwnd)
+{
+    int idx = FindByHwnd(hwnd);
+    if (idx < 0) return;
+    if (iconCache_) {
+        iconCache_->Evict(hwnd);
+        buttons_[idx].icon = iconCache_->GetIcon(hwnd, kIconSize);
+    }
+    if (onChange_) onChange_();
+}
+
 void WindowTracker::OnShellMessage(WPARAM wParam, LPARAM lParam)
 {
     WPARAM code = wParam & 0x7FFF;
@@ -180,8 +191,10 @@ void WindowTracker::OnShellMessage(WPARAM wParam, LPARAM lParam)
         if (hwnd) {
             if (ShouldTrack(hwnd) && FindByHwnd(hwnd) < 0)
                 AddWindow(hwnd);
-            else
+            else {
                 RefreshTitle(hwnd);
+                RefreshIcon(hwnd);
+            }
         }
         break;
 

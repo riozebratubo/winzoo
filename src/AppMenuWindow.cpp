@@ -1,6 +1,7 @@
 #include "AppMenuWindow.h"
 #include "LaunchHelper.h"
 #include "Dpi.h"
+#include "resource.h"
 #include <windowsx.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -279,7 +280,9 @@ void AppMenuWindow::ApplyFilter()
     int contentH = ContentHeight(entryRects_) + padPx;
     int clientH  = menuH_ - searchBoxH_;
     UpdateMaxScroll(contentH, clientH);
-    hoveredIdx_ = -1;
+    // Auto-select first result when searching so Enter opens it directly
+    hoveredIdx_ = (!searchText_.empty() && nodes_ && !nodes_->empty()) ? 0 : -1;
+    scrollOffset_ = 0;
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -476,10 +479,12 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
         FillRect(hdc, &sepR, sepBrush);
         DeleteObject(sepBrush);
 
-        // Collect visible buttons (bottom-aligned order: Explorer, Settings, Power)
+        // Collect visible buttons (bottom-aligned order: WinzooSettings, AllApps, Explorer, Settings, Power)
         struct BtnDef { int idx; const wchar_t* glyph; };
-        BtnDef btns[3];
+        BtnDef btns[5];
         int btnCount = 0;
+        btns[btnCount++] = { 3, L"\uE115" };  // Winzoo Settings
+        btns[btnCount++] = { 4, L"\uE8F1" };  // All Apps
         if (settings_->appMenuSidebarShowExplorer) btns[btnCount++] = { 0, L"\uE8B7" };
         if (settings_->appMenuSidebarShowSettings) btns[btnCount++] = { 1, L"\uE713" };
         if (settings_->appMenuSidebarShowPower)    btns[btnCount++] = { 2, L"\uE7E8" };
@@ -543,9 +548,11 @@ int AppMenuWindow::HitTestSidebarBtn(POINT ptClient) const
     if (sidebarW_ <= 0 || !settings_) return -1;
     if (ptClient.x < menuW_) return -1;
 
-    // Collect enabled buttons in display order (Explorer=0, Settings=1, Power=2)
-    int enabled[3];
+    // Collect enabled buttons in display order
+    int enabled[5];
     int enabledCount = 0;
+    enabled[enabledCount++] = 3;  // Winzoo Settings (always visible)
+    enabled[enabledCount++] = 4;  // All Apps (always visible)
     if (settings_->appMenuSidebarShowExplorer) enabled[enabledCount++] = 0;
     if (settings_->appMenuSidebarShowSettings) enabled[enabledCount++] = 1;
     if (settings_->appMenuSidebarShowPower)    enabled[enabledCount++] = 2;
@@ -693,7 +700,7 @@ void AppMenuWindow::ActivateSidebarBtn(int idx)
 
         // Position popup at the top-right of the power button
         int btnH = settings_ ? Scale(settings_->appMenuEntryHeight, dpi_) : Scale(36, dpi_);
-        int enabledCount = 0;
+        int enabledCount = 2;  // Winzoo Settings + All Apps always present
         if (settings_) {
             if (settings_->appMenuSidebarShowExplorer) ++enabledCount;
             if (settings_->appMenuSidebarShowSettings) ++enabledCount;
@@ -717,6 +724,50 @@ void AppMenuWindow::ActivateSidebarBtn(int idx)
             if (IsWindow(hwnd_)) DestroyWindow(hwnd_);
         } else {
             // User dismissed without selecting — restore focus so the menu stays active.
+            if (IsWindow(hwnd_)) SetForegroundWindow(hwnd_);
+        }
+    } else if (idx == 3) {
+        // Open Winzoo Settings dialog (post to owner taskbar window)
+        HWND owner = GetWindow(hwnd_, GW_OWNER);
+        closeReason_ = AppMenuCloseReason::Selection;
+        done_ = true;
+        DestroyWindow(hwnd_);
+        if (owner) PostMessageW(owner, WM_COMMAND, IDM_SETTINGS, 0);
+    } else if (idx == 4) {
+        // Show the app background menu (Settings, Export, etc.) without closing start menu
+        HMENU hMenu = CreatePopupMenu();
+        AppendMenuW(hMenu, MF_STRING, IDM_SETTINGS,           L"Settings...");
+        AppendMenuW(hMenu, MF_STRING, IDM_EXPORT_SETTINGS,    L"Export settings...");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(hMenu, MF_STRING, IDM_REBUILD_ICON_CACHE, L"Rebuild icon cache");
+        AppendMenuW(hMenu, MF_STRING, IDM_ABOUT,              L"About Winzoo...");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(hMenu, MF_STRING, IDM_RESTART,            L"Restart");
+        AppendMenuW(hMenu, MF_STRING, IDM_CLOSE_TASKBAR,      L"Close");
+
+        // Position at the button
+        int btnH = settings_ ? Scale(settings_->appMenuEntryHeight, dpi_) : Scale(36, dpi_);
+        POINT btnPt = { menuW_ + sidebarW_, 0 };
+        // Find the button's vertical center (second button from top)
+        btnPt.y = menuH_ - (3 + (settings_->appMenuSidebarShowExplorer ? 1 : 0)
+                              + (settings_->appMenuSidebarShowSettings ? 1 : 0)
+                              + (settings_->appMenuSidebarShowPower ? 1 : 0)) * btnH + btnH;
+        ClientToScreen(hwnd_, &btnPt);
+
+        suppressKillFocus_ = true;
+        int cmd = static_cast<int>(TrackPopupMenu(hMenu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_RIGHTALIGN | TPM_TOPALIGN,
+            btnPt.x, btnPt.y, 0, hwnd_, nullptr));
+        suppressKillFocus_ = false;
+        DestroyMenu(hMenu);
+
+        if (cmd > 0) {
+            HWND owner = GetWindow(hwnd_, GW_OWNER);
+            closeReason_ = AppMenuCloseReason::Selection;
+            done_ = true;
+            DestroyWindow(hwnd_);
+            if (owner) PostMessageW(owner, WM_COMMAND, static_cast<WPARAM>(cmd), 0);
+        } else {
             if (IsWindow(hwnd_)) SetForegroundWindow(hwnd_);
         }
     }

@@ -15,6 +15,7 @@ public:
     void OnShellMessage(WPARAM wParam, LPARAM lParam);
     void UpdateActiveWindow();
     void RefreshTitle(HWND hwnd);
+    void RefreshIcon(HWND hwnd);
 
     const std::vector<TaskButton>& Buttons()        const { return buttons_; }
     std::vector<TaskButton>&       MutableButtons()       { return buttons_; }

@@ -130,22 +130,26 @@ BEGIN
     CONTROL         "Show minimized indicator", IDC_CHECK_MINIMIZED_INDICATOR,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 90, 140, 10
 
-    LTEXT           "Indicator width (px):",  IDC_LBL_MINIMIZED_INDICATOR_W,  12, 106, 82, 10
-    EDITTEXT        IDC_EDIT_MINIMIZED_INDICATOR_W,                            96, 104, 28, 12,
+    LTEXT           "Indicator type:",        IDC_LBL_MINIMIZED_INDICATOR_TYPE, 12, 106, 56, 10
+    COMBOBOX        IDC_COMBO_MINIMIZED_INDICATOR_TYPE,                         70, 104, 120, 60,
+                    CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+
+    LTEXT           "Indicator width (px):",  IDC_LBL_MINIMIZED_INDICATOR_W,  12, 122, 82, 10
+    EDITTEXT        IDC_EDIT_MINIMIZED_INDICATOR_W,                            96, 120, 28, 12,
                     ES_NUMBER | WS_TABSTOP
     CONTROL         "", IDC_SPIN_MINIMIZED_INDICATOR_W, "msctls_updown32",
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    124, 104, 12, 12
+                    124, 120, 12, 12
 
-    LTEXT           "Indicator height (px):", IDC_LBL_MINIMIZED_INDICATOR_H,  12, 122, 82, 10
-    EDITTEXT        IDC_EDIT_MINIMIZED_INDICATOR_H,                            96, 120, 28, 12,
+    LTEXT           "Indicator height (px):", IDC_LBL_MINIMIZED_INDICATOR_H,  12, 138, 82, 10
+    EDITTEXT        IDC_EDIT_MINIMIZED_INDICATOR_H,                            96, 136, 28, 12,
                     ES_NUMBER | WS_TABSTOP
     CONTROL         "", IDC_SPIN_MINIMIZED_INDICATOR_H, "msctls_updown32",
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    124, 120, 12, 12
+                    124, 136, 12, 12
 
     CONTROL         "Pinned apps as buttons even if the apps are open", IDC_CHECK_PINNED_AS_BUTTONS,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 138, 192, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 154, 192, 10
 
     /* System Clock tab */
     CONTROL         "Show clock", IDC_CHECK_SHOWCLOCK,

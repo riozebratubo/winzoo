@@ -19,6 +19,10 @@ static constexpr const wchar_t* kAppMenuLayouts[] = {
     L"List", L"Grid"
 };
 
+static constexpr const wchar_t* kMinimizedIndicatorTypes[] = {
+    L"Small rectangle on the bottom", L"Dim the button"
+};
+
 static constexpr const wchar_t* kTaskbarMonitorModes[] = {
     L"On all monitors", L"On primary monitor"
 };
@@ -226,6 +230,7 @@ static const int kAppBtnControls[] = {
     IDC_LBL_MINBTNW,        IDC_EDIT_MINBTNW, IDC_SPIN_MINBTNW,
     IDC_CHECK_MIDDLECLICK,  IDC_CHECK_RIGHTCLICKGAP,
     IDC_CHECK_MINIMIZED_INDICATOR,
+    IDC_LBL_MINIMIZED_INDICATOR_TYPE, IDC_COMBO_MINIMIZED_INDICATOR_TYPE,
     IDC_LBL_MINIMIZED_INDICATOR_W, IDC_EDIT_MINIMIZED_INDICATOR_W, IDC_SPIN_MINIMIZED_INDICATOR_W,
     IDC_LBL_MINIMIZED_INDICATOR_H, IDC_EDIT_MINIMIZED_INDICATOR_H, IDC_SPIN_MINIMIZED_INDICATOR_H,
     IDC_CHECK_PINNED_AS_BUTTONS,
@@ -323,13 +328,23 @@ static void SetSearchControlsEnabled(HWND hwnd, bool enabled)
 
 static void SetMinimizedIndicatorControlsEnabled(HWND hwnd, bool enabled)
 {
-    static const int kIds[] = {
+    EnableWindow(GetDlgItem(hwnd, IDC_LBL_MINIMIZED_INDICATOR_TYPE), enabled ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_COMBO_MINIMIZED_INDICATOR_TYPE), enabled ? TRUE : FALSE);
+
+    // Size controls only apply when type is SmallRectangle
+    bool sizeEnabled = enabled;
+    if (enabled) {
+        int sel = static_cast<int>(
+            SendMessageW(GetDlgItem(hwnd, IDC_COMBO_MINIMIZED_INDICATOR_TYPE), CB_GETCURSEL, 0, 0));
+        sizeEnabled = (sel == static_cast<int>(MinimizedIndicatorType::SmallRectangle));
+    }
+    static const int kSizeIds[] = {
         IDC_LBL_MINIMIZED_INDICATOR_W, IDC_EDIT_MINIMIZED_INDICATOR_W, IDC_SPIN_MINIMIZED_INDICATOR_W,
         IDC_LBL_MINIMIZED_INDICATOR_H, IDC_EDIT_MINIMIZED_INDICATOR_H, IDC_SPIN_MINIMIZED_INDICATOR_H,
         0
     };
-    for (const int* id = kIds; *id; ++id)
-        EnableWindow(GetDlgItem(hwnd, *id), enabled ? TRUE : FALSE);
+    for (const int* id = kSizeIds; *id; ++id)
+        EnableWindow(GetDlgItem(hwnd, *id), sizeEnabled ? TRUE : FALSE);
 }
 
 static void SetAllMonitorsControlsEnabled(HWND hwnd, bool enabled)
@@ -386,6 +401,8 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
                    s.showRightClickGap ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hBtn, IDC_CHECK_MINIMIZED_INDICATOR,
                    s.showMinimizedIndicator ? BST_CHECKED : BST_UNCHECKED);
+    SendMessageW(GetDlgItem(hBtn, IDC_COMBO_MINIMIZED_INDICATOR_TYPE), CB_SETCURSEL,
+                 static_cast<WPARAM>(s.minimizedIndicatorType), 0);
     SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MINIMIZED_INDICATOR_W), UDM_SETPOS32, 0, s.minimizedIndicatorW);
     SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MINIMIZED_INDICATOR_H), UDM_SETPOS32, 0, s.minimizedIndicatorH);
     SetMinimizedIndicatorControlsEnabled(hBtn, s.showMinimizedIndicator);
@@ -530,6 +547,14 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 
         CheckDlgButton(hwnd, IDC_CHECK_MINIMIZED_INDICATOR,
                        data->settings->showMinimizedIndicator ? BST_CHECKED : BST_UNCHECKED);
+
+        {
+            HWND hIndType = GetDlgItem(hwnd, IDC_COMBO_MINIMIZED_INDICATOR_TYPE);
+            for (auto* s : kMinimizedIndicatorTypes)
+                SendMessageW(hIndType, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(s));
+            SendMessageW(hIndType, CB_SETCURSEL,
+                         static_cast<WPARAM>(data->settings->minimizedIndicatorType), 0);
+        }
 
         HWND hIndWSpin = GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_W);
         HWND hIndWEdit = GetDlgItem(hwnd, IDC_EDIT_MINIMIZED_INDICATOR_W);
@@ -950,6 +975,14 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             SetMinimizedIndicatorControlsEnabled(hBtn, checked);
             return TRUE;
         }
+        if (LOWORD(wParam) == IDC_COMBO_MINIMIZED_INDICATOR_TYPE
+            && HIWORD(wParam) == CBN_SELCHANGE)
+        {
+            HWND hBtn = TabHost(data, 1, hwnd);
+            bool checked = IsDlgButtonChecked(hBtn, IDC_CHECK_MINIMIZED_INDICATOR) == BST_CHECKED;
+            SetMinimizedIndicatorControlsEnabled(hBtn, checked);
+            return TRUE;
+        }
         if (LOWORD(wParam) == IDC_CHECK_APPMENU_SIDEBAR) {
             HWND hAm = TabHost(data, 3, hwnd);
             bool checked = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SIDEBAR) == BST_CHECKED;
@@ -1062,6 +1095,13 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 
             data->settings->showMinimizedIndicator =
                 IsDlgButtonChecked(hBtn, IDC_CHECK_MINIMIZED_INDICATOR) == BST_CHECKED;
+
+            {
+                int typeIdx = static_cast<int>(
+                    SendMessageW(GetDlgItem(hBtn, IDC_COMBO_MINIMIZED_INDICATOR_TYPE), CB_GETCURSEL, 0, 0));
+                if (typeIdx >= 0)
+                    data->settings->minimizedIndicatorType = static_cast<MinimizedIndicatorType>(typeIdx);
+            }
 
             int indW = static_cast<int>(
                 SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MINIMIZED_INDICATOR_W), UDM_GETPOS32, 0, 0));

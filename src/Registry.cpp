@@ -220,6 +220,9 @@ Settings LoadSettings()
     if (key.ReadDword(L"MiddleClickClose",  val)) s.middleClickClose  = val != 0;
     if (key.ReadDword(L"ShowRightClickGap", val)) s.showRightClickGap = val != 0;
     if (key.ReadDword(L"ShowMinimizedIndicator", val)) s.showMinimizedIndicator = val != 0;
+    if (key.ReadDword(L"MinimizedIndicatorType", val)) {
+        if (val <= 1) s.minimizedIndicatorType = static_cast<MinimizedIndicatorType>(val);
+    }
     if (key.ReadDword(L"MinimizedIndicatorW", val)) s.minimizedIndicatorW = static_cast<int>(val);
     if (key.ReadDword(L"MinimizedIndicatorH", val)) s.minimizedIndicatorH = static_cast<int>(val);
     if (s.minimizedIndicatorW < 2)  s.minimizedIndicatorW = 2;
@@ -344,6 +347,7 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"MiddleClickClose",  s.middleClickClose  ? 1u : 0u);
     key.WriteDword(L"ShowRightClickGap", s.showRightClickGap ? 1u : 0u);
     key.WriteDword(L"ShowMinimizedIndicator", s.showMinimizedIndicator ? 1u : 0u);
+    key.WriteDword(L"MinimizedIndicatorType", static_cast<DWORD>(s.minimizedIndicatorType));
     key.WriteDword(L"MinimizedIndicatorW",    static_cast<DWORD>(s.minimizedIndicatorW));
     key.WriteDword(L"MinimizedIndicatorH",    static_cast<DWORD>(s.minimizedIndicatorH));
     key.WriteDword(L"ShowStatusZone",    s.showStatusZone    ? 1u : 0u);

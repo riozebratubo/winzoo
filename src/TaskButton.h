@@ -3,9 +3,11 @@
 #include <string>
 #include "Theme.h"
 #include "Dpi.h"
+#include "Settings.h"
 
 struct MinimizedIndicatorOptions {
     bool enabled = true;
+    MinimizedIndicatorType type = MinimizedIndicatorType::SmallRectangle;
     int  width   = 10;
     int  height  = 4;
 };

@@ -4,10 +4,11 @@
 #include <vector>
 #include "Theme.h"
 
-enum class TaskbarPosition    { Top, Bottom, Left, Right, Floating };
-enum class AppMenuLayout      { List = 0, Grid = 1 };
-enum class AppMenuFlattenMode { None = 0, Submenus = 1, All = 2 };
-enum class TaskbarMonitorMode { AllMonitors = 0, Primary = 1 };
+enum class TaskbarPosition         { Top, Bottom, Left, Right, Floating };
+enum class AppMenuLayout           { List = 0, Grid = 1 };
+enum class AppMenuFlattenMode      { None = 0, Submenus = 1, All = 2 };
+enum class TaskbarMonitorMode      { AllMonitors = 0, Primary = 1 };
+enum class MinimizedIndicatorType  { SmallRectangle = 0, DimButton = 1 };
 
 struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can throw (wstring inits); no noexcept contract exists
     TaskbarPosition position  = TaskbarPosition::Bottom;
@@ -23,6 +24,7 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     bool            middleClickClose  = true;
     bool            showRightClickGap = true;
     bool            showMinimizedIndicator = true;
+    MinimizedIndicatorType minimizedIndicatorType = MinimizedIndicatorType::SmallRectangle;
     int             minimizedIndicatorW    = 10;
     int             minimizedIndicatorH    = 4;
     bool showStatusZone    = true;   // show volume / network / battery icons

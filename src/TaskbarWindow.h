@@ -136,4 +136,5 @@ private:
     // Custom WM_APP messages posted by background threads
     static constexpr UINT WM_APP_SCAN_DONE  = WM_APP + 1;
     static constexpr UINT WM_APP_ICONS_DONE = WM_APP + 2;
+    static constexpr UINT WM_APP_SHOW_MENU  = WM_APP + 3;
 };

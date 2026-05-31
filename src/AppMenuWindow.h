@@ -91,7 +91,7 @@ private:
 
     // Sidebar
     int  sidebarW_          = 0;  // 0 if disabled
-    int  sidebarHoveredBtn_ = -1; // 0=Explorer, 1=Settings, 2=Power
+    int  sidebarHoveredBtn_ = -1; // 0=Explorer, 1=Settings, 2=Power, 3=WinzooSettings, 4=AllApps
     bool suppressKillFocus_ = false;
 
     // Search box

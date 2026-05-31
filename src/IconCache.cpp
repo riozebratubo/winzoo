@@ -41,15 +41,27 @@ HICON IconCache::LoadForWindow(HWND hwnd, int sizePx)
     DWORD_PTR result = 0;
     if (SendMessageTimeout(hwnd, WM_GETICON, iconType, 0,
                            SMTO_ABORTIFHUNG, 50, &result) && result)
-        icon = reinterpret_cast<HICON>(result);
+        icon = CopyIcon(reinterpret_cast<HICON>(result));
+
+    // 1b. Retry with ICON_SMALL if ICON_SMALL2 yielded nothing
+    if (!icon && iconType == ICON_SMALL2) {
+        result = 0;
+        if (SendMessageTimeout(hwnd, WM_GETICON, ICON_SMALL, 0,
+                               SMTO_ABORTIFHUNG, 50, &result) && result)
+            icon = CopyIcon(reinterpret_cast<HICON>(result));
+    }
 
     // 2. Class small icon
-    if (!icon)
-        icon = reinterpret_cast<HICON>(GetClassLongPtr(hwnd, GCLP_HICONSM));
+    if (!icon) {
+        HICON cls = reinterpret_cast<HICON>(GetClassLongPtr(hwnd, GCLP_HICONSM));
+        if (cls) icon = CopyIcon(cls);
+    }
 
     // 3. Class large icon
-    if (!icon)
-        icon = reinterpret_cast<HICON>(GetClassLongPtr(hwnd, GCLP_HICON));
+    if (!icon) {
+        HICON cls = reinterpret_cast<HICON>(GetClassLongPtr(hwnd, GCLP_HICON));
+        if (cls) icon = CopyIcon(cls);
+    }
 
     // 4. Extract from executable
     if (!icon) {

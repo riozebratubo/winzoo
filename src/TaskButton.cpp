@@ -4,6 +4,10 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
                       bool hovered, bool pressed, bool isDragGhost, int dpi,
                       const MinimizedIndicatorOptions& indicator) const
 {
+    bool isMinimized = IsRunning() && IsWindow(hwnd) && IsIconic(hwnd);
+    bool dimButton = indicator.enabled && !isDragGhost && isMinimized
+                     && indicator.type == MinimizedIndicatorType::DimButton;
+
     COLORREF bgColor = colors.buttonNormal;
     if (IsRunning()) {
         if (isActive)
@@ -26,9 +30,24 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
         textColor = blend(textColor);
     }
 
+    COLORREF borderColor = colors.buttonBorder;
+
+    if (dimButton) {
+        // Blend toward background (darken) to indicate minimized state
+        auto dim = [](COLORREF c) -> COLORREF {
+            int r = GetRValue(c) * 60 / 100;
+            int g = GetGValue(c) * 60 / 100;
+            int b = GetBValue(c) * 60 / 100;
+            return RGB(r, g, b);
+        };
+        bgColor     = dim(bgColor);
+        textColor   = dim(textColor);
+        borderColor = dim(borderColor);
+    }
+
     int radius = Scale(4, dpi);
     HBRUSH bgBrush = CreateSolidBrush(bgColor);
-    HPEN   borderPen = CreatePen(PS_SOLID, 1, colors.buttonBorder);
+    HPEN   borderPen = CreatePen(PS_SOLID, 1, borderColor);
     HPEN   oldPen   = static_cast<HPEN>(SelectObject(hdc, borderPen));
     HBRUSH oldBrush = static_cast<HBRUSH>(SelectObject(hdc, bgBrush));
 
@@ -74,8 +93,8 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
     }
 
     // Minimized indicator: small accent-colored rectangle at bottom-right
-    if (indicator.enabled && !isDragGhost && IsRunning()
-        && IsWindow(hwnd) && IsIconic(hwnd))
+    if (indicator.enabled && !isDragGhost && isMinimized
+        && indicator.type == MinimizedIndicatorType::SmallRectangle)
     {
         int iw     = Scale(indicator.width,  dpi);
         int ih     = Scale(indicator.height, dpi);

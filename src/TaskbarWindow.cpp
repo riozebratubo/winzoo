@@ -5,6 +5,7 @@
 #include "resource.h"
 #include "SystemStatus.h"
 #include "LaunchHelper.h"
+#include "JumpList.h"
 #include <algorithm>
 #include <atomic>
 #include <memory>
@@ -727,14 +728,42 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
         const std::wstring exePath = pinnedButtons_[combinedIdx].exePath;
         HWND runningHwnd = FindHwndByExePath(exePath);
 
-        std::vector<MenuItem> items = {
-            { L"Open new window",    IDM_OPEN_NEW_WINDOW, false, false, exePath.empty() },
-            { L"",                   0,                   true,  false, false },
-            { L"Unpin from taskbar", IDM_PIN_UNPIN,       false, true,  false },
-            { L"Close window",       IDM_CLOSE_WINDOW,    false, false, !runningHwnd },
-        };
+        // Query jump list items (works via destination files even if app is not running)
+        std::vector<JumpListItem> jumpItems = GetJumpListItems(runningHwnd, exePath);
+
+        std::vector<MenuItem> items;
+
+        // Add jump list items if available (grouped by category)
+        if (!jumpItems.empty()) {
+            std::wstring header = jumpItems[0].category.empty() ? L"Tasks" : jumpItems[0].category;
+            items.push_back({ header, 0, false, false, false, true });
+            for (int i = 0; i < static_cast<int>(jumpItems.size()); ++i) {
+                UINT id = IDM_JUMPLIST_BASE + static_cast<UINT>(i);
+                if (id > IDM_JUMPLIST_MAX) break;
+                items.push_back({ jumpItems[i].displayName, id, false, false, false, false });
+            }
+            items.push_back({ L"", 0, true, false, false, false });
+        }
+
+        items.push_back({ L"Open new window",    IDM_OPEN_NEW_WINDOW, false, false, exePath.empty(), false });
+        items.push_back({ L"",                   0,                   true,  false, false, false });
+        items.push_back({ L"Unpin from taskbar", IDM_PIN_UNPIN,       false, true,  false, false });
+        items.push_back({ L"Close window",       IDM_CLOSE_WINDOW,    false, false, !runningHwnd, false });
 
         UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
+
+        if (id >= IDM_JUMPLIST_BASE && id <= IDM_JUMPLIST_MAX) {
+            int idx = static_cast<int>(id - IDM_JUMPLIST_BASE);
+            if (idx < static_cast<int>(jumpItems.size())) {
+                const auto& ji = jumpItems[idx];
+                const wchar_t* verb = ji.isFolder ? L"explore" : L"open";
+                ShellExecuteW(nullptr, verb, ji.path.c_str(),
+                              ji.arguments.empty() ? nullptr : ji.arguments.c_str(),
+                              ji.workingDir.empty() ? nullptr : ji.workingDir.c_str(),
+                              ji.showCmd);
+            }
+            return;
+        }
 
         switch (id) {
         case IDM_OPEN_NEW_WINDOW:
@@ -795,15 +824,43 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
             if (!exePath.empty() && _wcsicmp(p.c_str(), exePath.c_str()) == 0) { isPinned = true; break; }
     }
 
-    std::vector<MenuItem> items = {
-        { L"Open new window",       IDM_OPEN_NEW_WINDOW, false, false, exePath.empty() },
-        { L"",                      0,                   true,  false, false },
-        { isPinned ? L"Unpin from taskbar" : L"Pin to taskbar",
-                                    IDM_PIN_UNPIN,       false, isPinned, false },
-        { L"Close window",          IDM_CLOSE_WINDOW,    false, false, !isRunning },
-    };
+    // Query jump list items (works via destination files even if app is not running)
+    std::vector<JumpListItem> jumpItems = GetJumpListItems(btnHwnd, exePath);
+
+    std::vector<MenuItem> items;
+
+    // Add jump list items if available (grouped by category)
+    if (!jumpItems.empty()) {
+        std::wstring header = jumpItems[0].category.empty() ? L"Tasks" : jumpItems[0].category;
+        items.push_back({ header, 0, false, false, false, true });
+        for (int i = 0; i < static_cast<int>(jumpItems.size()); ++i) {
+            UINT jid = IDM_JUMPLIST_BASE + static_cast<UINT>(i);
+            if (jid > IDM_JUMPLIST_MAX) break;
+            items.push_back({ jumpItems[i].displayName, jid, false, false, false, false });
+        }
+        items.push_back({ L"", 0, true, false, false, false });
+    }
+
+    items.push_back({ L"Open new window",       IDM_OPEN_NEW_WINDOW, false, false, exePath.empty(), false });
+    items.push_back({ L"",                      0,                   true,  false, false, false });
+    items.push_back({ isPinned ? L"Unpin from taskbar" : L"Pin to taskbar",
+                                                IDM_PIN_UNPIN,       false, isPinned, false, false });
+    items.push_back({ L"Close window",          IDM_CLOSE_WINDOW,    false, false, !isRunning, false });
 
     UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
+
+    if (id >= IDM_JUMPLIST_BASE && id <= IDM_JUMPLIST_MAX) {
+        int idx = static_cast<int>(id - IDM_JUMPLIST_BASE);
+        if (idx < static_cast<int>(jumpItems.size())) {
+            const auto& ji = jumpItems[idx];
+            const wchar_t* verb = ji.isFolder ? L"explore" : L"open";
+            ShellExecuteW(nullptr, verb, ji.path.c_str(),
+                          ji.arguments.empty() ? nullptr : ji.arguments.c_str(),
+                          ji.workingDir.empty() ? nullptr : ji.workingDir.c_str(),
+                          ji.showCmd);
+        }
+        return;
+    }
 
     switch (id) {
     case IDM_OPEN_NEW_WINDOW:

@@ -61,6 +61,8 @@ LRESULT PopupMenu::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
     case WM_MOUSEMOVE: {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         int idx = HitTestItem(pt);
+        if (idx >= 0 && (items_[idx].isSeparator || items_[idx].isHeader || items_[idx].isDisabled))
+            idx = -1;
         if (idx != hovered_) {
             hovered_ = idx;
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -71,7 +73,7 @@ LRESULT PopupMenu::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
     case WM_LBUTTONUP: {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         int idx = HitTestItem(pt);
-        if (idx >= 0 && !items_[idx].isSeparator && !items_[idx].isDisabled) {
+        if (idx >= 0 && !items_[idx].isSeparator && !items_[idx].isHeader && !items_[idx].isDisabled) {
             result_ = items_[idx].id;
         }
         done_ = true;
@@ -83,18 +85,18 @@ LRESULT PopupMenu::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
         switch (wParam) {
         case VK_UP:
             for (int i = hovered_ - 1; i >= 0; --i) {
-                if (!items_[i].isSeparator) { hovered_ = i; break; }
+                if (!items_[i].isSeparator && !items_[i].isHeader && !items_[i].isDisabled) { hovered_ = i; break; }
             }
             InvalidateRect(hwnd, nullptr, FALSE);
             break;
         case VK_DOWN:
             for (int i = hovered_ + 1; std::cmp_less(i, items_.size()); ++i) {
-                if (!items_[i].isSeparator) { hovered_ = i; break; }
+                if (!items_[i].isSeparator && !items_[i].isHeader && !items_[i].isDisabled) { hovered_ = i; break; }
             }
             InvalidateRect(hwnd, nullptr, FALSE);
             break;
         case VK_RETURN:
-            if (hovered_ >= 0 && !items_[hovered_].isSeparator && !items_[hovered_].isDisabled)
+            if (hovered_ >= 0 && !items_[hovered_].isSeparator && !items_[hovered_].isHeader && !items_[hovered_].isDisabled)
                 result_ = items_[hovered_].id;
             done_ = true;
             DestroyWindow(hwnd);
@@ -133,6 +135,12 @@ void PopupMenu::Paint(HDC hdc, int w, int h)
     lf.lfQuality = CLEARTYPE_QUALITY;
     wcscpy_s(lf.lfFaceName, L"Segoe UI");
     HFONT font    = CreateFontIndirectW(&lf);
+
+    LOGFONTW lfHeader = lf;
+    lfHeader.lfWeight = FW_SEMIBOLD;
+    lfHeader.lfHeight = -MulDiv(8, dpi_, 72);
+    HFONT headerFont = CreateFontIndirectW(&lfHeader);
+
     HFONT oldFont = static_cast<HFONT>(SelectObject(hdc, font));
 
     int itemH = ItemHeight();
@@ -150,6 +158,14 @@ void PopupMenu::Paint(HDC hdc, int w, int h)
             LineTo(hdc, w - pad, mid);
             SelectObject(hdc, old);
             DeleteObject(pen);
+        } else if (item.isHeader) {
+            SelectObject(hdc, headerFont);
+            RECT textRect = { pad, y, w - pad, y + itemH };
+            SetTextColor(hdc, colors_.textDimmed);
+            SetBkMode(hdc, TRANSPARENT);
+            DrawTextW(hdc, item.label.c_str(), -1, &textRect,
+                      DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            SelectObject(hdc, font);
         } else {
             if (i == hovered_) {
                 RECT hr = { 0, y, w, y + itemH };
@@ -172,13 +188,14 @@ void PopupMenu::Paint(HDC hdc, int w, int h)
             SetTextColor(hdc, textCol);
             SetBkMode(hdc, TRANSPARENT);
             DrawTextW(hdc, item.label.c_str(), -1, &textRect,
-                      DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                      DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         }
         y += itemH;
     }
 
     SelectObject(hdc, oldFont);
     DeleteObject(font);
+    DeleteObject(headerFont);
 }
 
 int PopupMenu::HitTestItem(POINT ptClient) const
@@ -202,8 +219,33 @@ UINT PopupMenu::Show(HWND hwndOwner, POINT ptScreen,
     menu.dpi_    = dpi;
 
     int itemH = menu.ItemHeight();
-    int menuW = Scale(200, dpi);
     int menuH = static_cast<int>(menu.items_.size()) * itemH;
+
+    // Calculate menu width based on item text
+    int menuW = Scale(200, dpi);
+    {
+        HDC hdc = GetDC(hwndOwner);
+        LOGFONTW lf = {};
+        lf.lfHeight  = -MulDiv(9, dpi, 72);
+        lf.lfQuality = CLEARTYPE_QUALITY;
+        wcscpy_s(lf.lfFaceName, L"Segoe UI");
+        HFONT font = CreateFontIndirectW(&lf);
+        HFONT oldFont = static_cast<HFONT>(SelectObject(hdc, font));
+        int pad = Scale(8, dpi);
+        for (const auto& item : menu.items_) {
+            if (item.isSeparator || item.label.empty()) continue;
+            SIZE sz = {};
+            GetTextExtentPoint32W(hdc, item.label.c_str(),
+                                  static_cast<int>(item.label.size()), &sz);
+            int needed = sz.cx + pad * 2 + itemH + pad;
+            if (needed > menuW) menuW = needed;
+        }
+        SelectObject(hdc, oldFont);
+        DeleteObject(font);
+        ReleaseDC(hwndOwner, hdc);
+        int maxW = Scale(360, dpi);
+        if (menuW > maxW) menuW = maxW;
+    }
 
     // Clamp to the work area of the monitor the point is on
     HMONITOR hMon = MonitorFromPoint(ptScreen, MONITOR_DEFAULTTONEAREST);

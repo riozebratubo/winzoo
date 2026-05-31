@@ -11,6 +11,7 @@ struct MenuItem {
     bool         isSeparator = false;
     bool         isChecked   = false;
     bool         isDisabled  = false;
+    bool         isHeader    = false;   // non-clickable section header
 };
 
 class PopupMenu {

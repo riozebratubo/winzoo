@@ -63,18 +63,49 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
     int iconSz = Scale(16, dpi);
     int pad    = Scale(4, dpi);
 
+    auto drawIcon = [&](int x, int y) {
+        if (!dimButton) {
+            DrawIconEx(hdc, x, y, icon, iconSz, iconSz, 0, nullptr, DI_NORMAL);
+        } else {
+            // Draw icon into a 32bpp DIB, dim pixels to 60%, then blit back
+            BITMAPINFO bmi = {};
+            bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+            bmi.bmiHeader.biWidth       = iconSz;
+            bmi.bmiHeader.biHeight      = -iconSz; // top-down
+            bmi.bmiHeader.biPlanes      = 1;
+            bmi.bmiHeader.biBitCount    = 32;
+            bmi.bmiHeader.biCompression = BI_RGB;
+            void* bits = nullptr;
+            HDC hdcMem = CreateCompatibleDC(hdc);
+            HBITMAP hBmp = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+            HBITMAP oldBmp = static_cast<HBITMAP>(SelectObject(hdcMem, hBmp));
+            BitBlt(hdcMem, 0, 0, iconSz, iconSz, hdc, x, y, SRCCOPY);
+            DrawIconEx(hdcMem, 0, 0, icon, iconSz, iconSz, 0, nullptr, DI_NORMAL);
+            BYTE* p = static_cast<BYTE*>(bits);
+            for (int i = 0; i < iconSz * iconSz; ++i) {
+                p[0] = static_cast<BYTE>(p[0] * 60 / 100);
+                p[1] = static_cast<BYTE>(p[1] * 60 / 100);
+                p[2] = static_cast<BYTE>(p[2] * 60 / 100);
+                p += 4;
+            }
+            BitBlt(hdc, x, y, iconSz, iconSz, hdcMem, 0, 0, SRCCOPY);
+            SelectObject(hdcMem, oldBmp);
+            DeleteObject(hBmp);
+            DeleteDC(hdcMem);
+        }
+    };
+
     if (iconOnly) {
         // Center icon horizontally and vertically
         if (icon) {
             int iconX = rect.left + (w - iconSz) / 2;
             int iconY = rect.top  + (h - iconSz) / 2;
-            DrawIconEx(hdc, iconX, iconY, icon, iconSz, iconSz, 0, nullptr, DI_NORMAL);
+            drawIcon(iconX, iconY);
         }
     } else {
         if (icon) {
             int iconY = rect.top + (h - iconSz) / 2;
-            DrawIconEx(hdc, rect.left + pad, iconY,
-                       icon, iconSz, iconSz, 0, nullptr, DI_NORMAL);
+            drawIcon(rect.left + pad, iconY);
         }
 
         RECT textRect = {

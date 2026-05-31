@@ -70,6 +70,10 @@
 #define IDM_PIN_UNPIN           402
 #define IDM_CLOSE_WINDOW        403
 
+// Jump List items (dynamic range: 600..699)
+#define IDM_JUMPLIST_BASE       600
+#define IDM_JUMPLIST_MAX        699
+
 // App Menu settings tab controls
 #define IDC_LBL_APPMENU_LAYOUT      1100
 #define IDC_COMBO_APPMENU_LAYOUT    1101

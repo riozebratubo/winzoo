@@ -621,6 +621,27 @@ void AppMenuWindow::Scroll(int pixelDelta)
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
+void AppMenuWindow::EnsureVisible(int idx)
+{
+    if (idx < 0 || std::cmp_greater_equal(idx, entryRects_.size())) return;
+    int clientH = menuH_ - searchBoxH_;
+    int top = entryRects_[idx].top;
+    int bot = entryRects_[idx].bottom;
+    if (top < scrollOffset_)
+        scrollOffset_ = top;
+    else if (bot - scrollOffset_ > clientH)
+        scrollOffset_ = bot - clientH;
+    scrollOffset_ = std::max(0, std::min(scrollOffset_, maxScrollOffset_));
+}
+
+void AppMenuWindow::SetHoveredIdx(int idx)
+{
+    if (!nodes_ || idx < 0 || std::cmp_greater_equal(idx, nodes_->size())) return;
+    hoveredIdx_ = idx;
+    EnsureVisible(idx);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
 // ---------- sidebar button activation ----------
 
 static void ExecutePowerAction(PowerOption::Action action)
@@ -807,7 +828,11 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         return 0;
     }
 
-    case WM_KEYDOWN:
+    case WM_KEYDOWN: {
+        bool isList = !settings_ || settings_->appMenuLayout == AppMenuLayout::List;
+        int cols  = (isList || !settings_) ? 1 : std::max(1, settings_->appMenuGridCols);
+        int count = nodes_ ? static_cast<int>(nodes_->size()) : 0;
+
         switch (wParam) {
         case VK_ESCAPE:
             if (searchEnabled_ && !searchText_.empty()) {
@@ -821,52 +846,90 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 DestroyWindow(hwnd);
             }
             break;
+
         case VK_LEFT:
-            // Navigate back to parent when inside a submenu.
-            if (isSubmenu_) {
-                closeReason_ = AppMenuCloseReason::Escape;
-                done_ = true;
-                DestroyWindow(hwnd);
+            if (isList) {
+                // List: navigate back to parent when inside a submenu.
+                if (isSubmenu_) {
+                    closeReason_ = AppMenuCloseReason::Escape;
+                    done_ = true;
+                    DestroyWindow(hwnd);
+                }
+            } else {
+                // Grid: move one item to the left.
+                if (count == 0) break;
+                if (hoveredIdx_ == -1) {
+                    SetHoveredIdx(0);
+                } else if (hoveredIdx_ > 0) {
+                    SetHoveredIdx(hoveredIdx_ - 1);
+                } else if (isSubmenu_) {
+                    // At first item in a grid submenu — close it.
+                    closeReason_ = AppMenuCloseReason::Escape;
+                    done_ = true;
+                    DestroyWindow(hwnd);
+                }
             }
             break;
+
         case VK_RIGHT:
-            // Open submenu if the hovered item is a folder.
-            if (hoveredIdx_ >= 0 && nodes_ &&
-                std::cmp_less(hoveredIdx_, nodes_->size()) &&
-                (*nodes_)[hoveredIdx_].isFolder)
-            {
-                ActivateNode(hoveredIdx_);
+            if (isList) {
+                // List: open submenu if the hovered item is a folder.
+                if (hoveredIdx_ >= 0 && nodes_ &&
+                    std::cmp_less(hoveredIdx_, nodes_->size()) &&
+                    (*nodes_)[hoveredIdx_].isFolder)
+                {
+                    EnsureVisible(hoveredIdx_);
+                    ActivateNode(hoveredIdx_);
+                }
+            } else {
+                // Grid: move one item to the right.
+                if (count == 0) break;
+                if (hoveredIdx_ == -1) {
+                    SetHoveredIdx(0);
+                } else if (hoveredIdx_ + 1 < count) {
+                    SetHoveredIdx(hoveredIdx_ + 1);
+                }
             }
             break;
+
         case VK_UP:
-            if (hoveredIdx_ > 0) {
-                --hoveredIdx_;
-                if (!entryRects_.empty()) {
-                    int top = entryRects_[hoveredIdx_].top;
-                    if (top < scrollOffset_) scrollOffset_ = top;
-                }
-                InvalidateRect(hwnd, nullptr, FALSE);
+            if (count == 0) break;
+            if (hoveredIdx_ == -1) {
+                SetHoveredIdx(count - 1);
+            } else if (hoveredIdx_ - cols >= 0) {
+                SetHoveredIdx(hoveredIdx_ - cols);
             }
             break;
+
         case VK_DOWN:
-            if (nodes_ && hoveredIdx_ >= 0 &&
-                std::cmp_less(hoveredIdx_ + 1, nodes_->size())) {
-                ++hoveredIdx_;
-                if (!entryRects_.empty()) {
-                    int bot = entryRects_[hoveredIdx_].bottom;
-                    if (bot - scrollOffset_ > menuH_ - searchBoxH_)
-                        scrollOffset_ = bot - (menuH_ - searchBoxH_);
+            if (count == 0) break;
+            if (hoveredIdx_ == -1) {
+                SetHoveredIdx(0);
+            } else {
+                int newIdx = hoveredIdx_ + cols;
+                if (newIdx < count) {
+                    SetHoveredIdx(newIdx);
+                } else {
+                    // In grid: if there's a row below the current one, clamp
+                    // to the last item (partial last row).
+                    int curRow  = hoveredIdx_ / cols;
+                    int lastRow = (count - 1) / cols;
+                    if (curRow < lastRow)
+                        SetHoveredIdx(count - 1);
                 }
-                InvalidateRect(hwnd, nullptr, FALSE);
             }
             break;
+
         case VK_RETURN:
-            if (hoveredIdx_ >= 0)
+            if (hoveredIdx_ >= 0) {
+                EnsureVisible(hoveredIdx_);
                 ActivateNode(hoveredIdx_);
+            }
             break;
         default: break;
         }
         return 0;
+    }
 
     case WM_CHAR:
         // When the menu itself has focus and the user types a printable char,

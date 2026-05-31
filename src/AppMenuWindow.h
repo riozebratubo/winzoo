@@ -53,6 +53,8 @@ private:
     void ActivateNode(int idx);
     void ActivateSidebarBtn(int idx);
     void Scroll(int delta);
+    void EnsureVisible(int idx);
+    void SetHoveredIdx(int idx);
     void UpdateMaxScroll(int contentH, int clientH);
     void BuildEntryRects(int menuW);
     RECT GetNodeScreenRect(int idx) const; // returns screen coords of entry i

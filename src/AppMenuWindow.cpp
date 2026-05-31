@@ -296,7 +296,8 @@ static LRESULT CALLBACK SearchEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wPar
         case VK_UP:
         case VK_DOWN:
         case VK_RETURN:
-            // Forward these to the parent menu window
+            // Move focus to the parent menu so further keystrokes go there directly.
+            SetFocus(GetParent(hwnd));
             return SendMessageW(GetParent(hwnd), uMsg, wParam, lParam);
         }
     }

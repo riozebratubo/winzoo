@@ -53,7 +53,7 @@ set(SOURCES
     res/winzoo.rc
 )
 
-add_subdirectory(src/winzoo_hook)
+add_subdirectory(src/winzoo_com)
 
 add_executable(winzoo WIN32 ${SOURCES})
 target_include_directories(winzoo PRIVATE src res)

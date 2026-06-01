@@ -142,7 +142,6 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
         DeleteObject(indBrush);
     }
 
-    // Progress bar at bottom of running task buttons
     if (progressBar.enabled && IsRunning() && !isDragGhost
         && progress.state != kTBPF_NOPROGRESS)
     {
@@ -166,7 +165,7 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
             else if (progress.state == kTBPF_PAUSED)
                 fillColor = RGB(190, 160, 0);
             else
-                fillColor = progressBar.color;  // kTBPF_NORMAL or kTBPF_INDETERMINATE
+                fillColor = progressBar.color;
 
             RECT fillRect = trackRect;
             if (progress.state != kTBPF_INDETERMINATE)

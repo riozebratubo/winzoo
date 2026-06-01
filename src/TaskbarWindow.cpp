@@ -1127,9 +1127,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         HWND appHwnd = TaskbarProxy::DecodeHwnd(wParam);
         int  state   = TaskbarProxy::DecodeState(lParam);
         int  percent = TaskbarProxy::DecodePercent(lParam);
-        // Update the matching task button (pinned buttons don't show progress)
+        // Walk up to root in case the app passed a child HWND
+        HWND rootHwnd = GetAncestor(appHwnd, GA_ROOT);
         for (auto& btn : tracker_.MutableButtons()) {
-            if (btn.hwnd == appHwnd) {
+            if (btn.hwnd == appHwnd || btn.hwnd == rootHwnd) {
                 btn.progress.state   = state;
                 btn.progress.percent = percent;
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -1140,6 +1141,13 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     }
     if (taskbarCreatedMsg_ && uMsg == taskbarCreatedMsg_) {
         HWND tray = FindWindow(L"Shell_TrayWnd", nullptr);
+        // If FindWindow returns our own proxy window, look past it for Explorer's.
+        if (tray) {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(tray, &pid);
+            if (pid == GetCurrentProcessId())
+                tray = FindWindowEx(nullptr, tray, L"Shell_TrayWnd", nullptr);
+        }
         if (tray) ShowWindow(tray, SW_HIDE);
         appBar_.Unregister();
         appBar_.Register(hwnd_, settings_.position, Scale(settings_.thickness, dpi_));
@@ -1188,11 +1196,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         RefreshTrayIcons();
         LayoutButtons();
 
-        // Install progress proxy only on the primary taskbar (one hook is enough).
-        if (isPrimary_) {
-            progressRelayMsg_ = RegisterWindowMessageW(L"WinzooProgress");
+        // Register relay message on all windows; install proxy (COM registration) on primary only.
+        progressRelayMsg_ = RegisterWindowMessageW(L"WinzooProgress");
+        if (isPrimary_)
             proxy_.Install(hwnd_);
-        }
 
         return 0;
     }
@@ -1294,9 +1301,15 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                         tray,
                         ProgressBarOptions{
                             settings_.showProgressBars,
-                            settings_.progressBarUseThemeColor
-                                ? colors_.buttonActive
-                                : settings_.progressBarColor,
+                            [&]() -> COLORREF {
+                                if (!settings_.progressBarUseThemeColor)
+                                    return settings_.progressBarColor;
+                                COLORREF a = colors_.buttonActive;
+                                return RGB(
+                                    std::min(255, static_cast<int>(GetRValue(a)) + 100),
+                                    std::min(255, static_cast<int>(GetGValue(a)) + 100),
+                                    std::min(255, static_cast<int>(GetBValue(a)) + 100));
+                            }(),
                             settings_.progressBarHeight
                         });
         EndPaint(hwnd, &ps);

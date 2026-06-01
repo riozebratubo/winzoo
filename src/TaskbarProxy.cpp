@@ -1,40 +1,68 @@
 #include "TaskbarProxy.h"
 #include <string>
 
-using InstallHookFn   = BOOL(WINAPI*)(HWND winzooHwnd, UINT relayMsg);
-using UninstallHookFn = void(WINAPI*)();
+static constexpr wchar_t kInProcKey[] =
+    L"Software\\Classes\\CLSID\\{56FDF344-FD6D-11d0-958A-006097C9A090}\\InProcServer32";
+static constexpr wchar_t kClsidKey[] =
+    L"Software\\Classes\\CLSID\\{56FDF344-FD6D-11d0-958A-006097C9A090}";
 
-bool TaskbarProxy::Install(HWND winzooHwnd)
-{
-    relayMsg_ = RegisterWindowMessageW(L"WinzooProgress");
+// ---------------------------------------------------------------------------
+
+LRESULT CALLBACK TaskbarProxy::ProxyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_DESTROY) {
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+// ---------------------------------------------------------------------------
+
+bool TaskbarProxy::Install(HWND winzooHwnd) {
+    relayMsg_    = RegisterWindowMessageW(L"WinzooProgress");
     if (!relayMsg_) return false;
+    winzooHwnd_  = winzooHwnd;
 
-    // Load the hook DLL from the same directory as the executable.
+    // --- COM DLL registration (HKCU override) ---
     wchar_t exePath[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    wchar_t* last = wcsrchr(exePath, L'\\');
-    if (last) *(last + 1) = L'\0';
-    std::wstring dllPath = std::wstring(exePath) + L"winzoo_hook.dll";
+    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+    if (lastSlash) *(lastSlash + 1) = L'\0';
+    std::wstring dllPath = std::wstring(exePath) + L"winzoo_com.dll";
 
-    hookDll_ = LoadLibraryW(dllPath.c_str());
-    if (!hookDll_) return false;
-
-    auto fnInstall = reinterpret_cast<InstallHookFn>(
-        GetProcAddress(hookDll_, "InstallHook"));
-    if (!fnInstall) {
-        FreeLibrary(hookDll_);
-        hookDll_ = nullptr;
-        return false;
+    HKEY hKey = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, kInProcKey, 0, nullptr, 0,
+                        KEY_SET_VALUE, nullptr, &hKey, nullptr) == ERROR_SUCCESS) {
+        RegSetValueExW(hKey, nullptr, 0, REG_SZ,
+                       reinterpret_cast<const BYTE*>(dllPath.c_str()),
+                       static_cast<DWORD>((dllPath.size() + 1) * sizeof(wchar_t)));
+        static const wchar_t kApartment[] = L"Apartment";
+        RegSetValueExW(hKey, L"ThreadingModel", 0, REG_SZ,
+                       reinterpret_cast<const BYTE*>(kApartment), sizeof(kApartment));
+        RegCloseKey(hKey);
+        registered_ = true;
     }
 
-    if (!fnInstall(winzooHwnd, relayMsg_)) {
-        FreeLibrary(hookDll_);
-        hookDll_ = nullptr;
-        return false;
+    // --- Proxy Shell_TrayWnd window ---
+    WNDCLASSEXW wc = {};
+    wc.cbSize        = sizeof(wc);
+    wc.lpfnWndProc   = ProxyWndProc;
+    wc.hInstance     = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"Shell_TrayWnd";
+    if (RegisterClassExW(&wc) || GetLastError() == ERROR_CLASS_ALREADY_EXISTS) {
+        proxyHwnd_ = CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            L"Shell_TrayWnd", nullptr, WS_POPUP,
+            0, 0, 0, 0, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        if (proxyHwnd_) {
+            SetWindowLongPtrW(proxyHwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+            SetWindowPos(proxyHwnd_, HWND_TOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
     }
 
-    // After installing the hook, broadcast TaskbarCreated so running apps
-    // reinitialize their ITaskbarList3 objects and resend current progress state.
+    // Broadcast TaskbarCreated: apps reinitialize ITaskbarList3 and get winzoo_com.dll.
     UINT taskbarCreatedMsg = RegisterWindowMessageW(L"TaskbarCreated");
     if (taskbarCreatedMsg)
         PostMessageW(HWND_BROADCAST, taskbarCreatedMsg, 0, 0);
@@ -42,14 +70,15 @@ bool TaskbarProxy::Install(HWND winzooHwnd)
     return true;
 }
 
-void TaskbarProxy::Uninstall()
-{
-    if (hookDll_) {
-        auto fnUninstall = reinterpret_cast<UninstallHookFn>(
-            GetProcAddress(hookDll_, "UninstallHook"));
-        if (fnUninstall) fnUninstall();
-        FreeLibrary(hookDll_);
-        hookDll_ = nullptr;
+void TaskbarProxy::Uninstall() {
+    if (proxyHwnd_) {
+        DestroyWindow(proxyHwnd_);
+        proxyHwnd_ = nullptr;
     }
-    relayMsg_ = 0;
+    winzooHwnd_ = nullptr;
+
+    if (!registered_) return;
+    RegDeleteTreeW(HKEY_CURRENT_USER, kClsidKey);
+    registered_ = false;
+    relayMsg_   = 0;
 }

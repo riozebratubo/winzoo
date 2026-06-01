@@ -6,18 +6,26 @@ When running, winzoo hides the native Windows taskbar and takes its place, reser
 
 ## Features
 
+- *Very* lightweight!
+- Lots of configurations!
+- Custom position: top, bottom, left, right
 - Custom-drawn task buttons with app icon and title
-- Custom-drawn apps menu
+- Custom-drawn apps menu with keyboard navigation and search
 - Drag to reorder buttons
 - Pin/unpin monitor-spaced
-- Lots of configurations!
 - Per monitor DPI aware (PerMonitorV2)
 - Settings persisted in the registry (easily exportable/importable)
 - Small excutable + dll, no installer
+- And lots more...
 
 ## Requirements to use
 
 - Windows 10 or Windows 11
+
+## Export / Import settings
+
+- To export, just select "Export Settings..." on the main taskbar menu
+- To import, just place the exported file into the same folder as the executable. On the next run it will import the settings and delete the file
 
 ## Build
 

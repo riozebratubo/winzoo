@@ -1,27 +1,31 @@
 #pragma once
 #include <windows.h>
-#include <functional>
 
-// Installs a WH_CALLWNDPROC global hook (via winzoo_hook.dll) to intercept
-// ITaskbarList3 progress messages sent by apps to Shell_TrayWnd, and relays
-// them to this process via a registered "WinzooProgress" window message.
+// Intercepts ITaskbarList3 progress in two complementary ways:
+//  1. HKCU COM override: winzoo_com.dll is loaded instead of shell32's CTaskbarList
+//     for any app that calls CoCreateInstance(CLSID_TaskbarList) after Winzoo starts.
+//  2. Proxy Shell_TrayWnd window: shell32's CTaskbarList always FindWindow("Shell_TrayWnd")
+//     and sends private messages. A HWND_TOPMOST window with that class name is found
+//     first, intercepting progress from ALL apps including Explorer's own copy engine.
+// Both paths relay via the WinzooProgress registered message to all WinzooTaskbar windows.
 class TaskbarProxy {
 public:
-    // Returns false if Shell_TrayWnd is not found or hook DLL cannot be loaded.
     bool Install(HWND winzooHwnd);
     void Uninstall();
 
-    // The registered relay message ID (0 until Install() succeeds).
     UINT RelayMsg() const { return relayMsg_; }
 
-    // Decode a relay message: appHwnd=wParam, state=LOWORD(lParam), percent=HIWORD(lParam)
-    static HWND  DecodeHwnd   (WPARAM wp) { return reinterpret_cast<HWND>(wp); }
-    static int   DecodeState  (LPARAM lp) { return static_cast<int>(LOWORD(lp)); }
-    static int   DecodePercent(LPARAM lp) { return static_cast<int>(HIWORD(lp)); }
+    static HWND DecodeHwnd   (WPARAM wp) { return reinterpret_cast<HWND>(wp); }
+    static int  DecodeState  (LPARAM lp) { return static_cast<int>(LOWORD(lp)); }
+    static int  DecodePercent(LPARAM lp) { return static_cast<int>(HIWORD(lp)); }
 
     ~TaskbarProxy() { Uninstall(); }
 
 private:
-    HMODULE hookDll_  = nullptr;
-    UINT    relayMsg_ = 0;
+    static LRESULT CALLBACK ProxyWndProc(HWND, UINT, WPARAM, LPARAM);
+
+    HWND winzooHwnd_  = nullptr;
+    HWND proxyHwnd_   = nullptr;
+    UINT relayMsg_    = 0;
+    bool registered_  = false;
 };

@@ -1131,8 +1131,9 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         HWND rootHwnd = GetAncestor(appHwnd, GA_ROOT);
         for (auto& btn : tracker_.MutableButtons()) {
             if (btn.hwnd == appHwnd || btn.hwnd == rootHwnd) {
-                btn.progress.state   = state;
-                btn.progress.percent = percent;
+                btn.progress.state            = state;
+                btn.progress.percent          = percent;
+                btn.progress.lastProgressTick = (state != kTBPF_NOPROGRESS) ? GetTickCount() : 0;
                 InvalidateRect(hwnd, nullptr, FALSE);
                 break;
             }

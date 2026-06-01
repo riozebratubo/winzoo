@@ -67,10 +67,46 @@ bool TaskbarProxy::Install(HWND winzooHwnd) {
     if (taskbarCreatedMsg)
         PostMessageW(HWND_BROADCAST, taskbarCreatedMsg, 0, 0);
 
+    // --- Hook Explorer's Shell_TrayWnd thread ---
+    // Explorer caches its Shell_TrayWnd HWND at startup (before Winzoo), so our proxy
+    // window is never found. A thread-specific WH_GETMESSAGE hook on Explorer's tray
+    // thread intercepts the internal progress messages (0x04F3).
+    {
+        DWORD myPid = GetCurrentProcessId();
+        HWND  h     = FindWindowW(L"Shell_TrayWnd", nullptr);
+        HWND  explorerTray = nullptr;
+        while (h) {
+            if (h != proxyHwnd_) {
+                DWORD pid = 0;
+                GetWindowThreadProcessId(h, &pid);
+                if (pid != myPid) { explorerTray = h; break; }
+            }
+            h = FindWindowExW(nullptr, h, L"Shell_TrayWnd", nullptr);
+        }
+        if (explorerTray) {
+            hHookDll_ = LoadLibraryW(dllPath.c_str());
+            if (hHookDll_) {
+                using FnInstall = void (__stdcall *)(HWND);
+                auto fnInstall = reinterpret_cast<FnInstall>(
+                    GetProcAddress(hHookDll_, "WinzooCom_InstallHook"));
+                if (fnInstall) fnInstall(explorerTray);
+            }
+        }
+    }
+
     return true;
 }
 
 void TaskbarProxy::Uninstall() {
+    if (hHookDll_) {
+        using FnUninstall = void (__stdcall *)();
+        auto fnUninstall = reinterpret_cast<FnUninstall>(
+            GetProcAddress(hHookDll_, "WinzooCom_UninstallHook"));
+        if (fnUninstall) fnUninstall();
+        FreeLibrary(hHookDll_);
+        hHookDll_ = nullptr;
+    }
+
     if (proxyHwnd_) {
         DestroyWindow(proxyHwnd_);
         proxyHwnd_ = nullptr;

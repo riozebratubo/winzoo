@@ -24,8 +24,9 @@ public:
 private:
     static LRESULT CALLBACK ProxyWndProc(HWND, UINT, WPARAM, LPARAM);
 
-    HWND winzooHwnd_  = nullptr;
-    HWND proxyHwnd_   = nullptr;
-    UINT relayMsg_    = 0;
-    bool registered_  = false;
+    HWND    winzooHwnd_  = nullptr;
+    HWND    proxyHwnd_   = nullptr;
+    UINT    relayMsg_    = 0;
+    bool    registered_  = false;
+    HMODULE hHookDll_    = nullptr;
 };

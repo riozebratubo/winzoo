@@ -20,8 +20,9 @@ static constexpr int kTBPF_ERROR         = 0x4;
 static constexpr int kTBPF_PAUSED        = 0x8;
 
 struct ProgressInfo {
-    int state   = 0;    // kTBPF_* flag
-    int percent = 0;    // 0–100
+    int   state            = 0;    // kTBPF_* flag
+    int   percent          = 0;    // 0–100
+    DWORD lastProgressTick = 0;    // GetTickCount() at last relay; 0 = never received
 };
 
 struct ProgressBarOptions {

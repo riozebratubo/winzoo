@@ -142,8 +142,12 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
         DeleteObject(indBrush);
     }
 
+    static constexpr DWORD kProgressTimeout = 5000; // ms with no update → auto-clear
+
     if (progressBar.enabled && IsRunning() && !isDragGhost
-        && progress.state != kTBPF_NOPROGRESS)
+        && progress.state != kTBPF_NOPROGRESS
+        && progress.lastProgressTick != 0
+        && (GetTickCount() - progress.lastProgressTick) < kProgressTimeout)
     {
         int barH  = Scale(progressBar.height, dpi);
         int mgn   = Scale(1, dpi);

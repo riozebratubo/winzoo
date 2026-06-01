@@ -49,8 +49,11 @@ set(SOURCES
     src/TrayIconProvider.cpp
     src/LaunchHelper.cpp
     src/JumpList.cpp
+    src/TaskbarProxy.cpp
     res/winzoo.rc
 )
+
+add_subdirectory(src/winzoo_hook)
 
 add_executable(winzoo WIN32 ${SOURCES})
 target_include_directories(winzoo PRIVATE src res)

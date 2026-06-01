@@ -321,8 +321,9 @@ bool ExportSettingsToFile(const Settings& s)
     wInt("taskbarMonitorMode",          static_cast<int>(s.taskbarMonitorMode));
     wBool("showAppMenuOnAllMonitors",   s.showAppMenuOnAllMonitors);
     wBool("showCurrentMonitorAppsOnly", s.showCurrentMonitorAppsOnly);
-    wInt("maxButtonWidth", s.maxButtonWidth);
-    wInt("minButtonWidth", s.minButtonWidth);
+    wInt("maxButtonWidth",    s.maxButtonWidth);
+    wInt("minButtonWidth",    s.minButtonWidth);
+    wInt("appButtonIconSize", s.appButtonIconSize);
     wBool("middleClickClose",  s.middleClickClose);
     wBool("showRightClickGap", s.showRightClickGap);
     wBool("showMinimizedIndicator", s.showMinimizedIndicator);
@@ -370,6 +371,10 @@ bool ExportSettingsToFile(const Settings& s)
     wInt("settingsDlgW", s.settingsDlgW);
     wInt("settingsDlgH", s.settingsDlgH);
     wBool("openAppsOnSameMonitor", s.openAppsOnSameMonitor);
+    wBool("showProgressBars",         s.showProgressBars);
+    wBool("progressBarUseThemeColor", s.progressBarUseThemeColor);
+    wUInt("progressBarColor",         static_cast<unsigned int>(s.progressBarColor));
+    wInt("progressBarHeight",         s.progressBarHeight);
 
     // pinnedExePaths
     j += "  \"pinnedExePaths\": [";
@@ -515,8 +520,9 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     ri("floatY",     ns.floatY);
     rb("showAppMenuOnAllMonitors",   ns.showAppMenuOnAllMonitors);
     rb("showCurrentMonitorAppsOnly", ns.showCurrentMonitorAppsOnly);
-    ri("maxButtonWidth", ns.maxButtonWidth);
-    ri("minButtonWidth", ns.minButtonWidth);
+    ri("maxButtonWidth",    ns.maxButtonWidth);
+    ri("minButtonWidth",    ns.minButtonWidth);
+    ri("appButtonIconSize", ns.appButtonIconSize);
     rb("middleClickClose",  ns.middleClickClose);
     rb("showRightClickGap", ns.showRightClickGap);
     rb("showMinimizedIndicator", ns.showMinimizedIndicator);
@@ -573,6 +579,13 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     ri("settingsDlgW", ns.settingsDlgW);
     ri("settingsDlgH", ns.settingsDlgH);
     rb("openAppsOnSameMonitor", ns.openAppsOnSameMonitor);
+    rb("showProgressBars",         ns.showProgressBars);
+    rb("progressBarUseThemeColor", ns.progressBarUseThemeColor);
+    ri("progressBarHeight",        ns.progressBarHeight);
+    { size_t p = FindValue(content, "progressBarColor");
+      unsigned int v = 0;
+      if (p != std::string::npos && ParseUInt(content, p, v))
+          ns.progressBarColor = static_cast<COLORREF>(v); }
 
     { size_t p = FindValue(content, "pinnedExePaths");
       if (p != std::string::npos) ParseStringArray(content, p, ns.pinnedExePaths); }

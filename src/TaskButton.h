@@ -12,15 +12,35 @@ struct MinimizedIndicatorOptions {
     int  height  = 4;
 };
 
+// TBPFLAG values (from shobjidl.h)
+static constexpr int kTBPF_NOPROGRESS    = 0x0;
+static constexpr int kTBPF_INDETERMINATE = 0x1;
+static constexpr int kTBPF_NORMAL        = 0x2;
+static constexpr int kTBPF_ERROR         = 0x4;
+static constexpr int kTBPF_PAUSED        = 0x8;
+
+struct ProgressInfo {
+    int state   = 0;    // kTBPF_* flag
+    int percent = 0;    // 0–100
+};
+
+struct ProgressBarOptions {
+    bool     enabled = true;
+    COLORREF color   = RGB(0, 84, 153);
+    int      height  = 3;   // logical px
+};
+
 struct TaskButton {
     HWND         hwnd     = nullptr;
     HICON        icon     = nullptr;
     std::wstring title;
     std::wstring exePath;
     RECT         rect     = {};
-    bool         isPinned = false;
-    bool         isActive = false;
-    bool         iconOnly = false;  // draw only icon, centered (no text)
+    bool         isPinned   = false;
+    bool         isActive   = false;
+    bool         iconOnly   = false;  // draw only icon, centered (no text)
+    int          iconDrawSz = 16;     // logical icon draw size in px
+    ProgressInfo progress;
 
     bool IsRunning() const { return hwnd != nullptr; }
 
@@ -31,5 +51,6 @@ struct TaskButton {
 
     void Draw(HDC hdc, const ThemeColors& colors,
               bool hovered, bool pressed, bool isDragGhost, int dpi,
-              const MinimizedIndicatorOptions& indicator = {}) const;
+              const MinimizedIndicatorOptions& indicator = {},
+              const ProgressBarOptions& progressBar = {}) const;
 };

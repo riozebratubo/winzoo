@@ -216,6 +216,9 @@ Settings LoadSettings()
     if (s.maxButtonWidth > 400) s.maxButtonWidth = 400;
     if (s.minButtonWidth < 24)  s.minButtonWidth = 24;
     if (s.minButtonWidth > s.maxButtonWidth) s.minButtonWidth = s.maxButtonWidth;
+    if (key.ReadDword(L"AppButtonIconSize", val)) s.appButtonIconSize = static_cast<int>(val);
+    if (s.appButtonIconSize < 16) s.appButtonIconSize = 16;
+    if (s.appButtonIconSize > 64) s.appButtonIconSize = 64;
 
     if (key.ReadDword(L"MiddleClickClose",  val)) s.middleClickClose  = val != 0;
     if (key.ReadDword(L"ShowRightClickGap", val)) s.showRightClickGap = val != 0;
@@ -304,6 +307,15 @@ Settings LoadSettings()
     DWORD bval = 0;
     if (key.ReadDword(L"OpenAppsOnSameMonitor", bval)) s.openAppsOnSameMonitor = (bval != 0);
 
+    if (key.ReadDword(L"ShowProgressBars",         val)) s.showProgressBars         = val != 0;
+    if (key.ReadDword(L"ProgressBarUseThemeColor", val)) s.progressBarUseThemeColor = val != 0;
+    if (key.ReadDword(L"ProgressBarColor",         val)) s.progressBarColor         = static_cast<COLORREF>(val);
+    if (key.ReadDword(L"ProgressBarHeight",        val)) {
+        s.progressBarHeight = static_cast<int>(val);
+        if (s.progressBarHeight < 1)  s.progressBarHeight = 1;
+        if (s.progressBarHeight > 10) s.progressBarHeight = 10;
+    }
+
     // Clamp App Menu values
     if (s.appMenuWidth        < 120)  s.appMenuWidth        = 120;
     if (s.appMenuWidth        > 800)  s.appMenuWidth        = 800;
@@ -342,8 +354,9 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"TaskbarMonitorMode",        static_cast<DWORD>(s.taskbarMonitorMode));
     key.WriteDword(L"ShowAppMenuOnAllMonitors",   s.showAppMenuOnAllMonitors   ? 1u : 0u);
     key.WriteDword(L"ShowCurrentMonitorAppsOnly", s.showCurrentMonitorAppsOnly ? 1u : 0u);
-    key.WriteDword(L"MaxButtonWidth", static_cast<DWORD>(s.maxButtonWidth));
-    key.WriteDword(L"MinButtonWidth", static_cast<DWORD>(s.minButtonWidth));
+    key.WriteDword(L"MaxButtonWidth",    static_cast<DWORD>(s.maxButtonWidth));
+    key.WriteDword(L"MinButtonWidth",    static_cast<DWORD>(s.minButtonWidth));
+    key.WriteDword(L"AppButtonIconSize", static_cast<DWORD>(s.appButtonIconSize));
     key.WriteDword(L"MiddleClickClose",  s.middleClickClose  ? 1u : 0u);
     key.WriteDword(L"ShowRightClickGap", s.showRightClickGap ? 1u : 0u);
     key.WriteDword(L"ShowMinimizedIndicator", s.showMinimizedIndicator ? 1u : 0u);
@@ -396,4 +409,8 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"SettingsDlgW", static_cast<DWORD>(s.settingsDlgW));
     key.WriteDword(L"SettingsDlgH", static_cast<DWORD>(s.settingsDlgH));
     key.WriteDword(L"OpenAppsOnSameMonitor", s.openAppsOnSameMonitor ? 1u : 0u);
+    key.WriteDword(L"ShowProgressBars",         s.showProgressBars         ? 1u : 0u);
+    key.WriteDword(L"ProgressBarUseThemeColor", s.progressBarUseThemeColor ? 1u : 0u);
+    key.WriteDword(L"ProgressBarColor",         static_cast<DWORD>(s.progressBarColor));
+    key.WriteDword(L"ProgressBarHeight",        static_cast<DWORD>(s.progressBarHeight));
 }

@@ -17,6 +17,7 @@
 #include "AppMenuWindow.h"
 #include "SystemStatus.h"
 #include "TrayIconProvider.h"
+#include "TaskbarProxy.h"
 #include <vector>
 
 class TaskbarWindow {
@@ -85,6 +86,7 @@ private:
     AppIconCache    appIconCache_;
     AppBar          appBar_;
     WindowTracker   tracker_;
+    TaskbarProxy    proxy_;
     Settings        settings_;
     DragController  drag_;
     SystemStatusData statusData_    = {};
@@ -101,6 +103,7 @@ private:
     UINT            shellHookMsg_      = 0;
     UINT            taskbarCreatedMsg_ = 0;
     UINT            appBarCallbackMsg_ = 0;
+    UINT            progressRelayMsg_  = 0;
     DWORD           menuLastClosedTick_= 0;
     int             hoveredTrayIdx_ = -1;
     int             trayDragStart_  = -1;  // index pressed

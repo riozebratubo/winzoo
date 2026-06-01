@@ -228,12 +228,17 @@ static const int kGeneralControls[] = {
 static const int kAppBtnControls[] = {
     IDC_LBL_MAXBTNW,        IDC_EDIT_MAXBTNW, IDC_SPIN_MAXBTNW,
     IDC_LBL_MINBTNW,        IDC_EDIT_MINBTNW, IDC_SPIN_MINBTNW,
+    IDC_LBL_APP_BTN_ICON_SZ, IDC_EDIT_APP_BTN_ICON_SZ, IDC_SPIN_APP_BTN_ICON_SZ,
     IDC_CHECK_MIDDLECLICK,  IDC_CHECK_RIGHTCLICKGAP,
     IDC_CHECK_MINIMIZED_INDICATOR,
     IDC_LBL_MINIMIZED_INDICATOR_TYPE, IDC_COMBO_MINIMIZED_INDICATOR_TYPE,
     IDC_LBL_MINIMIZED_INDICATOR_W, IDC_EDIT_MINIMIZED_INDICATOR_W, IDC_SPIN_MINIMIZED_INDICATOR_W,
     IDC_LBL_MINIMIZED_INDICATOR_H, IDC_EDIT_MINIMIZED_INDICATOR_H, IDC_SPIN_MINIMIZED_INDICATOR_H,
     IDC_CHECK_PINNED_AS_BUTTONS,
+    IDC_CHECK_PROGRESSBAR,
+    IDC_CHECK_PROGRESSBAR_THEMECLR,
+    IDC_LBL_PROGRESSBAR_COLOR, IDC_BTN_PROGRESSBAR_COLOR,
+    IDC_LBL_PROGRESSBAR_HEIGHT, IDC_EDIT_PROGRESSBAR_HEIGHT, IDC_SPIN_PROGRESSBAR_HEIGHT,
     0
 };
 static const int kClockControls[] = {
@@ -347,6 +352,17 @@ static void SetMinimizedIndicatorControlsEnabled(HWND hwnd, bool enabled)
         EnableWindow(GetDlgItem(hwnd, *id), sizeEnabled ? TRUE : FALSE);
 }
 
+static void SetProgressBarControlsEnabled(HWND hwnd, bool pbEnabled, bool useTheme)
+{
+    EnableWindow(GetDlgItem(hwnd, IDC_CHECK_PROGRESSBAR_THEMECLR), pbEnabled ? TRUE : FALSE);
+    bool colorEnabled = pbEnabled && !useTheme;
+    EnableWindow(GetDlgItem(hwnd, IDC_LBL_PROGRESSBAR_COLOR),  colorEnabled ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_BTN_PROGRESSBAR_COLOR),  colorEnabled ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_LBL_PROGRESSBAR_HEIGHT), pbEnabled ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_PROGRESSBAR_HEIGHT),pbEnabled ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_SPIN_PROGRESSBAR_HEIGHT),pbEnabled ? TRUE : FALSE);
+}
+
 static void SetAllMonitorsControlsEnabled(HWND hwnd, bool enabled)
 {
     EnableWindow(GetDlgItem(hwnd, IDC_CHECK_APPMENU_ALL_MONITORS),  enabled ? TRUE : FALSE);
@@ -393,8 +409,9 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
     SetAllMonitorsControlsEnabled(hGen, s.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
 
     // App Buttons tab
-    SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MAXBTNW), UDM_SETPOS32, 0, s.maxButtonWidth);
-    SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MINBTNW), UDM_SETPOS32, 0, s.minButtonWidth);
+    SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MAXBTNW),        UDM_SETPOS32, 0, s.maxButtonWidth);
+    SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MINBTNW),        UDM_SETPOS32, 0, s.minButtonWidth);
+    SendMessageW(GetDlgItem(hBtn, IDC_SPIN_APP_BTN_ICON_SZ), UDM_SETPOS32, 0, s.appButtonIconSize);
     CheckDlgButton(hBtn, IDC_CHECK_MIDDLECLICK,
                    s.middleClickClose ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hBtn, IDC_CHECK_RIGHTCLICKGAP,
@@ -408,6 +425,15 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
     SetMinimizedIndicatorControlsEnabled(hBtn, s.showMinimizedIndicator);
     CheckDlgButton(hBtn, IDC_CHECK_PINNED_AS_BUTTONS,
                    s.pinnedAppsAsButtonsWhenOpen ? BST_CHECKED : BST_UNCHECKED);
+
+    // Progress bars
+    CheckDlgButton(hBtn, IDC_CHECK_PROGRESSBAR,
+                   s.showProgressBars ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hBtn, IDC_CHECK_PROGRESSBAR_THEMECLR,
+                   s.progressBarUseThemeColor ? BST_CHECKED : BST_UNCHECKED);
+    SendMessageW(GetDlgItem(hBtn, IDC_SPIN_PROGRESSBAR_HEIGHT), UDM_SETPOS32, 0, s.progressBarHeight);
+    InvalidateRect(GetDlgItem(hBtn, IDC_BTN_PROGRESSBAR_COLOR), nullptr, FALSE);
+    SetProgressBarControlsEnabled(hBtn, s.showProgressBars, s.progressBarUseThemeColor);
 
     // Clock tab
     CheckDlgButton(hClk, IDC_CHECK_SHOWCLOCK, s.showClock ? BST_CHECKED : BST_UNCHECKED);
@@ -540,6 +566,14 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         SendMessageW(hMinSpin, UDM_SETRANGE32, 24, 400);
         SendMessageW(hMinSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(data->settings->minButtonWidth));
 
+        {
+            HWND hIconSpin = GetDlgItem(hwnd, IDC_SPIN_APP_BTN_ICON_SZ);
+            HWND hIconEdit = GetDlgItem(hwnd, IDC_EDIT_APP_BTN_ICON_SZ);
+            SendMessageW(hIconSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hIconEdit), 0);
+            SendMessageW(hIconSpin, UDM_SETRANGE32, 16, 64);
+            SendMessageW(hIconSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(data->settings->appButtonIconSize));
+        }
+
         CheckDlgButton(hwnd, IDC_CHECK_MIDDLECLICK,
                        data->settings->middleClickClose ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(hwnd, IDC_CHECK_RIGHTCLICKGAP,
@@ -572,6 +606,22 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 
         CheckDlgButton(hwnd, IDC_CHECK_PINNED_AS_BUTTONS,
                        data->settings->pinnedAppsAsButtonsWhenOpen ? BST_CHECKED : BST_UNCHECKED);
+
+        // Progress bars
+        CheckDlgButton(hwnd, IDC_CHECK_PROGRESSBAR,
+                       data->settings->showProgressBars ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(hwnd, IDC_CHECK_PROGRESSBAR_THEMECLR,
+                       data->settings->progressBarUseThemeColor ? BST_CHECKED : BST_UNCHECKED);
+        {
+            HWND hPbHSpin = GetDlgItem(hwnd, IDC_SPIN_PROGRESSBAR_HEIGHT);
+            HWND hPbHEdit = GetDlgItem(hwnd, IDC_EDIT_PROGRESSBAR_HEIGHT);
+            SendMessageW(hPbHSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hPbHEdit), 0);
+            SendMessageW(hPbHSpin, UDM_SETRANGE32, 1, 10);
+            SendMessageW(hPbHSpin, UDM_SETPOS32,   0,
+                         static_cast<LPARAM>(data->settings->progressBarHeight));
+        }
+        SetProgressBarControlsEnabled(hwnd, data->settings->showProgressBars,
+                                      data->settings->progressBarUseThemeColor);
 
         // System Clock
         CheckDlgButton(hwnd, IDC_CHECK_SHOWCLOCK,
@@ -620,6 +670,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         static const int kCheckIds[] = {
             IDC_CHECK_MIDDLECLICK, IDC_CHECK_RIGHTCLICKGAP, IDC_CHECK_SHOWCLOCK,
             IDC_CHECK_MINIMIZED_INDICATOR, IDC_CHECK_PINNED_AS_BUTTONS,
+            IDC_CHECK_PROGRESSBAR, IDC_CHECK_PROGRESSBAR_THEMECLR,
             IDC_CHECK_APPMENU_ALL_MONITORS, IDC_CHECK_CURRENT_MONITOR_APPS,
             IDC_CHECK_PINNED_PER_MONITOR,
             IDC_CHECK_STATUS_ZONE, IDC_CHECK_TRAY_ICONS, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
@@ -913,10 +964,16 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
     case WM_DRAWITEM: {
         auto* di = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
         if (!data) break;
-        if (di->CtlID == IDC_BTN_TIMECOLOR || di->CtlID == IDC_BTN_DATECOLOR) {
-            COLORREF color = (di->CtlID == IDC_BTN_TIMECOLOR)
-                             ? data->settings->clockTimeColor
-                             : data->settings->clockDateColor;
+        if (di->CtlID == IDC_BTN_TIMECOLOR || di->CtlID == IDC_BTN_DATECOLOR
+            || di->CtlID == IDC_BTN_PROGRESSBAR_COLOR)
+        {
+            COLORREF color;
+            if (di->CtlID == IDC_BTN_TIMECOLOR)
+                color = data->settings->clockTimeColor;
+            else if (di->CtlID == IDC_BTN_DATECOLOR)
+                color = data->settings->clockDateColor;
+            else
+                color = data->settings->progressBarColor;
             HBRUSH br = CreateSolidBrush(color);
             FillRect(di->hDC, &di->rcItem, br);
             DeleteObject(br);
@@ -933,12 +990,22 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
     }
 
     case WM_COMMAND:
-        if ((LOWORD(wParam) == IDC_BTN_TIMECOLOR || LOWORD(wParam) == IDC_BTN_DATECOLOR)
+        if ((LOWORD(wParam) == IDC_BTN_TIMECOLOR || LOWORD(wParam) == IDC_BTN_DATECOLOR
+             || LOWORD(wParam) == IDC_BTN_PROGRESSBAR_COLOR)
             && data)
         {
-            COLORREF* colorField = (LOWORD(wParam) == IDC_BTN_TIMECOLOR)
-                                   ? &data->settings->clockTimeColor
-                                   : &data->settings->clockDateColor;
+            COLORREF* colorField;
+            HWND hTab;
+            if (LOWORD(wParam) == IDC_BTN_TIMECOLOR) {
+                colorField = &data->settings->clockTimeColor;
+                hTab = TabHost(data, 2, hwnd);
+            } else if (LOWORD(wParam) == IDC_BTN_DATECOLOR) {
+                colorField = &data->settings->clockDateColor;
+                hTab = TabHost(data, 2, hwnd);
+            } else {
+                colorField = &data->settings->progressBarColor;
+                hTab = TabHost(data, 1, hwnd);
+            }
             static COLORREF customColors[16] = {};
             CHOOSECOLORW cc    = {};
             cc.lStructSize     = sizeof(cc);
@@ -948,9 +1015,22 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             cc.Flags           = CC_RGBINIT | CC_FULLOPEN;
             if (ChooseColorW(&cc)) {
                 *colorField = cc.rgbResult;
-                HWND hClk = TabHost(data, 2, hwnd);
-                InvalidateRect(GetDlgItem(hClk, LOWORD(wParam)), nullptr, FALSE);
+                InvalidateRect(GetDlgItem(hTab, LOWORD(wParam)), nullptr, FALSE);
             }
+            return TRUE;
+        }
+        if (LOWORD(wParam) == IDC_CHECK_PROGRESSBAR && data) {
+            HWND hBtn  = TabHost(data, 1, hwnd);
+            bool pb    = IsDlgButtonChecked(hBtn, IDC_CHECK_PROGRESSBAR) == BST_CHECKED;
+            bool theme = IsDlgButtonChecked(hBtn, IDC_CHECK_PROGRESSBAR_THEMECLR) == BST_CHECKED;
+            SetProgressBarControlsEnabled(hBtn, pb, theme);
+            return TRUE;
+        }
+        if (LOWORD(wParam) == IDC_CHECK_PROGRESSBAR_THEMECLR && data) {
+            HWND hBtn  = TabHost(data, 1, hwnd);
+            bool pb    = IsDlgButtonChecked(hBtn, IDC_CHECK_PROGRESSBAR) == BST_CHECKED;
+            bool theme = IsDlgButtonChecked(hBtn, IDC_CHECK_PROGRESSBAR_THEMECLR) == BST_CHECKED;
+            SetProgressBarControlsEnabled(hBtn, pb, theme);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_SHOWCLOCK) {
@@ -1087,6 +1167,9 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             if (minW >= 24 && minW <= 400) data->settings->minButtonWidth = minW;
             if (data->settings->minButtonWidth > data->settings->maxButtonWidth)
                 data->settings->minButtonWidth = data->settings->maxButtonWidth;
+            int iconSz = static_cast<int>(
+                SendMessageW(GetDlgItem(hBtn, IDC_SPIN_APP_BTN_ICON_SZ), UDM_GETPOS32, 0, 0));
+            if (iconSz >= 16 && iconSz <= 64) data->settings->appButtonIconSize = iconSz;
 
             data->settings->middleClickClose =
                 IsDlgButtonChecked(hBtn, IDC_CHECK_MIDDLECLICK) == BST_CHECKED;
@@ -1112,6 +1195,17 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 
             data->settings->pinnedAppsAsButtonsWhenOpen =
                 IsDlgButtonChecked(hBtn, IDC_CHECK_PINNED_AS_BUTTONS) == BST_CHECKED;
+
+            data->settings->showProgressBars =
+                IsDlgButtonChecked(hBtn, IDC_CHECK_PROGRESSBAR) == BST_CHECKED;
+            data->settings->progressBarUseThemeColor =
+                IsDlgButtonChecked(hBtn, IDC_CHECK_PROGRESSBAR_THEMECLR) == BST_CHECKED;
+            // progressBarColor is updated immediately on pick (like clock colors)
+            {
+                int pbH = static_cast<int>(
+                    SendMessageW(GetDlgItem(hBtn, IDC_SPIN_PROGRESSBAR_HEIGHT), UDM_GETPOS32, 0, 0));
+                if (pbH >= 1 && pbH <= 10) data->settings->progressBarHeight = pbH;
+            }
 
             data->settings->showClock =
                 IsDlgButtonChecked(hClk, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;

@@ -170,3 +170,17 @@
 // App Menu Search
 #define IDC_CHECK_APPMENU_SEARCH            1161
 #define IDC_CHECK_APPMENU_SEARCH_FUZZY      1162
+
+// App Buttons — icon size
+#define IDC_LBL_APP_BTN_ICON_SZ             1165
+#define IDC_EDIT_APP_BTN_ICON_SZ            1166
+#define IDC_SPIN_APP_BTN_ICON_SZ            1167
+
+// App Buttons — progress bars
+#define IDC_CHECK_PROGRESSBAR               1168
+#define IDC_CHECK_PROGRESSBAR_THEMECLR      1169
+#define IDC_LBL_PROGRESSBAR_COLOR           1170
+#define IDC_BTN_PROGRESSBAR_COLOR           1171
+#define IDC_LBL_PROGRESSBAR_HEIGHT          1172
+#define IDC_EDIT_PROGRESSBAR_HEIGHT         1173
+#define IDC_SPIN_PROGRESSBAR_HEIGHT         1174

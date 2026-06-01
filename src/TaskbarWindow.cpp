@@ -202,7 +202,6 @@ void TaskbarWindow::ApplySettings(const Settings& s)
 
     RebuildPinnedButtons();
 
-    // If pinned paths changed and any icon is not yet cached, kick off icon loading.
     if (pinnedPathsChanged) {
         for (const auto& btn : pinnedButtons_) {
             if (!btn.icon) { StartIconLoadThread(); break; }
@@ -1124,6 +1123,21 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
     }
+    if (progressRelayMsg_ && uMsg == progressRelayMsg_) {
+        HWND appHwnd = TaskbarProxy::DecodeHwnd(wParam);
+        int  state   = TaskbarProxy::DecodeState(lParam);
+        int  percent = TaskbarProxy::DecodePercent(lParam);
+        // Update the matching task button (pinned buttons don't show progress)
+        for (auto& btn : tracker_.MutableButtons()) {
+            if (btn.hwnd == appHwnd) {
+                btn.progress.state   = state;
+                btn.progress.percent = percent;
+                InvalidateRect(hwnd, nullptr, FALSE);
+                break;
+            }
+        }
+        return 0;
+    }
     if (taskbarCreatedMsg_ && uMsg == taskbarCreatedMsg_) {
         HWND tray = FindWindow(L"Shell_TrayWnd", nullptr);
         if (tray) ShowWindow(tray, SW_HIDE);
@@ -1173,6 +1187,13 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         statusData_ = PollSystemStatus();
         RefreshTrayIcons();
         LayoutButtons();
+
+        // Install progress proxy only on the primary taskbar (one hook is enough).
+        if (isPrimary_) {
+            progressRelayMsg_ = RegisterWindowMessageW(L"WinzooProgress");
+            proxy_.Install(hwnd_);
+        }
+
         return 0;
     }
 
@@ -1214,8 +1235,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         // Build combined buttons vector for rendering (pinned first, then task)
         std::vector<TaskButton> allButtons;
         allButtons.reserve(pinnedButtons_.size() + tracker_.Buttons().size());
-        for (const auto& b : pinnedButtons_)       allButtons.push_back(b);
-        for (const auto& b : tracker_.Buttons())   allButtons.push_back(b);
+        for (auto b : pinnedButtons_)     { b.iconDrawSz = settings_.appButtonIconSize; allButtons.push_back(std::move(b)); }
+        for (auto b : tracker_.Buttons()) { b.iconDrawSz = settings_.appButtonIconSize; allButtons.push_back(std::move(b)); }
 
         StatusZoneInfo status;
         status.visible = settings_.showStatusZone && isHoriz;
@@ -1270,7 +1291,14 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                         },
                         pinnedSepX_,
                         status,
-                        tray);
+                        tray,
+                        ProgressBarOptions{
+                            settings_.showProgressBars,
+                            settings_.progressBarUseThemeColor
+                                ? colors_.buttonActive
+                                : settings_.progressBarColor,
+                            settings_.progressBarHeight
+                        });
         EndPaint(hwnd, &ps);
         return 0;
     }

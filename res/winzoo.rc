@@ -121,35 +121,59 @@ BEGIN
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
                     124, 44, 12, 12
 
+    LTEXT           "Icon size (px):", IDC_LBL_APP_BTN_ICON_SZ,  12,  62,  82, 10
+    EDITTEXT        IDC_EDIT_APP_BTN_ICON_SZ,                     96,  60,  28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_APP_BTN_ICON_SZ, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    124, 60, 12, 12
+
     CONTROL         "Middle-click closes window", IDC_CHECK_MIDDLECLICK,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 62, 148, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 78, 148, 10
 
     CONTROL         "Show right-click gap when no clock", IDC_CHECK_RIGHTCLICKGAP,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 76, 180, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 92, 180, 10
 
     CONTROL         "Show minimized indicator", IDC_CHECK_MINIMIZED_INDICATOR,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 90, 140, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 106, 140, 10
 
-    LTEXT           "Indicator type:",        IDC_LBL_MINIMIZED_INDICATOR_TYPE, 12, 106, 56, 10
-    COMBOBOX        IDC_COMBO_MINIMIZED_INDICATOR_TYPE,                         70, 104, 120, 60,
+    LTEXT           "Indicator type:",        IDC_LBL_MINIMIZED_INDICATOR_TYPE, 12, 122, 56, 10
+    COMBOBOX        IDC_COMBO_MINIMIZED_INDICATOR_TYPE,                         70, 120, 120, 60,
                     CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 
-    LTEXT           "Indicator width (px):",  IDC_LBL_MINIMIZED_INDICATOR_W,  12, 122, 82, 10
-    EDITTEXT        IDC_EDIT_MINIMIZED_INDICATOR_W,                            96, 120, 28, 12,
+    LTEXT           "Indicator width (px):",  IDC_LBL_MINIMIZED_INDICATOR_W,  12, 138, 82, 10
+    EDITTEXT        IDC_EDIT_MINIMIZED_INDICATOR_W,                            96, 136, 28, 12,
                     ES_NUMBER | WS_TABSTOP
     CONTROL         "", IDC_SPIN_MINIMIZED_INDICATOR_W, "msctls_updown32",
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    124, 120, 12, 12
+                    124, 136, 12, 12
 
-    LTEXT           "Indicator height (px):", IDC_LBL_MINIMIZED_INDICATOR_H,  12, 138, 82, 10
-    EDITTEXT        IDC_EDIT_MINIMIZED_INDICATOR_H,                            96, 136, 28, 12,
+    LTEXT           "Indicator height (px):", IDC_LBL_MINIMIZED_INDICATOR_H,  12, 154, 82, 10
+    EDITTEXT        IDC_EDIT_MINIMIZED_INDICATOR_H,                            96, 152, 28, 12,
                     ES_NUMBER | WS_TABSTOP
     CONTROL         "", IDC_SPIN_MINIMIZED_INDICATOR_H, "msctls_updown32",
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    124, 136, 12, 12
+                    124, 152, 12, 12
 
     CONTROL         "Pinned apps as buttons even if the apps are open", IDC_CHECK_PINNED_AS_BUTTONS,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 154, 192, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 170, 192, 10
+
+    CONTROL         "Show progress bars", IDC_CHECK_PROGRESSBAR,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 186, 140, 10
+
+    CONTROL         "Use theme color", IDC_CHECK_PROGRESSBAR_THEMECLR,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 200, 120, 10
+
+    LTEXT           "Color:", IDC_LBL_PROGRESSBAR_COLOR, 20, 216, 28, 10
+    CONTROL         "", IDC_BTN_PROGRESSBAR_COLOR, "Button",
+                    BS_OWNERDRAW | WS_TABSTOP, 52, 214, 44, 12
+
+    LTEXT           "Height (px):", IDC_LBL_PROGRESSBAR_HEIGHT, 20, 232, 56, 10
+    EDITTEXT        IDC_EDIT_PROGRESSBAR_HEIGHT,                 78, 230, 22, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_PROGRESSBAR_HEIGHT, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    100, 230, 12, 12
 
     /* System Clock tab */
     CONTROL         "Show clock", IDC_CHECK_SHOWCLOCK,

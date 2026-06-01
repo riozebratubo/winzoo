@@ -84,7 +84,8 @@ public:
                const MinimizedIndicatorOptions& indicator = {},
                int pinnedSepX = 0,
                const StatusZoneInfo& status = {},
-               const TrayZoneInfo& tray = {});
+               const TrayZoneInfo& tray = {},
+               const ProgressBarOptions& progressBar = {});
 
     ~Renderer();
 

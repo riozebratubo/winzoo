@@ -2,7 +2,8 @@
 
 void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
                       bool hovered, bool pressed, bool isDragGhost, int dpi,
-                      const MinimizedIndicatorOptions& indicator) const
+                      const MinimizedIndicatorOptions& indicator,
+                      const ProgressBarOptions& progressBar) const
 {
     bool isMinimized = IsRunning() && IsWindow(hwnd) && IsIconic(hwnd);
     bool dimButton = indicator.enabled && !isDragGhost && isMinimized
@@ -60,7 +61,7 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
 
     int h = rect.bottom - rect.top;
     int w = rect.right  - rect.left;
-    int iconSz = Scale(16, dpi);
+    int iconSz = Scale(iconDrawSz, dpi);
     int pad    = Scale(4, dpi);
 
     auto drawIcon = [&](int x, int y) {
@@ -139,5 +140,40 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
         HBRUSH indBrush = CreateSolidBrush(colors.buttonActive);
         FillRect(hdc, &indRect, indBrush);
         DeleteObject(indBrush);
+    }
+
+    // Progress bar at bottom of running task buttons
+    if (progressBar.enabled && IsRunning() && !isDragGhost
+        && progress.state != kTBPF_NOPROGRESS)
+    {
+        int barH  = Scale(progressBar.height, dpi);
+        int mgn   = Scale(1, dpi);
+        int totalW = (rect.right - rect.left) - 2 * mgn;
+        if (totalW > 0 && barH > 0) {
+            RECT trackRect = {
+                rect.left  + mgn,
+                rect.bottom - barH - mgn,
+                rect.right - mgn,
+                rect.bottom - mgn
+            };
+            HBRUSH trackBr = CreateSolidBrush(RGB(60, 60, 60));
+            FillRect(hdc, &trackRect, trackBr);
+            DeleteObject(trackBr);
+
+            COLORREF fillColor;
+            if (progress.state == kTBPF_ERROR)
+                fillColor = RGB(196, 43, 28);
+            else if (progress.state == kTBPF_PAUSED)
+                fillColor = RGB(190, 160, 0);
+            else
+                fillColor = progressBar.color;  // kTBPF_NORMAL or kTBPF_INDETERMINATE
+
+            RECT fillRect = trackRect;
+            if (progress.state != kTBPF_INDETERMINATE)
+                fillRect.right = fillRect.left + totalW * progress.percent / 100;
+            HBRUSH fillBr = CreateSolidBrush(fillColor);
+            FillRect(hdc, &fillRect, fillBr);
+            DeleteObject(fillBr);
+        }
     }
 }

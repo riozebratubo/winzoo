@@ -21,6 +21,7 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     bool               showCurrentMonitorAppsOnly = true;
     int             maxButtonWidth    = 200;
     int             minButtonWidth    = 48;
+    int             appButtonIconSize = 48;
     bool            middleClickClose  = true;
     bool            showRightClickGap = true;
     bool            showMinimizedIndicator = true;
@@ -78,6 +79,11 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     bool appMenuSidebarShowExplorer    = true;
     bool appMenuSidebarShowSettings    = true;
     bool appMenuSidebarShowPower       = true;
+
+    bool     showProgressBars         = true;
+    bool     progressBarUseThemeColor = true;
+    COLORREF progressBarColor         = RGB(0, 84, 153);
+    int      progressBarHeight        = 3;   // logical px, range 1–10
 
     bool openAppsOnSameMonitor = false;  // open launched apps/dialogs on the taskbar's monitor
 

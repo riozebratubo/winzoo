@@ -250,7 +250,8 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
                      const MinimizedIndicatorOptions& indicator,
                      int pinnedSepX,
                      const StatusZoneInfo& status,
-                     const TrayZoneInfo& tray)
+                     const TrayZoneInfo& tray,
+                     const ProgressBarOptions& progressBar)
 {
     if (!hdcMem_) return;
 
@@ -272,7 +273,7 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
         if (r.left == 0 && r.right == 0 && r.top == 0 && r.bottom == 0) continue;
         buttons[i].Draw(hdcMem_, colors,
                         i == hoveredIdx, i == pressedIdx,
-                        false, dpi, indicator);
+                        false, dpi, indicator, progressBar);
     }
 
     // Drag ghost
@@ -285,7 +286,7 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
             ghostPt.x - bw / 2, ghostPt.y - bh / 2,
             ghostPt.x + bw / 2, ghostPt.y + bh / 2
         };
-        ghost.Draw(hdcMem_, colors, false, false, true, dpi, indicator);
+        ghost.Draw(hdcMem_, colors, false, false, true, dpi, indicator, progressBar);
 
         // Drop indicator line — skip hidden buttons (rect={})
         for (int i = 0; std::cmp_less_equal(i, buttons.size()); ++i) {

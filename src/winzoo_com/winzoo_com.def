@@ -1,0 +1,6 @@
+LIBRARY winzoo_com
+EXPORTS
+    DllGetClassObject       PRIVATE
+    DllCanUnloadNow         PRIVATE
+    WinzooCom_InstallHook
+    WinzooCom_UninstallHook

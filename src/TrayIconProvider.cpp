@@ -11,7 +11,7 @@ struct TrayData {
     UINT uCallbackMsg;   // 4 bytes
     DWORD dwUserPref;    // 4 bytes
     DWORD pad;           // 4 bytes
-    HICON hIcon;         // 8 bytes on x64 (valid only inside Explorer; ignored)
+    HICON hIcon;         // 8 bytes on x64 (USER object handle, valid cross-process)
 };
 #pragma pack(pop)
 
@@ -108,15 +108,6 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int /*iconSizePx*/)
     int nButtons = static_cast<int>(btnCountResult);
     if (nButtons <= 0) return {};
 
-    // Get the imagelist from the toolbar (try slots 0, 1, 2).
-    HIMAGELIST hIml = nullptr;
-    for (int slot = 0; slot <= 2 && !hIml; ++slot) {
-        DWORD_PTR imlResult = 0;
-        if (SendMessageTimeoutW(hToolbar, TB_GETIMAGELIST, slot, 0,
-                                SMTO_ABORTIFHUNG, 500, &imlResult))
-            hIml = reinterpret_cast<HIMAGELIST>(imlResult);
-    }
-
     // Open Explorer's process for VM operations.
     DWORD explorerPid = 0;
     GetWindowThreadProcessId(hToolbar, &explorerPid);
@@ -153,11 +144,6 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int /*iconSizePx*/)
         TrayIconEntry entry = {};
         entry.uID           = static_cast<UINT>(btn.idCommand);
 
-        // Get icon from imagelist.
-        if (hIml && btn.iBitmap >= 0) {
-            entry.hIcon = ImageList_GetIcon(hIml, btn.iBitmap, ILD_TRANSPARENT);
-        }
-
         // Read the TRAYDATA from Explorer's process via btn.dwData (a remote pointer).
         TrayData td = {};
         if (btn.dwData) {
@@ -169,10 +155,13 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int /*iconSizePx*/)
             }
         }
 
-        // When no imagelist icon was obtained, try CopyIcon on the TRAYDATA hIcon.
-        // Works for shared/system icons; returns NULL for per-process icons (safe to attempt).
-        if (!entry.hIcon && td.hIcon)
+        // Copy the tray icon from Explorer's TRAYDATA. HICON is a USER object
+        // handle valid across processes; the returned icon is owned by us.
+        if (td.hIcon)
             entry.hIcon = CopyIcon(td.hIcon);
+
+        // Skip entries where we couldn't obtain a valid icon.
+        if (!entry.hIcon) continue;
 
         // Tooltip.
         entry.tooltip = GetButtonTooltip(hProc, hToolbar, i, pShared);

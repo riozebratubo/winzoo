@@ -220,6 +220,7 @@ static const int kGeneralControls[] = {
     IDC_CHECK_TRAY_ICONS,
     IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
     IDC_CHECK_TRAY_FALLBACK_EXE,
+    IDC_CHECK_TRAY_OVERFLOW,
     IDC_LBL_TRAY_ICON_SIZE,    IDC_EDIT_TRAY_ICON_SIZE,    IDC_SPIN_TRAY_ICON_SIZE,
     IDC_LBL_TRAY_ICON_PADDING, IDC_EDIT_TRAY_ICON_PADDING, IDC_SPIN_TRAY_ICON_PADDING,
     IDC_LBL_TRAY_ICON_MARGIN,  IDC_EDIT_TRAY_ICON_MARGIN,  IDC_SPIN_TRAY_ICON_MARGIN,
@@ -404,6 +405,8 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
                    s.hideDefaultTrayIcons ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hGen, IDC_CHECK_TRAY_FALLBACK_EXE,
                    s.trayIconFallbackExe ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hGen, IDC_CHECK_TRAY_OVERFLOW,
+                   s.showOverflowTrayIcons ? BST_CHECKED : BST_UNCHECKED);
     SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_SIZE),    UDM_SETPOS32, 0, s.trayIconSize);
     SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_PADDING), UDM_SETPOS32, 0, s.trayIconPadding);
     SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_MARGIN),  UDM_SETPOS32, 0, s.trayIconMargin);
@@ -538,6 +541,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                            data->settings->hideDefaultTrayIcons ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(hwnd, IDC_CHECK_TRAY_FALLBACK_EXE,
                            data->settings->trayIconFallbackExe ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_TRAY_OVERFLOW,
+                           data->settings->showOverflowTrayIcons ? BST_CHECKED : BST_UNCHECKED);
             {
                 auto setupSpin = [&](int spinId, int editId, int lo, int hi, int val) {
                     HWND hSpin = GetDlgItem(hwnd, spinId);
@@ -679,7 +684,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             IDC_CHECK_APPMENU_ALL_MONITORS, IDC_CHECK_CURRENT_MONITOR_APPS,
             IDC_CHECK_PINNED_PER_MONITOR,
             IDC_CHECK_STATUS_ZONE, IDC_CHECK_TRAY_ICONS, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
-            IDC_CHECK_TRAY_FALLBACK_EXE,
+            IDC_CHECK_TRAY_FALLBACK_EXE, IDC_CHECK_TRAY_OVERFLOW,
             IDC_CHECK_OPEN_SAME_MONITOR,
             IDC_CHECK_APPMENU_SIDEBAR,
             IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
@@ -1152,6 +1157,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                     IsDlgButtonChecked(hGen, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS) == BST_CHECKED;
                 data->settings->trayIconFallbackExe =
                     IsDlgButtonChecked(hGen, IDC_CHECK_TRAY_FALLBACK_EXE) == BST_CHECKED;
+                data->settings->showOverflowTrayIcons =
+                    IsDlgButtonChecked(hGen, IDC_CHECK_TRAY_OVERFLOW) == BST_CHECKED;
                 {
                     int tsz = static_cast<int>(
                         SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_SIZE), UDM_GETPOS32, 0, 0));

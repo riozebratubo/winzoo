@@ -220,34 +220,21 @@ static std::wstring GetButtonTooltip(HANDLE hProc, HWND hToolbar, int idx, LPVOI
     return std::wstring(buf.data());
 }
 
-std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIcon)
+// Helper: enumerate all icons from a single toolbar window and append to `result`.
+// `hToolbar` must be a valid ToolbarWindow32 HWND.
+// `hParentForCapture` is the top-level window to show/hide if needed for PrintWindow.
+// `skipHidden`: if true, skip buttons with TBSTATE_HIDDEN.
+static void EnumerateToolbarButtons(HWND hToolbar, HWND hParentForCapture,
+                                    int iconSizePx, bool fallbackExeIcon,
+                                    bool skipHidden,
+                                    std::vector<TrayIconEntry>& result)
 {
-    // Locate the notification area toolbar inside Explorer.
-    // Windows 10 hierarchy: Shell_TrayWnd → TrayNotifyWnd → SysPager → ToolbarWindow32
-    // Windows 11 hierarchy: Shell_TrayWnd → TrayNotifyWnd → ToolbarWindow32 (no SysPager)
-    HWND hTray = FindWindowW(L"Shell_TrayWnd", nullptr);
-    if (!hTray) return {};
-
-    HWND hNotify = FindWindowExW(hTray, nullptr, L"TrayNotifyWnd", nullptr);
-    if (!hNotify) return {};
-
-    // Try Windows 10 path (SysPager wrapper) first, then Windows 11 direct child.
-    HWND hToolbar = nullptr;
-    {
-        HWND hPager = FindWindowExW(hNotify, nullptr, L"SysPager", nullptr);
-        if (hPager)
-            hToolbar = FindWindowExW(hPager, nullptr, L"ToolbarWindow32", nullptr);
-    }
-    if (!hToolbar)
-        hToolbar = FindWindowExW(hNotify, nullptr, L"ToolbarWindow32", nullptr);
-    if (!hToolbar) return {};
-
     DWORD_PTR btnCountResult = 0;
     if (!SendMessageTimeoutW(hToolbar, TB_BUTTONCOUNT, 0, 0,
                              SMTO_ABORTIFHUNG, 500, &btnCountResult))
-        return {};
+        return;
     int nButtons = static_cast<int>(btnCountResult);
-    if (nButtons <= 0) return {};
+    if (nButtons <= 0) return;
 
     // Get the imagelist from the toolbar (try slots 0, 1, 2).
     HIMAGELIST hIml = nullptr;
@@ -261,11 +248,11 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIc
     // Open Explorer's process for VM operations.
     DWORD explorerPid = 0;
     GetWindowThreadProcessId(hToolbar, &explorerPid);
-    if (!explorerPid) return {};
+    if (!explorerPid) return;
 
     HANDLE hProc = OpenProcess(
         PROCESS_VM_READ | PROCESS_VM_OPERATION | PROCESS_VM_WRITE, FALSE, explorerPid);
-    if (!hProc) return {};
+    if (!hProc) return;
 
     // Allocate a shared block in Explorer's address space large enough for one
     // TBBUTTON and a TOOLINFO + text buffer.
@@ -274,36 +261,30 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIc
                                     MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!pShared) {
         CloseHandle(hProc);
-        return {};
+        return;
     }
 
     // Capture the toolbar via PrintWindow to extract icons from its rendering.
-    // The toolbar may not render icons if Shell_TrayWnd is hidden, so we
-    // temporarily make it transparent and visible for the capture.
     int capW = 0, capH = 0;
     BYTE* capPixels = nullptr;
     {
-        bool wasHidden = !IsWindowVisible(hTray);
+        bool wasHidden = hParentForCapture && !IsWindowVisible(hParentForCapture);
         if (wasHidden) {
-            // Make Shell_TrayWnd transparent-but-visible so the toolbar renders.
-            SetWindowLongPtrW(hTray, GWL_EXSTYLE,
-                GetWindowLongPtrW(hTray, GWL_EXSTYLE) | WS_EX_LAYERED);
-            SetLayeredWindowAttributes(hTray, 0, 0, LWA_ALPHA);
-            ShowWindow(hTray, SW_SHOWNOACTIVATE);
-            // Give the toolbar a moment to process the visibility change.
+            SetWindowLongPtrW(hParentForCapture, GWL_EXSTYLE,
+                GetWindowLongPtrW(hParentForCapture, GWL_EXSTYLE) | WS_EX_LAYERED);
+            SetLayeredWindowAttributes(hParentForCapture, 0, 0, LWA_ALPHA);
+            ShowWindow(hParentForCapture, SW_SHOWNOACTIVATE);
             Sleep(50);
         }
 
         capPixels = CaptureToolbarBitmap(hToolbar, &capW, &capH);
 
         if (wasHidden) {
-            ShowWindow(hTray, SW_HIDE);
-            SetWindowLongPtrW(hTray, GWL_EXSTYLE,
-                GetWindowLongPtrW(hTray, GWL_EXSTYLE) & ~WS_EX_LAYERED);
+            ShowWindow(hParentForCapture, SW_HIDE);
+            SetWindowLongPtrW(hParentForCapture, GWL_EXSTYLE,
+                GetWindowLongPtrW(hParentForCapture, GWL_EXSTYLE) & ~WS_EX_LAYERED);
         }
     }
-
-    std::vector<TrayIconEntry> result;
 
     for (int i = 0; i < nButtons; ++i) {
         // Ask Explorer to write the TBBUTTON into shared memory.
@@ -314,15 +295,12 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIc
         TBBUTTON btn = {};
         if (!ReadRemote(hProc, pShared, &btn, sizeof(btn))) continue;
 
-        // Skip hidden buttons.
-        if (btn.fsState & TBSTATE_HIDDEN) continue;
+        // Skip hidden buttons if requested.
+        if (skipHidden && (btn.fsState & TBSTATE_HIDDEN)) continue;
 
         TrayIconEntry entry = {};
         entry.uID           = static_cast<UINT>(btn.idCommand);
 
-        // Read a larger blob from Explorer's TRAYDATA to probe for the icon handle.
-        // The first 16 bytes (hWnd + uID + uCallbackMsg) are stable across Windows
-        // versions; the hIcon offset varies.
         BYTE trayBlob[kTrayDataReadSize] = {};
         bool hasTrayData = false;
         if (btn.dwData) {
@@ -361,11 +339,8 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIc
 
         // --- Icon retrieval ---
 
-        // 1. Probe the TRAYDATA blob for a valid HICON at multiple 8-byte-aligned
-        //    offsets (the hIcon field offset varies between Windows builds).
+        // 1. Probe the TRAYDATA blob for a valid HICON at multiple 8-byte-aligned offsets.
         if (hasTrayData) {
-            // Start probing after the fixed header (16 bytes). Try every 8-byte
-            // aligned slot up to the end of the blob.
             for (SIZE_T off = 16; off + sizeof(HICON) <= kTrayDataReadSize; off += 8) {
                 HICON candidate = *reinterpret_cast<HICON*>(trayBlob + off);
                 if (!candidate) continue;
@@ -414,5 +389,53 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIc
     delete[] capPixels;
     VirtualFreeEx(hProc, pShared, 0, MEM_RELEASE);
     CloseHandle(hProc);
+}
+
+std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIcon,
+                                              bool includeOverflow)
+{
+    // Locate the notification area toolbar inside Explorer.
+    // Windows 10 hierarchy: Shell_TrayWnd → TrayNotifyWnd → SysPager → ToolbarWindow32
+    // Windows 11 hierarchy: Shell_TrayWnd → TrayNotifyWnd → ToolbarWindow32 (no SysPager)
+    HWND hTray = FindWindowW(L"Shell_TrayWnd", nullptr);
+    if (!hTray) return {};
+
+    HWND hNotify = FindWindowExW(hTray, nullptr, L"TrayNotifyWnd", nullptr);
+    if (!hNotify) return {};
+
+    // Try Windows 10 path (SysPager wrapper) first, then Windows 11 direct child.
+    HWND hToolbar = nullptr;
+    {
+        HWND hPager = FindWindowExW(hNotify, nullptr, L"SysPager", nullptr);
+        if (hPager)
+            hToolbar = FindWindowExW(hPager, nullptr, L"ToolbarWindow32", nullptr);
+    }
+    if (!hToolbar)
+        hToolbar = FindWindowExW(hNotify, nullptr, L"ToolbarWindow32", nullptr);
+    if (!hToolbar) return {};
+
+    std::vector<TrayIconEntry> result;
+
+    // Enumerate the visible toolbar. When includeOverflow is true, also include
+    // buttons with TBSTATE_HIDDEN (which are the overflow/chevron-hidden icons
+    // on Windows 11 where they share the same toolbar).
+    EnumerateToolbarButtons(hToolbar, hTray, iconSizePx, fallbackExeIcon,
+                            /*skipHidden=*/!includeOverflow, result);
+
+    // On Windows 10 (or older Win11 builds), overflow icons may live in a
+    // separate NotifyIconOverflowWindow toolbar.
+    if (includeOverflow) {
+        HWND hOverflow = FindWindowW(L"NotifyIconOverflowWindow", nullptr);
+        if (hOverflow) {
+            HWND hOverflowToolbar = FindWindowExW(hOverflow, nullptr,
+                                                  L"ToolbarWindow32", nullptr);
+            if (hOverflowToolbar) {
+                EnumerateToolbarButtons(hOverflowToolbar, hOverflow,
+                                        iconSizePx, fallbackExeIcon,
+                                        /*skipHidden=*/true, result);
+            }
+        }
+    }
+
     return result;
 }

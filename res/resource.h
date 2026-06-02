@@ -177,6 +177,9 @@
 #define IDC_EDIT_APP_BTN_ICON_SZ            1166
 #define IDC_SPIN_APP_BTN_ICON_SZ            1167
 
+// General tab — overflow (hidden) tray icons
+#define IDC_CHECK_TRAY_OVERFLOW             1176
+
 // App Buttons — progress bars
 #define IDC_CHECK_PROGRESSBAR               1168
 #define IDC_CHECK_PROGRESSBAR_THEMECLR      1169

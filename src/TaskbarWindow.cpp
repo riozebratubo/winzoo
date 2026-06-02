@@ -342,7 +342,8 @@ void TaskbarWindow::RefreshTrayIcons()
 
     int iconPx = std::min(Scale(settings_.trayIconSize, dpi_),
                           Scale(settings_.thickness, dpi_));
-    auto fresh = EnumerateTrayIcons(iconPx, settings_.trayIconFallbackExe);
+    auto fresh = EnumerateTrayIcons(iconPx, settings_.trayIconFallbackExe,
+                                    settings_.showOverflowTrayIcons);
 
     // If enumeration returned nothing but we already have entries, keep the
     // previous set. This handles the case where Explorer's toolbar becomes

@@ -85,29 +85,32 @@ BEGIN
     CONTROL         "Fallback to app exe icon when tray icon unavailable", IDC_CHECK_TRAY_FALLBACK_EXE,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 198, 210, 10
 
-    LTEXT           "Tray icon size (px):",    IDC_LBL_TRAY_ICON_SIZE,    20, 216, 90, 10
-    EDITTEXT        IDC_EDIT_TRAY_ICON_SIZE,                              116, 214, 28, 12,
+    CONTROL         "Show overflow (hidden) tray icons", IDC_CHECK_TRAY_OVERFLOW,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 210, 184, 10
+
+    LTEXT           "Tray icon size (px):",    IDC_LBL_TRAY_ICON_SIZE,    20, 228, 90, 10
+    EDITTEXT        IDC_EDIT_TRAY_ICON_SIZE,                              116, 226, 28, 12,
                     ES_NUMBER | WS_TABSTOP
     CONTROL         "", IDC_SPIN_TRAY_ICON_SIZE, "msctls_updown32",
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    144, 214, 12, 12
+                    144, 226, 12, 12
 
-    LTEXT           "Tray icon padding (px):", IDC_LBL_TRAY_ICON_PADDING, 20, 232, 90, 10
-    EDITTEXT        IDC_EDIT_TRAY_ICON_PADDING,                           116, 230, 28, 12,
+    LTEXT           "Tray icon padding (px):", IDC_LBL_TRAY_ICON_PADDING, 20, 244, 90, 10
+    EDITTEXT        IDC_EDIT_TRAY_ICON_PADDING,                           116, 242, 28, 12,
                     ES_NUMBER | WS_TABSTOP
     CONTROL         "", IDC_SPIN_TRAY_ICON_PADDING, "msctls_updown32",
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    144, 230, 12, 12
+                    144, 242, 12, 12
 
-    LTEXT           "Tray icon margin (px):",  IDC_LBL_TRAY_ICON_MARGIN,  20, 248, 90, 10
-    EDITTEXT        IDC_EDIT_TRAY_ICON_MARGIN,                            116, 246, 28, 12,
+    LTEXT           "Tray icon margin (px):",  IDC_LBL_TRAY_ICON_MARGIN,  20, 260, 90, 10
+    EDITTEXT        IDC_EDIT_TRAY_ICON_MARGIN,                            116, 258, 28, 12,
                     ES_NUMBER | WS_TABSTOP
     CONTROL         "", IDC_SPIN_TRAY_ICON_MARGIN, "msctls_updown32",
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    144, 246, 12, 12
+                    144, 258, 12, 12
 
     CONTROL         "Open launched apps/dialogs on same monitor", IDC_CHECK_OPEN_SAME_MONITOR,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 264, 192, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 276, 192, 10
 
     /* App Buttons tab */
     LTEXT           "Max btn width (px):", IDC_LBL_MAXBTNW,   12,  30,  82, 10

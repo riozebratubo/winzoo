@@ -53,5 +53,6 @@ struct TaskButton {
     void Draw(HDC hdc, const ThemeColors& colors,
               bool hovered, bool pressed, bool isDragGhost, int dpi,
               const MinimizedIndicatorOptions& indicator = {},
-              const ProgressBarOptions& progressBar = {}) const;
+              const ProgressBarOptions& progressBar = {},
+              int borderRadius = 0) const;
 };

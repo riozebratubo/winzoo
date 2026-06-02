@@ -316,6 +316,11 @@ Settings LoadSettings()
         if (s.progressBarHeight < 1)  s.progressBarHeight = 1;
         if (s.progressBarHeight > 10) s.progressBarHeight = 10;
     }
+    if (key.ReadDword(L"ButtonOutlineRadius", val)) {
+        s.buttonOutlineRadius = static_cast<int>(val);
+        if (s.buttonOutlineRadius < 0)  s.buttonOutlineRadius = 0;
+        if (s.buttonOutlineRadius > 32) s.buttonOutlineRadius = 32;
+    }
 
     // Clamp App Menu values
     if (s.appMenuWidth        < 120)  s.appMenuWidth        = 120;
@@ -415,4 +420,5 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"ProgressBarUseThemeColor", s.progressBarUseThemeColor ? 1u : 0u);
     key.WriteDword(L"ProgressBarColor",         static_cast<DWORD>(s.progressBarColor));
     key.WriteDword(L"ProgressBarHeight",        static_cast<DWORD>(s.progressBarHeight));
+    key.WriteDword(L"ButtonOutlineRadius",      static_cast<DWORD>(s.buttonOutlineRadius));
 }

@@ -181,6 +181,13 @@ BEGIN
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
                     100, 230, 12, 12
 
+    LTEXT           "Outline radius (px):", IDC_LBL_BTN_OUTLINE_RADIUS, 12, 250, 80, 10
+    EDITTEXT        IDC_EDIT_BTN_OUTLINE_RADIUS,                         96, 248, 22, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_BTN_OUTLINE_RADIUS, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    118, 248, 12, 12
+
     /* System Clock tab */
     CONTROL         "Show clock", IDC_CHECK_SHOWCLOCK,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 28, 80, 12

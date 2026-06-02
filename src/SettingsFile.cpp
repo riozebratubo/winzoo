@@ -374,6 +374,7 @@ bool ExportSettingsToFile(const Settings& s)
     wInt("settingsDlgW", s.settingsDlgW);
     wInt("settingsDlgH", s.settingsDlgH);
     wBool("openAppsOnSameMonitor", s.openAppsOnSameMonitor);
+    wInt("buttonOutlineRadius",       s.buttonOutlineRadius);
     wBool("showProgressBars",         s.showProgressBars);
     wBool("progressBarUseThemeColor", s.progressBarUseThemeColor);
     wUInt("progressBarColor",         static_cast<unsigned int>(s.progressBarColor));
@@ -585,6 +586,7 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     ri("settingsDlgW", ns.settingsDlgW);
     ri("settingsDlgH", ns.settingsDlgH);
     rb("openAppsOnSameMonitor", ns.openAppsOnSameMonitor);
+    ri("buttonOutlineRadius",      ns.buttonOutlineRadius);
     rb("showProgressBars",         ns.showProgressBars);
     rb("progressBarUseThemeColor", ns.progressBarUseThemeColor);
     ri("progressBarHeight",        ns.progressBarHeight);

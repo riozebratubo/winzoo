@@ -185,6 +185,11 @@
 // General tab — overflow (hidden) tray icons
 #define IDC_CHECK_TRAY_OVERFLOW             1176
 
+// App Buttons — outline border radius
+#define IDC_LBL_BTN_OUTLINE_RADIUS          1177
+#define IDC_EDIT_BTN_OUTLINE_RADIUS         1178
+#define IDC_SPIN_BTN_OUTLINE_RADIUS         1179
+
 // App Buttons — progress bars
 #define IDC_CHECK_PROGRESSBAR               1168
 #define IDC_CHECK_PROGRESSBAR_THEMECLR      1169

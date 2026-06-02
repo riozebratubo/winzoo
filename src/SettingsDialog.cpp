@@ -241,6 +241,7 @@ static const int kAppBtnControls[] = {
     IDC_CHECK_PROGRESSBAR_THEMECLR,
     IDC_LBL_PROGRESSBAR_COLOR, IDC_BTN_PROGRESSBAR_COLOR,
     IDC_LBL_PROGRESSBAR_HEIGHT, IDC_EDIT_PROGRESSBAR_HEIGHT, IDC_SPIN_PROGRESSBAR_HEIGHT,
+    IDC_LBL_BTN_OUTLINE_RADIUS, IDC_EDIT_BTN_OUTLINE_RADIUS, IDC_SPIN_BTN_OUTLINE_RADIUS,
     0
 };
 static const int kClockControls[] = {
@@ -440,6 +441,7 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
     SendMessageW(GetDlgItem(hBtn, IDC_SPIN_PROGRESSBAR_HEIGHT), UDM_SETPOS32, 0, s.progressBarHeight);
     InvalidateRect(GetDlgItem(hBtn, IDC_BTN_PROGRESSBAR_COLOR), nullptr, FALSE);
     SetProgressBarControlsEnabled(hBtn, s.showProgressBars, s.progressBarUseThemeColor);
+    SendMessageW(GetDlgItem(hBtn, IDC_SPIN_BTN_OUTLINE_RADIUS), UDM_SETPOS32, 0, s.buttonOutlineRadius);
 
     // Clock tab
     CheckDlgButton(hClk, IDC_CHECK_SHOWCLOCK, s.showClock ? BST_CHECKED : BST_UNCHECKED);
@@ -632,6 +634,15 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         }
         SetProgressBarControlsEnabled(hwnd, data->settings->showProgressBars,
                                       data->settings->progressBarUseThemeColor);
+
+        {
+            HWND hRadSpin = GetDlgItem(hwnd, IDC_SPIN_BTN_OUTLINE_RADIUS);
+            HWND hRadEdit = GetDlgItem(hwnd, IDC_EDIT_BTN_OUTLINE_RADIUS);
+            SendMessageW(hRadSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hRadEdit), 0);
+            SendMessageW(hRadSpin, UDM_SETRANGE32, 0, 32);
+            SendMessageW(hRadSpin, UDM_SETPOS32,   0,
+                         static_cast<LPARAM>(data->settings->buttonOutlineRadius));
+        }
 
         // System Clock
         CheckDlgButton(hwnd, IDC_CHECK_SHOWCLOCK,
@@ -1220,6 +1231,11 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 int pbH = static_cast<int>(
                     SendMessageW(GetDlgItem(hBtn, IDC_SPIN_PROGRESSBAR_HEIGHT), UDM_GETPOS32, 0, 0));
                 if (pbH >= 1 && pbH <= 10) data->settings->progressBarHeight = pbH;
+            }
+            {
+                int rad = static_cast<int>(
+                    SendMessageW(GetDlgItem(hBtn, IDC_SPIN_BTN_OUTLINE_RADIUS), UDM_GETPOS32, 0, 0));
+                if (rad >= 0 && rad <= 32) data->settings->buttonOutlineRadius = rad;
             }
 
             data->settings->showClock =

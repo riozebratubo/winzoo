@@ -1466,7 +1466,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                                     std::min(255, static_cast<int>(GetBValue(a)) + 100));
                             }(),
                             settings_.progressBarHeight
-                        });
+                        },
+                        settings_.buttonOutlineRadius);
         EndPaint(hwnd, &ps);
         return 0;
     }

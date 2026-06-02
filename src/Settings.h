@@ -83,6 +83,8 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     bool appMenuSidebarShowSettings    = true;
     bool appMenuSidebarShowPower       = true;
 
+    int      buttonOutlineRadius      = 0;    // corner radius of task button outline in logical px
+
     bool     showProgressBars         = true;
     bool     progressBarUseThemeColor = true;
     COLORREF progressBarColor         = RGB(0, 84, 153);

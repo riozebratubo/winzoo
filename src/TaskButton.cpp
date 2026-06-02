@@ -3,7 +3,8 @@
 void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
                       bool hovered, bool pressed, bool isDragGhost, int dpi,
                       const MinimizedIndicatorOptions& indicator,
-                      const ProgressBarOptions& progressBar) const
+                      const ProgressBarOptions& progressBar,
+                      int borderRadius) const
 {
     bool isMinimized = IsRunning() && IsWindow(hwnd) && IsIconic(hwnd);
     bool dimButton = indicator.enabled && !isDragGhost && isMinimized
@@ -46,7 +47,7 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
         borderColor = dim(borderColor);
     }
 
-    int radius = Scale(4, dpi);
+    int radius = Scale(borderRadius, dpi);
     HBRUSH bgBrush = CreateSolidBrush(bgColor);
     HPEN   borderPen = CreatePen(PS_SOLID, 1, borderColor);
     HPEN   oldPen   = static_cast<HPEN>(SelectObject(hdc, borderPen));

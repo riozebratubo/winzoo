@@ -90,7 +90,8 @@ public:
                int pinnedSepX = 0,
                const StatusZoneInfo& status = {},
                const TrayZoneInfo& tray = {},
-               const ProgressBarOptions& progressBar = {});
+               const ProgressBarOptions& progressBar = {},
+               int buttonBorderRadius = 0);
 
     ~Renderer();
 

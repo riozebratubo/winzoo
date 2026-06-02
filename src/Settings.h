@@ -29,6 +29,7 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     int             minimizedIndicatorW    = 10;
     int             minimizedIndicatorH    = 4;
     bool showStatusZone    = true;   // show volume / network / battery icons
+    bool showLangIndicator = true;   // show current keyboard/input language (e.g. "EN", "JA")
     int  statusIconSize    = 22;     // icon side length in logical pixels
 
     bool showTrayIcons     = true;   // show notification-area (system tray) icons

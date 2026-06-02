@@ -54,6 +54,11 @@ struct StatusZoneInfo {
     bool batCharging  = false;
     int  batPercent   = 0;
     bool batHovered   = false;
+
+    bool         langAvailable = false;
+    RECT         langRect      = {};
+    std::wstring langText;
+    bool         langHovered   = false;
 };
 
 struct TrayZoneInfo {

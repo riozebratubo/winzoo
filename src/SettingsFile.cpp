@@ -331,6 +331,7 @@ bool ExportSettingsToFile(const Settings& s)
     wInt("minimizedIndicatorW",    s.minimizedIndicatorW);
     wInt("minimizedIndicatorH",    s.minimizedIndicatorH);
     wBool("showStatusZone",   s.showStatusZone);
+    wBool("showLangIndicator", s.showLangIndicator);
     wInt("statusIconSize",    s.statusIconSize);
     wBool("showTrayIcons",    s.showTrayIcons);
     wBool("hideDefaultTrayIcons", s.hideDefaultTrayIcons);
@@ -534,6 +535,7 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     ri("minimizedIndicatorW", ns.minimizedIndicatorW);
     ri("minimizedIndicatorH", ns.minimizedIndicatorH);
     rb("showStatusZone",   ns.showStatusZone);
+    rb("showLangIndicator", ns.showLangIndicator);
     ri("statusIconSize",   ns.statusIconSize);
     rb("showTrayIcons",    ns.showTrayIcons);
     rb("hideDefaultTrayIcons", ns.hideDefaultTrayIcons);

@@ -43,6 +43,7 @@ private:
     void ShowButtonMenu(int combinedIdx, POINT ptScreen);
     void ShowBackgroundMenu(POINT ptScreen);
     void ShowStatusIconMenu(int which, POINT ptScreen);  // 1=vol, 2=net, 3=bat
+    void ShowLangMenu(POINT ptScreen);
     void ShowAppMenu();
     void StartScanThread(bool isFirstScan);
     void StartIconLoadThread();
@@ -79,7 +80,9 @@ private:
     std::vector<AppEntry>          appEntries_;
     std::vector<TrayIconEntry>     trayIcons_;       // owns the HICONs
     std::vector<RECT>              trayIconRects_;
-    std::wstring    monitorDeviceName_;  // e.g. "DISPLAY1", stripped of "\\.\\" prefix
+    std::wstring    monitorDeviceName_;
+    std::wstring    currentLangText_;    // e.g. "EN-US" — updated by kTimerActiveWindow
+    HKL             currentHkl_      = nullptr;
     ThemeColors     colors_         = {};
     Renderer        renderer_;
     IconCache       iconCache_;
@@ -112,6 +115,7 @@ private:
     RECT            volIconRect_    = {};
     RECT            netIconRect_    = {};
     RECT            batIconRect_    = {};
+    RECT            langIconRect_   = {};
     RECT            scrollLeftRect_ = {};
     RECT            scrollRightRect_= {};
     RECT            startBtnRect_   = {};

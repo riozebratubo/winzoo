@@ -447,6 +447,19 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
             DrawBatteryIcon(hdcMem_, status.batRect,
                             status.batPercent, status.batOnAC, status.batCharging, iconCol);
         }
+        if (status.langAvailable && !status.langText.empty()) {
+            if (status.langHovered) {
+                HBRUSH hb = CreateSolidBrush(colors.buttonHover);
+                FillRect(hdcMem_, &status.langRect, hb);
+                DeleteObject(hb);
+            }
+            SetBkMode(hdcMem_, TRANSPARENT);
+            SelectObject(hdcMem_, hFontSm_);
+            SetTextColor(hdcMem_, iconCol);
+            RECT lr = status.langRect;
+            DrawTextW(hdcMem_, status.langText.c_str(), -1, &lr,
+                      DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        }
     }
 
     // Tray zone (notification-area icons)

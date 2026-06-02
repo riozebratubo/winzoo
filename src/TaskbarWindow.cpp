@@ -13,6 +13,8 @@
 #include <commctrl.h>
 #include <windowsx.h>
 #include <objbase.h>
+#include <initguid.h>
+#include <msctf.h>
 
 static std::wstring ApplyClockPattern(const std::wstring& pattern, const SYSTEMTIME& st, bool isTime)
 {
@@ -40,6 +42,64 @@ static std::wstring ApplyClockPattern(const std::wstring& pattern, const SYSTEMT
     }
 
     return result;
+}
+
+// Returns "EN-US" / "ZH-TW" / "PT-BR" style text for a LANGID.
+// Uses ISO 639-1 (2-letter lang) + ISO 3166-1 (2-letter country), always uppercase.
+static std::wstring GetLangDisplayText(LANGID langId)
+{
+    LCID lcid = MAKELCID(langId, SORT_DEFAULT);
+    wchar_t lang[16] = {}, ctry[16] = {};
+    bool gotLang = GetLocaleInfoW(lcid, LOCALE_SISO639LANGNAME,  lang, _countof(lang)) > 0 && lang[0];
+    bool gotCtry = GetLocaleInfoW(lcid, LOCALE_SISO3166CTRYNAME, ctry, _countof(ctry)) > 0 && ctry[0];
+    if (gotLang) {
+        CharUpperW(lang);
+        if (gotCtry) { CharUpperW(ctry); return std::wstring(lang) + L"-" + ctry; }
+        return lang;
+    }
+    // Fallback: abbreviated name (e.g. "ENU"), trimmed to 3 chars
+    wchar_t abbr[16] = {};
+    if (GetLocaleInfoW(lcid, LOCALE_SABBREVLANGNAME, abbr, _countof(abbr)) > 0 && abbr[0]) {
+        abbr[3] = L'\0';
+        CharUpperW(abbr);
+        return abbr;
+    }
+    return {};
+}
+
+// Returns {display text, HKL} for the foreground window's active input language.
+// Primary: GetKeyboardLayout on the foreground thread (fast, no COM).
+// TSF fallback: ITfInputProcessorProfileMgr (handles unusual/custom input processors).
+static std::pair<std::wstring, HKL> GetCurrentInputLanguage()
+{
+    HWND fg = GetForegroundWindow();
+    if (fg) {
+        DWORD tid = GetWindowThreadProcessId(fg, nullptr);
+        if (tid) {
+            HKL hkl = GetKeyboardLayout(tid);
+            if (hkl) {
+                LANGID langId = static_cast<LANGID>(
+                    reinterpret_cast<ULONG_PTR>(hkl) & 0xFFFF);
+                std::wstring text = GetLangDisplayText(langId);
+                if (!text.empty()) return { text, hkl };
+            }
+        }
+    }
+    // TSF fallback
+    ITfInputProcessorProfileMgr* pMgr = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr,
+                                   CLSCTX_INPROC_SERVER,
+                                   IID_ITfInputProcessorProfileMgr,
+                                   reinterpret_cast<void**>(&pMgr)))) {
+        TF_INPUTPROCESSORPROFILE profile = {};
+        std::wstring text;
+        if (SUCCEEDED(pMgr->GetActiveProfile(GUID_TFCAT_TIP_KEYBOARD, &profile)))
+            text = GetLangDisplayText(profile.langid);
+        pMgr->Release();
+        if (!text.empty())
+            return { text, GetKeyboardLayout(GetCurrentThreadId()) };
+    }
+    return {};
 }
 
 static constexpr wchar_t kClassName[] = L"WinzooTaskbar";
@@ -467,6 +527,7 @@ void TaskbarWindow::LayoutButtons()
     volIconRect_     = {};
     netIconRect_     = {};
     batIconRect_     = {};
+    langIconRect_    = {};
     trayZoneRect_    = {};
     trayIconRects_.clear();
 
@@ -479,10 +540,15 @@ void TaskbarWindow::LayoutButtons()
 
     // Status zone width (only on horizontal bars)
     int statusZoneW = 0;
+    int langW = 0;
     if (settings_.showStatusZone && isHoriz) {
         if (statusData_.volAvailable && !settings_.hideDefaultTrayIcons) statusZoneW += statusIconW;
         if (statusData_.netAvailable && !settings_.hideDefaultTrayIcons) statusZoneW += statusIconW;
         if (statusData_.batAvailable) statusZoneW += statusIconW;
+    }
+    if (settings_.showLangIndicator && isHoriz && !currentLangText_.empty()) {
+        langW = Scale(40, dpi_);
+        statusZoneW += langW;
     }
 
     // Tray zone width (only on horizontal bars, to the left of the status zone)
@@ -532,16 +598,22 @@ void TaskbarWindow::LayoutButtons()
         int iconTop = (h - statusIconW) / 2;
         int iconBot = iconTop + statusIconW;
         int x = statusZoneRect_.left;
-        if (statusData_.volAvailable && !settings_.hideDefaultTrayIcons) {
-            volIconRect_ = { x, iconTop, x + statusIconW, iconBot };
-            x += statusIconW;
+        if (settings_.showStatusZone) {
+            if (statusData_.volAvailable && !settings_.hideDefaultTrayIcons) {
+                volIconRect_ = { x, iconTop, x + statusIconW, iconBot };
+                x += statusIconW;
+            }
+            if (statusData_.netAvailable && !settings_.hideDefaultTrayIcons) {
+                netIconRect_ = { x, iconTop, x + statusIconW, iconBot };
+                x += statusIconW;
+            }
+            if (statusData_.batAvailable) {
+                batIconRect_ = { x, iconTop, x + statusIconW, iconBot };
+                x += statusIconW;
+            }
         }
-        if (statusData_.netAvailable && !settings_.hideDefaultTrayIcons) {
-            netIconRect_ = { x, iconTop, x + statusIconW, iconBot };
-            x += statusIconW;
-        }
-        if (statusData_.batAvailable) {
-            batIconRect_ = { x, iconTop, x + statusIconW, iconBot };
+        if (langW > 0) {
+            langIconRect_ = { x, iconTop, x + langW, iconBot };
         }
     }
 
@@ -1037,6 +1109,51 @@ void TaskbarWindow::ShowStatusIconMenu(int which, POINT ptScreen)
     }
 }
 
+void TaskbarWindow::ShowLangMenu(POINT ptScreen)
+{
+    // Enumerate all installed keyboard layouts
+    int count = GetKeyboardLayoutList(0, nullptr);
+    if (count <= 0) return;
+    std::vector<HKL> hkls(static_cast<size_t>(count));
+    count = GetKeyboardLayoutList(count, hkls.data());
+
+    std::vector<MenuItem> items;
+    std::vector<HKL>      hklForItem;   // parallel to items, tracks which HKL each item maps to
+
+    for (int i = 0; i < count; ++i) {
+        LANGID langId = static_cast<LANGID>(
+            reinterpret_cast<ULONG_PTR>(hkls[i]) & 0xFFFF);
+        std::wstring text = GetLangDisplayText(langId);
+        if (text.empty()) continue;
+        UINT id = IDM_LANG_BASE + static_cast<UINT>(hklForItem.size());
+        if (id > IDM_LANG_MAX) break;
+        bool isCurrent = (hkls[i] == currentHkl_);
+        items.push_back({ text, id, false, isCurrent, false });
+        hklForItem.push_back(hkls[i]);
+    }
+
+    if (!items.empty())
+        items.push_back({ {}, 0, true });   // separator before settings link
+    items.push_back({ L"Language settings", IDM_LANG_SETTINGS, false, false, false });
+
+    UINT selected = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
+
+    if (selected == IDM_LANG_SETTINGS) {
+        LaunchApp(L"ms-settings:regionlanguage");
+        return;
+    }
+    if (selected >= IDM_LANG_BASE) {
+        size_t idx = selected - IDM_LANG_BASE;
+        if (idx < hklForItem.size()) {
+            HKL targetHkl = hklForItem[idx];
+            HWND fg = GetForegroundWindow();
+            if (fg)
+                PostMessage(fg, WM_INPUTLANGCHANGEREQUEST, 0,
+                            reinterpret_cast<LPARAM>(targetHkl));
+        }
+    }
+}
+
 RECT TaskbarWindow::GetStartBtnScreenRect() const
 {
     RECT r = startBtnRect_;
@@ -1217,8 +1334,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         SetTimer(hwnd, kTimerAppScanFirst, 500, nullptr);
         SetTimer(hwnd, kTimerStatus, kTimerStatusMs, nullptr);
         SetTimer(hwnd, kTimerTray, kTimerTrayMs, nullptr);
-        // Immediately prime the status data so layout includes it on first paint
+        // Immediately prime status/lang data so layout includes them on first paint
         statusData_ = PollSystemStatus();
+        auto [lt, lh]    = GetCurrentInputLanguage();
+        currentLangText_ = lt;
+        currentHkl_      = lh;
         RefreshTrayIcons();
         LayoutButtons();
 
@@ -1271,25 +1391,34 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         for (auto b : pinnedButtons_)     { b.iconDrawSz = settings_.appButtonIconSize; allButtons.push_back(std::move(b)); }
         for (auto b : tracker_.Buttons()) { b.iconDrawSz = settings_.appButtonIconSize; allButtons.push_back(std::move(b)); }
 
+        bool showLangInStatus = settings_.showLangIndicator && isHoriz && !currentLangText_.empty();
         StatusZoneInfo status;
-        status.visible = settings_.showStatusZone && isHoriz;
+        status.visible = isHoriz && (settings_.showStatusZone || showLangInStatus);
         if (status.visible) {
             status.rect = statusZoneRect_;
-            status.volAvailable = statusData_.volAvailable && !settings_.hideDefaultTrayIcons;
-            status.volRect      = volIconRect_;
-            status.volLevel     = statusData_.volLevel;
-            status.volMuted     = statusData_.volMuted;
-            status.volHovered   = (hoveredStatus_ == 1);
-            status.netAvailable = statusData_.netAvailable && !settings_.hideDefaultTrayIcons;
-            status.netRect      = netIconRect_;
-            status.netConnected = statusData_.netConnected;
-            status.netHovered   = (hoveredStatus_ == 2);
-            status.batAvailable = statusData_.batAvailable;
-            status.batRect      = batIconRect_;
-            status.batOnAC      = statusData_.batOnAC;
-            status.batCharging  = statusData_.batCharging;
-            status.batPercent   = statusData_.batPercent;
-            status.batHovered   = (hoveredStatus_ == 3);
+            if (settings_.showStatusZone) {
+                status.volAvailable = statusData_.volAvailable && !settings_.hideDefaultTrayIcons;
+                status.volRect      = volIconRect_;
+                status.volLevel     = statusData_.volLevel;
+                status.volMuted     = statusData_.volMuted;
+                status.volHovered   = (hoveredStatus_ == 1);
+                status.netAvailable = statusData_.netAvailable && !settings_.hideDefaultTrayIcons;
+                status.netRect      = netIconRect_;
+                status.netConnected = statusData_.netConnected;
+                status.netHovered   = (hoveredStatus_ == 2);
+                status.batAvailable = statusData_.batAvailable;
+                status.batRect      = batIconRect_;
+                status.batOnAC      = statusData_.batOnAC;
+                status.batCharging  = statusData_.batCharging;
+                status.batPercent   = statusData_.batPercent;
+                status.batHovered   = (hoveredStatus_ == 3);
+            }
+            if (showLangInStatus) {
+                status.langAvailable = true;
+                status.langRect      = langIconRect_;
+                status.langText      = currentLangText_;
+                status.langHovered   = (hoveredStatus_ == 4);
+            }
         }
 
         TrayZoneInfo tray;
@@ -1383,10 +1512,13 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
         int newHovStatus = 0;
         if (settings_.showStatusZone) {
-            if (statusData_.volAvailable && PtInRect(&volIconRect_, pt)) newHovStatus = 1;
-            else if (statusData_.netAvailable && PtInRect(&netIconRect_, pt)) newHovStatus = 2;
+            if (statusData_.volAvailable && !settings_.hideDefaultTrayIcons && PtInRect(&volIconRect_, pt)) newHovStatus = 1;
+            else if (statusData_.netAvailable && !settings_.hideDefaultTrayIcons && PtInRect(&netIconRect_, pt)) newHovStatus = 2;
             else if (statusData_.batAvailable && PtInRect(&batIconRect_, pt)) newHovStatus = 3;
         }
+        if (newHovStatus == 0 && settings_.showLangIndicator &&
+            !currentLangText_.empty() && PtInRect(&langIconRect_, pt))
+            newHovStatus = 4;
         if (newHovStatus != hoveredStatus_) {
             hoveredStatus_ = newHovStatus;
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -1460,6 +1592,16 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 if (scrollOffset_ < maxScrollOffset_) { ++scrollOffset_; LayoutButtons(); InvalidateRect(hwnd, nullptr, FALSE); }
                 return 0;
             }
+        }
+
+        // Lang indicator — left click opens language switcher
+        if (settings_.showLangIndicator && !currentLangText_.empty() &&
+            PtInRect(&langIconRect_, pt))
+        {
+            POINT screenPt = pt;
+            ClientToScreen(hwnd, &screenPt);
+            ShowLangMenu(screenPt);
+            return 0;
         }
 
         // Tray icon drag/click start
@@ -1667,6 +1809,12 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 return 0;
             }
         }
+        if (settings_.showLangIndicator && !currentLangText_.empty() &&
+            PtInRect(&langIconRect_, pt))
+        {
+            ShowLangMenu(screenPt);
+            return 0;
+        }
 
         int idx = HitTestButton(pt);
         if (idx >= 0)
@@ -1691,6 +1839,16 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     case WM_TIMER:
         if (wParam == kTimerActiveWindow) {
             tracker_.UpdateActiveWindow();
+            if (settings_.showLangIndicator) {
+                auto [newText, newHkl] = GetCurrentInputLanguage();
+                if (newText != currentLangText_) {
+                    currentLangText_ = newText;
+                    currentHkl_      = newHkl;
+                    LayoutButtons();
+                } else {
+                    currentHkl_ = newHkl;
+                }
+            }
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (wParam == kTimerAppScanFirst) {
             KillTimer(hwnd, kTimerAppScanFirst);

@@ -159,6 +159,11 @@
 #define IDM_BAT_POWER       522
 #define IDM_BAT_SETTINGS    523
 
+// Language indicator context menu (dynamic items: IDM_LANG_BASE .. IDM_LANG_MAX)
+#define IDM_LANG_SETTINGS   530
+#define IDM_LANG_BASE       700
+#define IDM_LANG_MAX        799
+
 // App Menu Sidebar controls
 #define IDC_CHECK_APPMENU_SIDEBAR           1129
 #define IDC_LBL_APPMENU_SIDEBARW           1130

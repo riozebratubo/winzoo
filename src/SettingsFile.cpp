@@ -334,6 +334,7 @@ bool ExportSettingsToFile(const Settings& s)
     wInt("statusIconSize",    s.statusIconSize);
     wBool("showTrayIcons",    s.showTrayIcons);
     wBool("hideDefaultTrayIcons", s.hideDefaultTrayIcons);
+    wBool("trayIconFallbackExe", s.trayIconFallbackExe);
     wInt("trayIconSize",      s.trayIconSize);
     wInt("trayIconPadding",   s.trayIconPadding);
     wInt("trayIconMargin",    s.trayIconMargin);
@@ -535,6 +536,7 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     ri("statusIconSize",   ns.statusIconSize);
     rb("showTrayIcons",    ns.showTrayIcons);
     rb("hideDefaultTrayIcons", ns.hideDefaultTrayIcons);
+    rb("trayIconFallbackExe", ns.trayIconFallbackExe);
     ri("trayIconSize",     ns.trayIconSize);
     ri("trayIconPadding",  ns.trayIconPadding);
     ri("trayIconMargin",   ns.trayIconMargin);

@@ -1,25 +1,166 @@
 #include "TrayIconProvider.h"
 #include <commctrl.h>
 #include <psapi.h>
+#include <shellapi.h>
 
 // Layout of a notification-area button's dwData field in Explorer's process (x64).
 // This is an undocumented but well-known structure used by Explorer.
+// We read the first 16 bytes (hWnd + uID + uCallbackMsg) which are stable, then
+// probe for the HICON at multiple offsets since the layout varies between Windows builds.
 #pragma pack(push, 1)
-struct TrayData {
+struct TrayDataBase {
     HWND hWnd;           // 8 bytes on x64
     UINT uID;            // 4 bytes
     UINT uCallbackMsg;   // 4 bytes
-    DWORD dwUserPref;    // 4 bytes
-    DWORD pad;           // 4 bytes
-    HICON hIcon;         // 8 bytes on x64 (USER object handle, valid cross-process)
 };
 #pragma pack(pop)
+
+// Size of the raw TRAYDATA blob we read for icon probing.
+static constexpr SIZE_T kTrayDataReadSize = 64;
 
 // Helper: read a block from another process.
 static bool ReadRemote(HANDLE hProc, LPCVOID remote, void* local, SIZE_T size)
 {
     SIZE_T read = 0;
     return ReadProcessMemory(hProc, remote, local, size, &read) && read == size;
+}
+
+// Helper: capture the toolbar via PrintWindow and return the pixel data as a 32-bit
+// top-down ARGB DIB.  Returns nullptr on failure; caller must free with delete[].
+// *outWidth and *outHeight receive the captured dimensions.
+static BYTE* CaptureToolbarBitmap(HWND hToolbar, int* outWidth, int* outHeight)
+{
+    RECT rc = {};
+    GetClientRect(hToolbar, &rc);
+    int w = rc.right - rc.left;
+    int h = rc.bottom - rc.top;
+    if (w <= 0 || h <= 0) return nullptr;
+
+    HDC hdcScreen = GetDC(nullptr);
+    HDC hdcMem    = CreateCompatibleDC(hdcScreen);
+
+    BITMAPINFOHEADER bih = {};
+    bih.biSize        = sizeof(bih);
+    bih.biWidth       = w;
+    bih.biHeight      = -h; // top-down
+    bih.biPlanes      = 1;
+    bih.biBitCount    = 32;
+    bih.biCompression = BI_RGB;
+
+    void* pBits = nullptr;
+    HBITMAP hDib = CreateDIBSection(hdcScreen, reinterpret_cast<BITMAPINFO*>(&bih),
+                                    DIB_RGB_COLORS, &pBits, nullptr, 0);
+    ReleaseDC(nullptr, hdcScreen);
+    if (!hDib || !pBits) {
+        DeleteDC(hdcMem);
+        return nullptr;
+    }
+
+    HGDIOBJ hOld = SelectObject(hdcMem, hDib);
+
+    // Clear to transparent black so we can detect drawn pixels.
+    memset(pBits, 0, static_cast<size_t>(w) * h * 4);
+
+    // PW_CLIENTONLY = 1, PW_RENDERFULLCONTENT = 2
+    PrintWindow(hToolbar, hdcMem, PW_CLIENTONLY | 0x2 /*PW_RENDERFULLCONTENT*/);
+
+    SelectObject(hdcMem, hOld);
+    DeleteDC(hdcMem);
+
+    // Copy pixel data out before deleting the DIB.
+    size_t dataSize = static_cast<size_t>(w) * h * 4;
+    BYTE* copy = new (std::nothrow) BYTE[dataSize];
+    if (copy) memcpy(copy, pBits, dataSize);
+
+    DeleteObject(hDib);
+    *outWidth  = w;
+    *outHeight = h;
+    return copy;
+}
+
+// Helper: extract an HICON from a captured 32-bit BGRA bitmap at the given rect.
+// Returns nullptr if the region is entirely transparent/empty.
+static HICON ExtractIconFromCapture(const BYTE* pixels, int bmpW, int bmpH,
+                                    const RECT& iconRect, int iconCx, int iconCy)
+{
+    if (!pixels || iconCx <= 0 || iconCy <= 0) return nullptr;
+    if (iconRect.left < 0 || iconRect.top < 0 ||
+        iconRect.right > bmpW || iconRect.bottom > bmpH)
+        return nullptr;
+
+    int srcW = iconRect.right  - iconRect.left;
+    int srcH = iconRect.bottom - iconRect.top;
+    if (srcW <= 0 || srcH <= 0) return nullptr;
+
+    // We'll extract the center iconCx×iconCy area from the button rect.
+    int offX = (srcW - iconCx) / 2;
+    int offY = (srcH - iconCy) / 2;
+    if (offX < 0) offX = 0;
+    if (offY < 0) offY = 0;
+    int cropW = (std::min)(iconCx, srcW);
+    int cropH = (std::min)(iconCy, srcH);
+
+    // Check if the region has any non-transparent pixels.
+    bool hasContent = false;
+    for (int y = 0; y < cropH && !hasContent; ++y) {
+        int srcY = iconRect.top + offY + y;
+        for (int x = 0; x < cropW; ++x) {
+            int srcX = iconRect.left + offX + x;
+            const BYTE* px = pixels + (static_cast<size_t>(srcY) * bmpW + srcX) * 4;
+            // px[3] is alpha in BGRA; also check if any color channel is non-zero
+            if (px[3] != 0 || px[0] != 0 || px[1] != 0 || px[2] != 0) {
+                hasContent = true;
+                break;
+            }
+        }
+    }
+    if (!hasContent) return nullptr;
+
+    // Build a 32-bit BGRA DIB for the icon's color bitmap.
+    BITMAPINFOHEADER bih = {};
+    bih.biSize        = sizeof(bih);
+    bih.biWidth       = cropW;
+    bih.biHeight      = -cropH; // top-down
+    bih.biPlanes      = 1;
+    bih.biBitCount    = 32;
+    bih.biCompression = BI_RGB;
+
+    HDC hdcScreen = GetDC(nullptr);
+    void* pColor  = nullptr;
+    HBITMAP hbmColor = CreateDIBSection(hdcScreen, reinterpret_cast<BITMAPINFO*>(&bih),
+                                        DIB_RGB_COLORS, &pColor, nullptr, 0);
+    if (!hbmColor || !pColor) {
+        ReleaseDC(nullptr, hdcScreen);
+        return nullptr;
+    }
+
+    // Copy pixel data into the color bitmap.
+    for (int y = 0; y < cropH; ++y) {
+        int srcY = iconRect.top + offY + y;
+        BYTE* dst = static_cast<BYTE*>(pColor) + static_cast<size_t>(y) * cropW * 4;
+        for (int x = 0; x < cropW; ++x) {
+            int srcX = iconRect.left + offX + x;
+            const BYTE* src = pixels + (static_cast<size_t>(srcY) * bmpW + srcX) * 4;
+            dst[x * 4 + 0] = src[0]; // B
+            dst[x * 4 + 1] = src[1]; // G
+            dst[x * 4 + 2] = src[2]; // R
+            dst[x * 4 + 3] = src[3]; // A
+        }
+    }
+
+    // Create a monochrome mask (all zeros = fully opaque; alpha is in color bitmap).
+    HBITMAP hbmMask = CreateBitmap(cropW, cropH, 1, 1, nullptr);
+
+    ICONINFO ii  = {};
+    ii.fIcon     = TRUE;
+    ii.hbmColor  = hbmColor;
+    ii.hbmMask   = hbmMask;
+    HICON hIcon  = CreateIconIndirect(&ii);
+
+    DeleteObject(hbmColor);
+    DeleteObject(hbmMask);
+    ReleaseDC(nullptr, hdcScreen);
+    return hIcon;
 }
 
 // Helper: get tooltip text for button index from the toolbar's tooltip control.
@@ -79,7 +220,7 @@ static std::wstring GetButtonTooltip(HANDLE hProc, HWND hToolbar, int idx, LPVOI
     return std::wstring(buf.data());
 }
 
-std::vector<TrayIconEntry> EnumerateTrayIcons(int /*iconSizePx*/)
+std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIcon)
 {
     // Locate the notification area toolbar inside Explorer.
     // Windows 10 hierarchy: Shell_TrayWnd → TrayNotifyWnd → SysPager → ToolbarWindow32
@@ -108,6 +249,15 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int /*iconSizePx*/)
     int nButtons = static_cast<int>(btnCountResult);
     if (nButtons <= 0) return {};
 
+    // Get the imagelist from the toolbar (try slots 0, 1, 2).
+    HIMAGELIST hIml = nullptr;
+    for (int slot = 0; slot <= 2 && !hIml; ++slot) {
+        DWORD_PTR imlResult = 0;
+        if (SendMessageTimeoutW(hToolbar, TB_GETIMAGELIST, slot, 0,
+                                SMTO_ABORTIFHUNG, 500, &imlResult))
+            hIml = reinterpret_cast<HIMAGELIST>(imlResult);
+    }
+
     // Open Explorer's process for VM operations.
     DWORD explorerPid = 0;
     GetWindowThreadProcessId(hToolbar, &explorerPid);
@@ -119,12 +269,38 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int /*iconSizePx*/)
 
     // Allocate a shared block in Explorer's address space large enough for one
     // TBBUTTON and a TOOLINFO + text buffer.
-    const SIZE_T kSharedSize = sizeof(TBBUTTON) + sizeof(TrayData) + 4096;
+    const SIZE_T kSharedSize = sizeof(TBBUTTON) + kTrayDataReadSize + 4096;
     LPVOID pShared = VirtualAllocEx(hProc, nullptr, kSharedSize,
                                     MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!pShared) {
         CloseHandle(hProc);
         return {};
+    }
+
+    // Capture the toolbar via PrintWindow to extract icons from its rendering.
+    // The toolbar may not render icons if Shell_TrayWnd is hidden, so we
+    // temporarily make it transparent and visible for the capture.
+    int capW = 0, capH = 0;
+    BYTE* capPixels = nullptr;
+    {
+        bool wasHidden = !IsWindowVisible(hTray);
+        if (wasHidden) {
+            // Make Shell_TrayWnd transparent-but-visible so the toolbar renders.
+            SetWindowLongPtrW(hTray, GWL_EXSTYLE,
+                GetWindowLongPtrW(hTray, GWL_EXSTYLE) | WS_EX_LAYERED);
+            SetLayeredWindowAttributes(hTray, 0, 0, LWA_ALPHA);
+            ShowWindow(hTray, SW_SHOWNOACTIVATE);
+            // Give the toolbar a moment to process the visibility change.
+            Sleep(50);
+        }
+
+        capPixels = CaptureToolbarBitmap(hToolbar, &capW, &capH);
+
+        if (wasHidden) {
+            ShowWindow(hTray, SW_HIDE);
+            SetWindowLongPtrW(hTray, GWL_EXSTYLE,
+                GetWindowLongPtrW(hTray, GWL_EXSTYLE) & ~WS_EX_LAYERED);
+        }
     }
 
     std::vector<TrayIconEntry> result;
@@ -144,29 +320,24 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int /*iconSizePx*/)
         TrayIconEntry entry = {};
         entry.uID           = static_cast<UINT>(btn.idCommand);
 
-        // Read the TRAYDATA from Explorer's process via btn.dwData (a remote pointer).
-        TrayData td = {};
+        // Read a larger blob from Explorer's TRAYDATA to probe for the icon handle.
+        // The first 16 bytes (hWnd + uID + uCallbackMsg) are stable across Windows
+        // versions; the hIcon offset varies.
+        BYTE trayBlob[kTrayDataReadSize] = {};
+        bool hasTrayData = false;
         if (btn.dwData) {
-            if (ReadRemote(hProc, reinterpret_cast<LPCVOID>(btn.dwData), &td, sizeof(td))) {
-                entry.hWnd         = td.hWnd;
-                entry.uCallbackMsg = td.uCallbackMsg;
-                // Override uID with the one from TRAYDATA (more reliable).
-                entry.uID          = td.uID;
+            hasTrayData = ReadRemote(hProc, reinterpret_cast<LPCVOID>(btn.dwData),
+                                    trayBlob, kTrayDataReadSize);
+            if (hasTrayData) {
+                auto* base = reinterpret_cast<TrayDataBase*>(trayBlob);
+                entry.hWnd         = base->hWnd;
+                entry.uCallbackMsg = base->uCallbackMsg;
+                entry.uID          = base->uID;
             }
         }
 
-        // Copy the tray icon from Explorer's TRAYDATA. HICON is a USER object
-        // handle valid across processes; the returned icon is owned by us.
-        if (td.hIcon)
-            entry.hIcon = CopyIcon(td.hIcon);
-
-        // Skip entries where we couldn't obtain a valid icon.
-        if (!entry.hIcon) continue;
-
-        // Tooltip.
-        entry.tooltip = GetButtonTooltip(hProc, hToolbar, i, pShared);
-
-        // Exe basename of the icon's owner process.
+        // Exe path of the icon's owner process.
+        std::wstring exeFullPath;
         if (entry.hWnd) {
             DWORD ownerPid = 0;
             GetWindowThreadProcessId(entry.hWnd, &ownerPid);
@@ -176,22 +347,71 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int /*iconSizePx*/)
                 if (hOwner) {
                     wchar_t path[MAX_PATH] = {};
                     DWORD sz = MAX_PATH;
-                    if (QueryFullProcessImageNameW(hOwner, 0, path, &sz)) {
-                        std::wstring fullPath(path);
-                        auto slash = fullPath.rfind(L'\\');
-                        entry.exeName = (slash != std::wstring::npos)
-                                        ? fullPath.substr(slash + 1) : fullPath;
-                    }
+                    if (QueryFullProcessImageNameW(hOwner, 0, path, &sz))
+                        exeFullPath = path;
                     CloseHandle(hOwner);
                 }
             }
         }
+        if (!exeFullPath.empty()) {
+            auto slash = exeFullPath.rfind(L'\\');
+            entry.exeName = (slash != std::wstring::npos)
+                            ? exeFullPath.substr(slash + 1) : exeFullPath;
+        }
+
+        // --- Icon retrieval ---
+
+        // 1. Probe the TRAYDATA blob for a valid HICON at multiple 8-byte-aligned
+        //    offsets (the hIcon field offset varies between Windows builds).
+        if (hasTrayData) {
+            // Start probing after the fixed header (16 bytes). Try every 8-byte
+            // aligned slot up to the end of the blob.
+            for (SIZE_T off = 16; off + sizeof(HICON) <= kTrayDataReadSize; off += 8) {
+                HICON candidate = *reinterpret_cast<HICON*>(trayBlob + off);
+                if (!candidate) continue;
+                HICON copied = CopyIcon(candidate);
+                if (copied) {
+                    entry.hIcon = copied;
+                    break;
+                }
+            }
+        }
+
+        // 2. Extract from PrintWindow capture of the toolbar.
+        if (!entry.hIcon && capPixels) {
+            DWORD_PTR rectResult = 0;
+            SendMessageTimeoutW(hToolbar, TB_GETITEMRECT, static_cast<WPARAM>(i),
+                                reinterpret_cast<LPARAM>(pShared),
+                                SMTO_ABORTIFHUNG, 500, &rectResult);
+            RECT btnRect = {};
+            if (ReadRemote(hProc, pShared, &btnRect, sizeof(btnRect))) {
+                int iconCx = iconSizePx > 0 ? iconSizePx : 16;
+                int iconCy = iconCx;
+                entry.hIcon = ExtractIconFromCapture(capPixels, capW, capH,
+                                                    btnRect, iconCx, iconCy);
+            }
+        }
+
+        // 3. Imagelist (may work if Explorer shares the imagelist handle).
+        if (!entry.hIcon && hIml && btn.iBitmap >= 0)
+            entry.hIcon = ImageList_GetIcon(hIml, btn.iBitmap, ILD_TRANSPARENT);
+
+        // 4. Extract icon from the owner's exe file (optional setting).
+        if (!entry.hIcon && fallbackExeIcon && !exeFullPath.empty()) {
+            HICON hSmall = nullptr;
+            if (ExtractIconExW(exeFullPath.c_str(), 0, nullptr, &hSmall, 1) && hSmall)
+                entry.hIcon = hSmall;
+        }
+
+        // Tooltip.
+        entry.tooltip = GetButtonTooltip(hProc, hToolbar, i, pShared);
 
         entry.orderKey = entry.exeName + L"|" + std::to_wstring(entry.uID);
 
         result.push_back(std::move(entry));
     }
 
+    delete[] capPixels;
     VirtualFreeEx(hProc, pShared, 0, MEM_RELEASE);
     CloseHandle(hProc);
     return result;

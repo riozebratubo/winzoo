@@ -33,6 +33,7 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
 
     bool showTrayIcons     = true;   // show notification-area (system tray) icons
     bool hideDefaultTrayIcons = true; // hide explorer.exe-owned default icons (sound, network) from tray
+    bool trayIconFallbackExe = false; // fall back to app's exe icon when tray icon can't be retrieved
     int  trayIconSize      = 22;     // icon side length in logical pixels
     int  trayIconPadding   = 0;      // padding inside each icon slot (px each side)
     int  trayIconMargin    = 2;      // gap between adjacent icons (px)

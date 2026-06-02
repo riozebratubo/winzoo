@@ -16,5 +16,6 @@ struct TrayIconEntry {
 
 // Enumerate visible icons from the Windows notification area toolbar.
 // iconSizePx is the requested icon size in physical pixels.
+// fallbackExeIcon: if true, falls back to extracting the app's exe icon when other methods fail.
 // Returns empty vector if the toolbar cannot be located (e.g. Windows 11 XAML tray).
-std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx);
+std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIcon = false);

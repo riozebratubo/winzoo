@@ -143,6 +143,7 @@
 
 // General tab — multi-monitor launch
 #define IDC_CHECK_OPEN_SAME_MONITOR         1160
+#define IDC_CHECK_TRAY_FALLBACK_EXE         1175
 
 // Volume icon context menu
 #define IDM_VOL_MIXER       501

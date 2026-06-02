@@ -342,7 +342,13 @@ void TaskbarWindow::RefreshTrayIcons()
 
     int iconPx = std::min(Scale(settings_.trayIconSize, dpi_),
                           Scale(settings_.thickness, dpi_));
-    auto fresh = EnumerateTrayIcons(iconPx);
+    auto fresh = EnumerateTrayIcons(iconPx, settings_.trayIconFallbackExe);
+
+    // If enumeration returned nothing but we already have entries, keep the
+    // previous set. This handles the case where Explorer's toolbar becomes
+    // temporarily inaccessible (e.g. after Shell_TrayWnd is hidden).
+    if (fresh.empty() && !trayIcons_.empty())
+        return;
 
     // --- Sort by settings_.trayIconOrder ---
     // Build an index map: orderKey → position in the saved order.
@@ -379,6 +385,19 @@ void TaskbarWindow::RefreshTrayIcons()
     sorted.reserve(unknown.size() + known.size());
     for (auto& e : unknown) sorted.push_back(std::move(e));
     for (auto& e : known)   sorted.push_back(std::move(e));
+
+    // Carry over cached icons: if a fresh entry has no icon but the previous
+    // trayIcons_ had one for the same orderKey, transfer it to the new entry.
+    for (auto& newEntry : sorted) {
+        if (newEntry.hIcon) continue;
+        for (auto& oldEntry : trayIcons_) {
+            if (oldEntry.hIcon && oldEntry.orderKey == newEntry.orderKey) {
+                newEntry.hIcon = oldEntry.hIcon;
+                oldEntry.hIcon = nullptr; // transferred, don't destroy
+                break;
+            }
+        }
+    }
 
     // Destroy old icons and replace.
     for (auto& e : trayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }

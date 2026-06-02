@@ -242,6 +242,7 @@ static const int kAppBtnControls[] = {
     IDC_LBL_PROGRESSBAR_COLOR, IDC_BTN_PROGRESSBAR_COLOR,
     IDC_LBL_PROGRESSBAR_HEIGHT, IDC_EDIT_PROGRESSBAR_HEIGHT, IDC_SPIN_PROGRESSBAR_HEIGHT,
     IDC_LBL_BTN_OUTLINE_RADIUS, IDC_EDIT_BTN_OUTLINE_RADIUS, IDC_SPIN_BTN_OUTLINE_RADIUS,
+    IDC_CHECK_SHOW_PINNED_AS_BUTTONS,
     0
 };
 static const int kClockControls[] = {
@@ -442,6 +443,8 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
     InvalidateRect(GetDlgItem(hBtn, IDC_BTN_PROGRESSBAR_COLOR), nullptr, FALSE);
     SetProgressBarControlsEnabled(hBtn, s.showProgressBars, s.progressBarUseThemeColor);
     SendMessageW(GetDlgItem(hBtn, IDC_SPIN_BTN_OUTLINE_RADIUS), UDM_SETPOS32, 0, s.buttonOutlineRadius);
+    CheckDlgButton(hBtn, IDC_CHECK_SHOW_PINNED_AS_BUTTONS,
+                   s.showPinnedAppsAsButtons ? BST_CHECKED : BST_UNCHECKED);
 
     // Clock tab
     CheckDlgButton(hClk, IDC_CHECK_SHOWCLOCK, s.showClock ? BST_CHECKED : BST_UNCHECKED);
@@ -643,6 +646,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             SendMessageW(hRadSpin, UDM_SETPOS32,   0,
                          static_cast<LPARAM>(data->settings->buttonOutlineRadius));
         }
+        CheckDlgButton(hwnd, IDC_CHECK_SHOW_PINNED_AS_BUTTONS,
+                       data->settings->showPinnedAppsAsButtons ? BST_CHECKED : BST_UNCHECKED);
 
         // System Clock
         CheckDlgButton(hwnd, IDC_CHECK_SHOWCLOCK,
@@ -705,6 +710,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             IDC_CHECK_APPMENU_FLATTEN_ALL,
             IDC_CHECK_APPMENU_SEARCH,
             IDC_CHECK_APPMENU_SEARCH_FUZZY,
+            IDC_CHECK_SHOW_PINNED_AS_BUTTONS,
             0
         };
         for (const int* id = kCheckIds; *id; ++id)
@@ -1237,6 +1243,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                     SendMessageW(GetDlgItem(hBtn, IDC_SPIN_BTN_OUTLINE_RADIUS), UDM_GETPOS32, 0, 0));
                 if (rad >= 0 && rad <= 32) data->settings->buttonOutlineRadius = rad;
             }
+            data->settings->showPinnedAppsAsButtons =
+                IsDlgButtonChecked(hBtn, IDC_CHECK_SHOW_PINNED_AS_BUTTONS) == BST_CHECKED;
 
             data->settings->showClock =
                 IsDlgButtonChecked(hClk, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;

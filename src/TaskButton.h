@@ -54,5 +54,6 @@ struct TaskButton {
               bool hovered, bool pressed, bool isDragGhost, int dpi,
               const MinimizedIndicatorOptions& indicator = {},
               const ProgressBarOptions& progressBar = {},
-              int borderRadius = 0) const;
+              int borderRadius = 0,
+              bool showPinnedAsButtons = false) const;
 };

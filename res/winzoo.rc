@@ -188,6 +188,9 @@ BEGIN
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
                     118, 248, 12, 12
 
+    CONTROL         "Show pinned apps as buttons", IDC_CHECK_SHOW_PINNED_AS_BUTTONS,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 266, 148, 10
+
     /* System Clock tab */
     CONTROL         "Show clock", IDC_CHECK_SHOWCLOCK,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 28, 80, 12

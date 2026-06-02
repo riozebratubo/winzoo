@@ -374,8 +374,9 @@ bool ExportSettingsToFile(const Settings& s)
     wInt("settingsDlgW", s.settingsDlgW);
     wInt("settingsDlgH", s.settingsDlgH);
     wBool("openAppsOnSameMonitor", s.openAppsOnSameMonitor);
-    wInt("buttonOutlineRadius",       s.buttonOutlineRadius);
-    wBool("showProgressBars",         s.showProgressBars);
+    wInt("buttonOutlineRadius",        s.buttonOutlineRadius);
+    wBool("showPinnedAppsAsButtons",   s.showPinnedAppsAsButtons);
+    wBool("showProgressBars",          s.showProgressBars);
     wBool("progressBarUseThemeColor", s.progressBarUseThemeColor);
     wUInt("progressBarColor",         static_cast<unsigned int>(s.progressBarColor));
     wInt("progressBarHeight",         s.progressBarHeight);
@@ -586,8 +587,9 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     ri("settingsDlgW", ns.settingsDlgW);
     ri("settingsDlgH", ns.settingsDlgH);
     rb("openAppsOnSameMonitor", ns.openAppsOnSameMonitor);
-    ri("buttonOutlineRadius",      ns.buttonOutlineRadius);
-    rb("showProgressBars",         ns.showProgressBars);
+    ri("buttonOutlineRadius",       ns.buttonOutlineRadius);
+    rb("showPinnedAppsAsButtons",   ns.showPinnedAppsAsButtons);
+    rb("showProgressBars",          ns.showProgressBars);
     rb("progressBarUseThemeColor", ns.progressBarUseThemeColor);
     ri("progressBarHeight",        ns.progressBarHeight);
     { size_t p = FindValue(content, "progressBarColor");

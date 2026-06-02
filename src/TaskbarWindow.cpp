@@ -547,7 +547,9 @@ void TaskbarWindow::LayoutButtons()
         if (statusData_.batAvailable) statusZoneW += statusIconW;
     }
     if (settings_.showLangIndicator && isHoriz && !currentLangText_.empty()) {
-        langW = Scale(40, dpi_);
+        int tw = renderer_.MeasureSmallText(currentLangText_,
+                                            settings_.clockDateFontSize, dpi_);
+        langW = (tw > 0 ? tw : Scale(40, dpi_)) + Scale(9, dpi_);
         statusZoneW += langW;
     }
 
@@ -613,7 +615,7 @@ void TaskbarWindow::LayoutButtons()
             }
         }
         if (langW > 0) {
-            langIconRect_ = { x, iconTop, x + langW, iconBot };
+            langIconRect_ = { x, iconTop, x + langW - Scale(3, dpi_), iconBot };
         }
     }
 
@@ -1467,7 +1469,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                             }(),
                             settings_.progressBarHeight
                         },
-                        settings_.buttonOutlineRadius);
+                        settings_.buttonOutlineRadius,
+                        settings_.showPinnedAppsAsButtons);
         EndPaint(hwnd, &ps);
         return 0;
     }

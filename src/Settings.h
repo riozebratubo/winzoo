@@ -84,6 +84,7 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     bool appMenuSidebarShowPower       = true;
 
     int      buttonOutlineRadius      = 0;    // corner radius of task button outline in logical px
+    bool     showPinnedAppsAsButtons  = false; // draw outline + background for pinned-but-not-running buttons
 
     bool     showProgressBars         = true;
     bool     progressBarUseThemeColor = true;

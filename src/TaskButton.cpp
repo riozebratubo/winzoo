@@ -4,7 +4,8 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
                       bool hovered, bool pressed, bool isDragGhost, int dpi,
                       const MinimizedIndicatorOptions& indicator,
                       const ProgressBarOptions& progressBar,
-                      int borderRadius) const
+                      int borderRadius,
+                      bool showPinnedAsButtons) const
 {
     bool isMinimized = IsRunning() && IsWindow(hwnd) && IsIconic(hwnd);
     bool dimButton = indicator.enabled && !isDragGhost && isMinimized
@@ -16,6 +17,8 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
             bgColor = colors.buttonActive;
         else if (pressed || hovered)
             bgColor = colors.buttonHover;
+    } else if (hovered || pressed) {
+        bgColor = colors.buttonHover;
     }
 
     COLORREF textColor = IsRunning() ? colors.text : colors.textDimmed;
@@ -47,18 +50,24 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
         borderColor = dim(borderColor);
     }
 
-    int radius = Scale(borderRadius, dpi);
-    HBRUSH bgBrush = CreateSolidBrush(bgColor);
-    HPEN   borderPen = CreatePen(PS_SOLID, 1, borderColor);
-    HPEN   oldPen   = static_cast<HPEN>(SelectObject(hdc, borderPen));
-    HBRUSH oldBrush = static_cast<HBRUSH>(SelectObject(hdc, bgBrush));
+    // Pinned-but-not-running buttons are drawn flat (no outline/background) unless
+    // showPinnedAsButtons is enabled or the button is hovered/pressed/dragged.
+    bool drawOutline = IsRunning() || showPinnedAsButtons || hovered || pressed || isDragGhost;
 
-    RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, radius, radius);
+    if (drawOutline) {
+        int radius = Scale(borderRadius, dpi);
+        HBRUSH bgBrush   = CreateSolidBrush(bgColor);
+        HPEN   borderPen = CreatePen(PS_SOLID, 1, borderColor);
+        HPEN   oldPen    = static_cast<HPEN>(SelectObject(hdc, borderPen));
+        HBRUSH oldBrush  = static_cast<HBRUSH>(SelectObject(hdc, bgBrush));
 
-    SelectObject(hdc, oldBrush);
-    SelectObject(hdc, oldPen);
-    DeleteObject(bgBrush);
-    DeleteObject(borderPen);
+        RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, radius, radius);
+
+        SelectObject(hdc, oldBrush);
+        SelectObject(hdc, oldPen);
+        DeleteObject(bgBrush);
+        DeleteObject(borderPen);
+    }
 
     int h = rect.bottom - rect.top;
     int w = rect.right  - rect.left;

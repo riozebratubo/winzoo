@@ -190,6 +190,9 @@
 #define IDC_EDIT_BTN_OUTLINE_RADIUS         1178
 #define IDC_SPIN_BTN_OUTLINE_RADIUS         1179
 
+// App Buttons — pinned apps visual style
+#define IDC_CHECK_SHOW_PINNED_AS_BUTTONS    1180
+
 // App Buttons — progress bars
 #define IDC_CHECK_PROGRESSBAR               1168
 #define IDC_CHECK_PROGRESSBAR_THEMECLR      1169

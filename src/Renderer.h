@@ -91,7 +91,10 @@ public:
                const StatusZoneInfo& status = {},
                const TrayZoneInfo& tray = {},
                const ProgressBarOptions& progressBar = {},
-               int buttonBorderRadius = 0);
+               int buttonBorderRadius = 0,
+               bool showPinnedAsButtons = false);
+
+    int MeasureSmallText(const std::wstring& text, int datePt, int dpi);
 
     ~Renderer();
 

@@ -35,6 +35,42 @@ void Renderer::CreateFonts(int timePt, int datePt, int dpi)
     cachedDpi_    = dpi;
 }
 
+int Renderer::MeasureSmallText(const std::wstring& text, int datePt, int dpi)
+{
+    if (text.empty()) return 0;
+
+    HFONT font    = nullptr;
+    bool  ownFont = false;
+    if (hFontSm_ && datePt == cachedDatePt_ && dpi == cachedDpi_) {
+        font = hFontSm_;
+    } else {
+        LOGFONTW lf  = {};
+        lf.lfHeight  = -MulDiv(datePt, dpi, 72);
+        lf.lfWeight  = FW_NORMAL;
+        lf.lfQuality = CLEARTYPE_QUALITY;
+        wcscpy_s(lf.lfFaceName, L"Segoe UI");
+        font    = CreateFontIndirectW(&lf);
+        ownFont = (font != nullptr);
+    }
+    if (!font) return 0;
+
+    HDC  dc    = hdcMem_;
+    bool ownDC = false;
+    if (!dc) {
+        dc    = CreateCompatibleDC(nullptr);
+        ownDC = (dc != nullptr);
+        if (!ownDC) { if (ownFont) DeleteObject(font); return 0; }
+    }
+
+    HFONT old = static_cast<HFONT>(SelectObject(dc, font));
+    SIZE  sz  = {};
+    GetTextExtentPoint32W(dc, text.c_str(), static_cast<int>(text.size()), &sz);
+    SelectObject(dc, old);
+    if (ownFont) DeleteObject(font);
+    if (ownDC)   DeleteDC(dc);
+    return sz.cx;
+}
+
 void Renderer::Resize(int w, int h, HDC hdcRef)
 {
     if (w == width_ && h == height_ && hdcMem_) return;
@@ -252,7 +288,8 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
                      const StatusZoneInfo& status,
                      const TrayZoneInfo& tray,
                      const ProgressBarOptions& progressBar,
-                     int buttonBorderRadius)
+                     int buttonBorderRadius,
+                     bool showPinnedAsButtons)
 {
     if (!hdcMem_) return;
 
@@ -274,7 +311,7 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
         if (r.left == 0 && r.right == 0 && r.top == 0 && r.bottom == 0) continue;
         buttons[i].Draw(hdcMem_, colors,
                         i == hoveredIdx, i == pressedIdx,
-                        false, dpi, indicator, progressBar, buttonBorderRadius);
+                        false, dpi, indicator, progressBar, buttonBorderRadius, showPinnedAsButtons);
     }
 
     // Drag ghost
@@ -287,7 +324,7 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
             ghostPt.x - bw / 2, ghostPt.y - bh / 2,
             ghostPt.x + bw / 2, ghostPt.y + bh / 2
         };
-        ghost.Draw(hdcMem_, colors, false, false, true, dpi, indicator, progressBar, buttonBorderRadius);
+        ghost.Draw(hdcMem_, colors, false, false, true, dpi, indicator, progressBar, buttonBorderRadius, showPinnedAsButtons);
 
         // Drop indicator line — skip hidden buttons (rect={})
         for (int i = 0; std::cmp_less_equal(i, buttons.size()); ++i) {
@@ -457,9 +494,17 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
             SetBkMode(hdcMem_, TRANSPARENT);
             SelectObject(hdcMem_, hFontSm_);
             SetTextColor(hdcMem_, iconCol);
-            RECT lr = status.langRect;
+            SIZE sz = {};
+            GetTextExtentPoint32W(hdcMem_, status.langText.c_str(),
+                                  static_cast<int>(status.langText.size()), &sz);
+            RECT lr   = status.langRect;
+            int  rectW = static_cast<int>(lr.right - lr.left);
+            int  textW = static_cast<int>(sz.cx);
+            int  hOff  = rectW > textW ? (rectW - textW) / 2 : 0;
+            lr.left  += hOff;
+            lr.right  = lr.left + sz.cx;
             DrawTextW(hdcMem_, status.langText.c_str(), -1, &lr,
-                      DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+                      DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
         }
     }
 

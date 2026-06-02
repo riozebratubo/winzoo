@@ -79,19 +79,23 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
             void* bits = nullptr;
             HDC hdcMem = CreateCompatibleDC(hdc);
             HBITMAP hBmp = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-            HBITMAP oldBmp = static_cast<HBITMAP>(SelectObject(hdcMem, hBmp));
-            BitBlt(hdcMem, 0, 0, iconSz, iconSz, hdc, x, y, SRCCOPY);
-            DrawIconEx(hdcMem, 0, 0, icon, iconSz, iconSz, 0, nullptr, DI_NORMAL);
-            BYTE* p = static_cast<BYTE*>(bits);
-            for (int i = 0; i < iconSz * iconSz; ++i) {
-                p[0] = static_cast<BYTE>(p[0] * 60 / 100);
-                p[1] = static_cast<BYTE>(p[1] * 60 / 100);
-                p[2] = static_cast<BYTE>(p[2] * 60 / 100);
-                p += 4;
+            if (hBmp && bits) {
+                HBITMAP oldBmp = static_cast<HBITMAP>(SelectObject(hdcMem, hBmp));
+                BitBlt(hdcMem, 0, 0, iconSz, iconSz, hdc, x, y, SRCCOPY);
+                DrawIconEx(hdcMem, 0, 0, icon, iconSz, iconSz, 0, nullptr, DI_NORMAL);
+                BYTE* p = static_cast<BYTE*>(bits);
+                for (int i = 0; i < iconSz * iconSz; ++i) {
+                    p[0] = static_cast<BYTE>(p[0] * 60 / 100);
+                    p[1] = static_cast<BYTE>(p[1] * 60 / 100);
+                    p[2] = static_cast<BYTE>(p[2] * 60 / 100);
+                    p += 4;
+                }
+                BitBlt(hdc, x, y, iconSz, iconSz, hdcMem, 0, 0, SRCCOPY);
+                SelectObject(hdcMem, oldBmp);
+                DeleteObject(hBmp);
+            } else {
+                DrawIconEx(hdc, x, y, icon, iconSz, iconSz, 0, nullptr, DI_NORMAL);
             }
-            BitBlt(hdc, x, y, iconSz, iconSz, hdcMem, 0, 0, SRCCOPY);
-            SelectObject(hdcMem, oldBmp);
-            DeleteObject(hBmp);
             DeleteDC(hdcMem);
         }
     };

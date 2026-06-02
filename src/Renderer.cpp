@@ -8,8 +8,8 @@ Renderer::~Renderer()
 
 void Renderer::DestroyResources()
 {
-    if (hBitmap_) { DeleteObject(hBitmap_); hBitmap_ = nullptr; }
     if (hdcMem_)  { DeleteDC(hdcMem_);      hdcMem_  = nullptr; }
+    if (hBitmap_) { DeleteObject(hBitmap_); hBitmap_ = nullptr; }
     if (hFont_)   { DeleteObject(hFont_);   hFont_   = nullptr; }
     if (hFontSm_) { DeleteObject(hFontSm_); hFontSm_ = nullptr; }
 }
@@ -39,8 +39,8 @@ void Renderer::Resize(int w, int h, HDC hdcRef)
 {
     if (w == width_ && h == height_ && hdcMem_) return;
 
-    if (hBitmap_) { DeleteObject(hBitmap_); hBitmap_ = nullptr; }
     if (hdcMem_)  { DeleteDC(hdcMem_);      hdcMem_  = nullptr; }
+    if (hBitmap_) { DeleteObject(hBitmap_); hBitmap_ = nullptr; }
 
     width_  = w;
     height_ = h;

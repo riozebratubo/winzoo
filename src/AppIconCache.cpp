@@ -51,8 +51,9 @@ HICON AppIconCache::LoadStatic(const std::wstring& iconPath, int sizePx)
     if (path.empty()) return nullptr;
 
     // Expand environment strings
-    wchar_t expanded[MAX_PATH * 2];
-    ExpandEnvironmentStringsW(path.c_str(), expanded, MAX_PATH * 2);
+    wchar_t expanded[MAX_PATH * 2] = {};
+    if (!ExpandEnvironmentStringsW(path.c_str(), expanded, MAX_PATH * 2))
+        return nullptr;
 
     // For default icons (no explicit resource index), use IShellItemImageFactory —
     // the same API the Windows shell uses. It renders from the best available icon
@@ -84,11 +85,15 @@ HICON AppIconCache::LoadStatic(const std::wstring& iconPath, int sizePx)
     UINT count = ExtractIconExW(expanded, index, &hLarge, &hSmall, 1);
     if (count > 0) {
         if (sizePx <= 16) {
-            if (hLarge) { DestroyIcon(hLarge); hLarge = nullptr; }
-            return hSmall;
+            HICON chosen = hSmall ? hSmall : hLarge;
+            if (chosen != hLarge && hLarge) { DestroyIcon(hLarge); }
+            if (chosen != hSmall && hSmall) { DestroyIcon(hSmall); }
+            return chosen;
         } else {
-            if (hSmall) { DestroyIcon(hSmall); hSmall = nullptr; }
-            return hLarge;
+            HICON chosen = hLarge ? hLarge : hSmall;
+            if (chosen != hSmall && hSmall) { DestroyIcon(hSmall); }
+            if (chosen != hLarge && hLarge) { DestroyIcon(hLarge); }
+            return chosen;
         }
     }
 

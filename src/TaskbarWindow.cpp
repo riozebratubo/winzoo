@@ -189,8 +189,9 @@ void TaskbarWindow::ApplySettings(const Settings& s)
                      SWP_NOACTIVATE | SWP_FRAMECHANGED);
         RECT client;
         GetClientRect(hwnd_, &client);
-        renderer_.Resize(client.right, client.bottom,
-                         GetDC(hwnd_));
+        HDC hdc = GetDC(hwnd_);
+        renderer_.Resize(client.right, client.bottom, hdc);
+        ReleaseDC(hwnd_, hdc);
     } else {
         appBar_.Unregister();
         RECT rc = CalculateWindowRect();
@@ -618,7 +619,7 @@ void TaskbarWindow::LayoutButtons()
         int taskAvail = h - taskStart - tail;
 
         if (tCount > 0 && taskAvail > 0) {
-            int totalMin = tCount * minBtnW + (tCount - 1) * pad + 2 * pad;
+            int totalMin = tCount * btnH + (tCount - 1) * pad + 2 * pad;
             if (totalMin <= taskAvail) {
                 scrollOffset_ = 0;
                 int y = taskStart + pad;
@@ -631,14 +632,14 @@ void TaskbarWindow::LayoutButtons()
                 scrollLeftRect_  = { 0, taskStart,                      w, taskStart + arrowW };
                 scrollRightRect_ = { 0, taskStart + taskAvail - arrowW, w, taskStart + taskAvail };
                 int inner    = taskAvail - 2 * arrowW - 2 * pad;
-                int visCount = std::max(1, (inner + pad) / (minBtnW + pad));
+                int visCount = std::max(1, (inner + pad) / (btnH + pad));
                 maxScrollOffset_ = std::max(0, tCount - visCount);
                 scrollOffset_    = std::min(scrollOffset_, maxScrollOffset_);
                 for (auto* btn : visibleTask) btn->rect = {};
                 int y = taskStart + arrowW + pad;
                 for (int i = scrollOffset_; i < scrollOffset_ + visCount && i < tCount; ++i) {
-                    visibleTask[i]->rect = { pad, y, w - pad, y + minBtnW };
-                    y += minBtnW + pad;
+                    visibleTask[i]->rect = { pad, y, w - pad, y + btnH };
+                    y += btnH + pad;
                 }
             }
         } else {
@@ -1042,7 +1043,8 @@ void TaskbarWindow::ShowAppMenu()
 void TaskbarWindow::StartScanThread(bool isFirstScan)
 {
     HWND hwnd = hwnd_;
-    WPARAM wp = isFirstScan ? 0 : 1;
+    unsigned gen = ++scanGen_;
+    WPARAM wp = MAKEWPARAM(isFirstScan ? 0 : 1, static_cast<WORD>(gen));
     std::thread([hwnd, wp]() {
         auto pEntries = std::make_unique<std::vector<AppEntry>>(AppScanner::Scan());
         if (!PostMessageW(hwnd, WM_APP_SCAN_DONE, wp,
@@ -1056,6 +1058,7 @@ void TaskbarWindow::StartIconLoadThread()
 {
     HWND hwnd = hwnd_;
     int  sizePx = Scale(48, dpi_);
+    unsigned gen = ++iconGen_;
 
     // Determine which pinned paths this taskbar shows
     static const std::vector<std::wstring> kEmptyPinned;
@@ -1080,7 +1083,9 @@ void TaskbarWindow::StartIconLoadThread()
         if (!alreadyIn)
             paths.push_back(p);
     }
-    std::thread([hwnd, sizePx, paths = std::move(paths)]() {
+    WPARAM wp = MAKEWPARAM(static_cast<WORD>(sizePx), static_cast<WORD>(gen));
+    std::thread([hwnd, wp, paths = std::move(paths)]() {
+        int sizePx = LOWORD(wp);
         using Pair = std::pair<std::wstring, HICON>;
         auto pResults = std::make_unique<std::vector<Pair>>(paths.size());
         for (size_t i = 0; i < paths.size(); ++i)
@@ -1105,7 +1110,7 @@ void TaskbarWindow::StartIconLoadThread()
             for (auto& t : workers) t.join();
         }
 
-        if (!PostMessageW(hwnd, WM_APP_ICONS_DONE, static_cast<WPARAM>(sizePx),
+        if (!PostMessageW(hwnd, WM_APP_ICONS_DONE, wp,
                           reinterpret_cast<LPARAM>(pResults.get()))) {
             for (auto& [p, icon] : *pResults)
                 if (icon) DestroyIcon(icon);
@@ -1487,7 +1492,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                     // Reorder trayIcons_ and settings_.trayIconOrder
                     TrayIconEntry moved = std::move(trayIcons_[from]);
                     trayIcons_.erase(trayIcons_.begin() + from);
-                    int insertAt = (to > from) ? to : to;
+                    int insertAt = (to > from) ? to - 1 : to;
                     trayIcons_.insert(trayIcons_.begin() + insertAt, std::move(moved));
 
                     // Rebuild trayIconOrder from new display order
@@ -1688,9 +1693,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     case WM_APP_SCAN_DONE: {
         auto pEntries = std::unique_ptr<std::vector<AppEntry>>(
             reinterpret_cast<std::vector<AppEntry>*>(lParam));
-        if (!shutdownPending_) {
+        unsigned gen = HIWORD(wParam);
+        if (!shutdownPending_ && gen == scanGen_) {
             int iconSz = Scale(48, dpi_);
-            if (wParam == 0) {
+            bool isFirst = (LOWORD(wParam) == 0);
+            if (isFirst) {
                 appEntries_ = std::move(*pEntries);
                 SetTimer(hwnd_, kTimerAppScan, kTimerAppScanMs, nullptr);
                 StartIconLoadThread();
@@ -1709,8 +1716,9 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     case WM_APP_ICONS_DONE: {
         auto pIcons = std::unique_ptr<std::vector<std::pair<std::wstring, HICON>>>(
             reinterpret_cast<std::vector<std::pair<std::wstring, HICON>>*>(lParam));
-        if (!shutdownPending_) {
-            int iconSz = static_cast<int>(wParam);
+        unsigned gen = HIWORD(wParam);
+        if (!shutdownPending_ && gen == iconGen_) {
+            int iconSz = LOWORD(wParam);
             for (auto& [path, icon] : *pIcons)
                 appIconCache_.Store(path, iconSz, icon);
             if (iconSz == Scale(48, dpi_)) {
@@ -1749,6 +1757,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         LayoutButtons();
         // Reload icons at the new DPI scale so they stay crisp.
         for (auto& e : appEntries_) e.icon = nullptr;
+        for (auto& btn : pinnedButtons_) btn.icon = nullptr;
         appIconCache_.Clear();
         StartIconLoadThread();
         return 0;
@@ -1798,6 +1807,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                         MB_OK | MB_ICONINFORMATION);
             return 0;
         case IDM_REBUILD_ICON_CACHE:
+            for (auto& e : appEntries_) e.icon = nullptr;
+            for (auto& btn : pinnedButtons_) btn.icon = nullptr;
             appIconCache_.Clear();
             StartIconLoadThread();
             return 0;
@@ -1818,6 +1829,12 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         KillTimer(hwnd, kTimerAppScan);
         KillTimer(hwnd, kTimerStatus);
         KillTimer(hwnd, kTimerTray);
+        // Drain any pending thread-posted messages to prevent heap/icon leaks.
+        {
+            MSG pendingMsg;
+            while (PeekMessageW(&pendingMsg, hwnd, WM_APP_SCAN_DONE, WM_APP_ICONS_DONE, PM_REMOVE))
+                HandleMessage(hwnd, pendingMsg.message, pendingMsg.wParam, pendingMsg.lParam);
+        }
         for (auto& e : trayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
         trayIcons_.clear();
         tracker_.Shutdown();

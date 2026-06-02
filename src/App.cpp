@@ -62,6 +62,7 @@ bool App::Init(HINSTANCE hInst)
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         CloseHandle(mutex_);
         mutex_ = nullptr;
+        CoUninitialize();
         return false;
     }
 
@@ -101,16 +102,20 @@ bool App::Init(HINSTANCE hInst)
         for (HMONITOR hMon : monitors) {
             bool isPrimary = (hMon == primaryMon);
             auto tb = std::make_unique<TaskbarWindow>();
-            if (!tb->Create(hInst_, settings_, hMon, isPrimary))
+            if (!tb->Create(hInst_, settings_, hMon, isPrimary)) {
+                Shutdown();
                 return false;
+            }
             tb->Show();
             taskbars_.push_back(std::move(tb));
         }
     } else {
         // Primary monitor only
         auto tb = std::make_unique<TaskbarWindow>();
-        if (!tb->Create(hInst_, settings_, primaryMon, true))
+        if (!tb->Create(hInst_, settings_, primaryMon, true)) {
+            Shutdown();
             return false;
+        }
         tb->Show();
         taskbars_.push_back(std::move(tb));
     }

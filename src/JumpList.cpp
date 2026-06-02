@@ -316,6 +316,7 @@ static std::vector<JumpListItem> ReadCustomDestinations(const std::wstring& file
         if (!hGlobal) { ++pos; continue; }
 
         void* pData = GlobalLock(hGlobal);
+        if (!pData) { GlobalFree(hGlobal); ++pos; continue; }
         memcpy(pData, &data[pos], remaining);
         GlobalUnlock(hGlobal);
 

@@ -77,19 +77,23 @@ HICON IconCache::LoadForWindow(HWND hwnd, int sizePx)
         if (*path) {
             HICON lg = nullptr, sm = nullptr;
             if (ExtractIconExW(path, 0, &lg, &sm, 1) > 0) {
-                icon = (sizePx <= 20) ? sm : lg;
+                // Prefer the size closest to the request; fall back to the other
+                if (sizePx <= 20)
+                    icon = sm ? sm : lg;
+                else
+                    icon = lg ? lg : sm;
                 // Destroy the one we don't use
-                if (icon == sm && lg) DestroyIcon(lg);
-                if (icon == lg && sm) DestroyIcon(sm);
+                if (icon != lg && lg) DestroyIcon(lg);
+                if (icon != sm && sm) DestroyIcon(sm);
             }
         }
     }
 
     // 5. System fallback
     if (!icon)
-        icon = reinterpret_cast<HICON>(LoadImage(nullptr, IDI_APPLICATION,
+        icon = CopyIcon(reinterpret_cast<HICON>(LoadImage(nullptr, IDI_APPLICATION,
                                                   IMAGE_ICON, sizePx, sizePx,
-                                                  LR_SHARED));
+                                                  LR_SHARED)));
 
     return icon;
 }

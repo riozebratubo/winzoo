@@ -25,8 +25,11 @@ static bool ReadRemote(HANDLE hProc, LPCVOID remote, void* local, SIZE_T size)
 // Helper: get tooltip text for button index from the toolbar's tooltip control.
 static std::wstring GetButtonTooltip(HANDLE hProc, HWND hToolbar, int idx, LPVOID pShared)
 {
-    HWND hTT = reinterpret_cast<HWND>(SendMessageW(hToolbar, TB_GETTOOLTIPS, 0, 0));
-    if (!hTT) return {};
+    DWORD_PTR ttResult = 0;
+    if (!SendMessageTimeoutW(hToolbar, TB_GETTOOLTIPS, 0, 0,
+                             SMTO_ABORTIFHUNG, 500, &ttResult) || !ttResult)
+        return {};
+    HWND hTT = reinterpret_cast<HWND>(ttResult);
 
     // Write a TOOLINFO into shared memory and request the text.
     struct RemoteTI {
@@ -63,8 +66,9 @@ static std::wstring GetButtonTooltip(HANDLE hProc, HWND hToolbar, int idx, LPVOI
     WriteProcessMemory(hProc, pTIRemote + kTextOffset, zeroBuf.data(),
                        kTextBufLen * sizeof(wchar_t), nullptr);
 
-    SendMessageW(hTT, TTM_GETTEXT, kTextBufLen,
-                 reinterpret_cast<LPARAM>(pTIRemote));
+    SendMessageTimeoutW(hTT, TTM_GETTEXT, kTextBufLen,
+                        reinterpret_cast<LPARAM>(pTIRemote),
+                        SMTO_ABORTIFHUNG, 500, nullptr);
 
     // Read back the text.
     std::vector<wchar_t> buf(kTextBufLen, L'\0');
@@ -97,13 +101,21 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int /*iconSizePx*/)
         hToolbar = FindWindowExW(hNotify, nullptr, L"ToolbarWindow32", nullptr);
     if (!hToolbar) return {};
 
-    int nButtons = static_cast<int>(SendMessageW(hToolbar, TB_BUTTONCOUNT, 0, 0));
+    DWORD_PTR btnCountResult = 0;
+    if (!SendMessageTimeoutW(hToolbar, TB_BUTTONCOUNT, 0, 0,
+                             SMTO_ABORTIFHUNG, 500, &btnCountResult))
+        return {};
+    int nButtons = static_cast<int>(btnCountResult);
     if (nButtons <= 0) return {};
 
     // Get the imagelist from the toolbar (try slots 0, 1, 2).
     HIMAGELIST hIml = nullptr;
-    for (int slot = 0; slot <= 2 && !hIml; ++slot)
-        hIml = reinterpret_cast<HIMAGELIST>(SendMessageW(hToolbar, TB_GETIMAGELIST, slot, 0));
+    for (int slot = 0; slot <= 2 && !hIml; ++slot) {
+        DWORD_PTR imlResult = 0;
+        if (SendMessageTimeoutW(hToolbar, TB_GETIMAGELIST, slot, 0,
+                                SMTO_ABORTIFHUNG, 500, &imlResult))
+            hIml = reinterpret_cast<HIMAGELIST>(imlResult);
+    }
 
     // Open Explorer's process for VM operations.
     DWORD explorerPid = 0;
@@ -128,8 +140,9 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int /*iconSizePx*/)
 
     for (int i = 0; i < nButtons; ++i) {
         // Ask Explorer to write the TBBUTTON into shared memory.
-        SendMessageW(hToolbar, TB_GETBUTTON, static_cast<WPARAM>(i),
-                     reinterpret_cast<LPARAM>(pShared));
+        SendMessageTimeoutW(hToolbar, TB_GETBUTTON, static_cast<WPARAM>(i),
+                            reinterpret_cast<LPARAM>(pShared),
+                            SMTO_ABORTIFHUNG, 500, nullptr);
 
         TBBUTTON btn = {};
         if (!ReadRemote(hProc, pShared, &btn, sizeof(btn))) continue;

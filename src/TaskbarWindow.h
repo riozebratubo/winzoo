@@ -126,6 +126,10 @@ private:
     bool            trayDragging_   = false;
     bool            shutdownPending_= false;
 
+    // Generation counters to discard stale background-thread results
+    unsigned        scanGen_        = 0;
+    unsigned        iconGen_        = 0;
+
     static constexpr UINT_PTR kTimerActiveWindow = 1;
     static constexpr UINT_PTR kTimerAppScanFirst = 2;
     static constexpr UINT_PTR kTimerAppScan      = 3;

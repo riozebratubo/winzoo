@@ -6,8 +6,9 @@ When running, winzoo hides the native Windows taskbar and takes its place, reser
 
 ## Features
 
-- *Very* lightweight!
-- Lots of configurations!
+- No nonsense
+- *Very* lightweight
+- Lots of configurations
 - Custom-drawn task buttons with app icon and title
 - Custom-drawn apps menu with keyboard navigation and search
 - Custom position: top, bottom, left, right

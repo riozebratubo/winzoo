@@ -17,6 +17,7 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     int             leftRightHeight  = 300;   // taskbar width in vertical (left/right) mode when titles are shown
     int             floatX           = 100;
     int             floatY           = 100;
+    int             floatWidth       = 400;
     TaskbarMonitorMode taskbarMonitorMode        = TaskbarMonitorMode::AllMonitors;
     bool               showAppMenuOnAllMonitors  = true;
     bool               showCurrentMonitorAppsOnly = true;

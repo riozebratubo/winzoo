@@ -198,8 +198,9 @@ Settings LoadSettings()
     if (key.ReadDword(L"Position", val))  s.position  = static_cast<TaskbarPosition>(val);
     if (key.ReadDword(L"Theme", val))     s.theme     = static_cast<ThemePreset>(val);
     if (key.ReadDword(L"Thickness", val)) s.thickness = static_cast<int>(val);
-    if (key.ReadDword(L"FloatX", val))    s.floatX    = static_cast<int>(val);
-    if (key.ReadDword(L"FloatY", val))    s.floatY    = static_cast<int>(val);
+    if (key.ReadDword(L"FloatX", val))     s.floatX     = static_cast<int>(val);
+    if (key.ReadDword(L"FloatY", val))     s.floatY     = static_cast<int>(val);
+    if (key.ReadDword(L"FloatWidth", val)) s.floatWidth = static_cast<int>(val);
 
     if (key.ReadDword(L"TaskbarMonitorMode", val) && val <= 1)
         s.taskbarMonitorMode = static_cast<TaskbarMonitorMode>(val);
@@ -209,6 +210,7 @@ Settings LoadSettings()
     // Clamp thickness
     if (s.thickness < 28) s.thickness = 28;
     if (s.thickness > 120) s.thickness = 120;
+    if (s.floatWidth < 100) s.floatWidth = 100;
 
     if (key.ReadDword(L"MaxButtonWidth", val)) s.maxButtonWidth = static_cast<int>(val);
     if (key.ReadDword(L"MinButtonWidth", val)) s.minButtonWidth = static_cast<int>(val);
@@ -365,8 +367,9 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"Position",  static_cast<DWORD>(s.position));
     key.WriteDword(L"Theme",     static_cast<DWORD>(s.theme));
     key.WriteDword(L"Thickness", static_cast<DWORD>(s.thickness));
-    key.WriteDword(L"FloatX",    static_cast<DWORD>(s.floatX));
-    key.WriteDword(L"FloatY",          static_cast<DWORD>(s.floatY));
+    key.WriteDword(L"FloatX",     static_cast<DWORD>(s.floatX));
+    key.WriteDword(L"FloatY",     static_cast<DWORD>(s.floatY));
+    key.WriteDword(L"FloatWidth", static_cast<DWORD>(s.floatWidth));
     key.WriteDword(L"TaskbarMonitorMode",        static_cast<DWORD>(s.taskbarMonitorMode));
     key.WriteDword(L"ShowAppMenuOnAllMonitors",   s.showAppMenuOnAllMonitors   ? 1u : 0u);
     key.WriteDword(L"ShowCurrentMonitorAppsOnly", s.showCurrentMonitorAppsOnly ? 1u : 0u);

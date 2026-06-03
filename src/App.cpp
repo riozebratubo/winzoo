@@ -96,7 +96,8 @@ bool App::Init(HINSTANCE hInst)
     if (!primaryMon && !monitors.empty())
         primaryMon = monitors[0];
 
-    bool allMonitors = (settings_.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
+    bool allMonitors = (settings_.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors)
+                    && (settings_.position != TaskbarPosition::Floating);
 
     if (allMonitors) {
         for (HMONITOR hMon : monitors) {

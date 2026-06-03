@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <atomic>
 #include <memory>
+#include <unordered_set>
 #include <utility>
 #include <commctrl.h>
 #include <windowsx.h>
@@ -216,7 +217,7 @@ RECT TaskbarWindow::CalculateWindowRect() const
         return { mon.right - thickLR, mon.top, mon.right, mon.bottom };
     case TaskbarPosition::Floating:
         return { settings_.floatX, settings_.floatY,
-                 settings_.floatX + Scale(400, dpi_),
+                 settings_.floatX + Scale(settings_.floatWidth, dpi_),
                  settings_.floatY + thick };
     default: // Bottom
         return { mon.left, mon.bottom - thick, mon.right, mon.bottom };
@@ -252,7 +253,10 @@ void TaskbarWindow::ApplySettings(const Settings& s)
     SaveSettings(s);
 
     if (settings_.position != TaskbarPosition::Floating) {
-        appBar_.SetPosition(settings_.position, EffectiveThicknessPx());
+        if (!appBar_.IsRegistered())
+            appBar_.Register(hwnd_, settings_.position, EffectiveThicknessPx());
+        else
+            appBar_.SetPosition(settings_.position, EffectiveThicknessPx());
         RECT rc = appBar_.GetReservedRect();
         SetWindowPos(hwnd_, HWND_TOPMOST,
                      rc.left, rc.top,
@@ -352,7 +356,20 @@ void TaskbarWindow::RebuildPinnedButtons()
 
     const std::vector<std::wstring>* paths = nullptr;
     static const std::vector<std::wstring> kEmpty;
-    if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
+    std::vector<std::wstring> mergedPaths;
+    if (settings_.pinnedAppsPerMonitor && settings_.position == TaskbarPosition::Floating) {
+        // Merge all per-monitor pin lists, deduplicated by exe path.
+        std::unordered_set<std::wstring> seen;
+        for (auto& [mon, monPaths] : settings_.pinnedExePathsPerMonitor) {
+            for (auto& p : monPaths) {
+                std::wstring lower = p;
+                CharLowerW(lower.data());
+                if (seen.insert(lower).second)
+                    mergedPaths.push_back(p);
+            }
+        }
+        paths = &mergedPaths;
+    } else if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
         auto it = settings_.pinnedExePathsPerMonitor.find(monitorDeviceName_);
         paths = (it != settings_.pinnedExePathsPerMonitor.end()) ? &it->second : &kEmpty;
     } else {
@@ -545,6 +562,7 @@ void TaskbarWindow::LayoutButtons()
     // Determine visible task buttons (monitor filter)
     bool filterByMonitor = settings_.showCurrentMonitorAppsOnly
                         && settings_.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors
+                        && settings_.position != TaskbarPosition::Floating
                         && hMonitor_ != nullptr;
 
     std::vector<TaskButton*> visibleTask;
@@ -1363,7 +1381,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (tray) ShowWindow(tray, SW_HIDE);
         appBar_.Unregister();
         appBar_.Register(hwnd_, settings_.position, EffectiveThicknessPx());
-        RECT rc = appBar_.GetReservedRect();
+        // For floating mode, AppBar is not registered so GetReservedRect() returns {0,0,0,0};
+        // use CalculateWindowRect() instead to preserve the floating position.
+        RECT rc = (settings_.position == TaskbarPosition::Floating)
+                ? CalculateWindowRect()
+                : appBar_.GetReservedRect();
         SetWindowPos(hwnd_, HWND_TOPMOST,
                      rc.left, rc.top,
                      rc.right - rc.left, rc.bottom - rc.top,
@@ -1545,6 +1567,51 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_ERASEBKGND:
         return 1;
+
+    case WM_NCHITTEST: {
+        LRESULT def = DefWindowProc(hwnd, uMsg, wParam, lParam);
+        if (settings_.position != TaskbarPosition::Floating)
+            return def;
+
+        POINT clientPt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        ScreenToClient(hwnd, &clientPt);
+
+        RECT crc;
+        GetClientRect(hwnd, &crc);
+        int b = Scale(6, dpi_);
+
+        if (clientPt.x < b)               return HTLEFT;
+        if (clientPt.x >= crc.right - b)  return HTRIGHT;
+
+        if (HitTestButton(clientPt) >= 0)                                   return HTCLIENT;
+        if (PtInRect(&startBtnRect_, clientPt))                             return HTCLIENT;
+        if (settings_.showLangIndicator && !currentLangText_.empty()
+            && PtInRect(&langIconRect_, clientPt))                          return HTCLIENT;
+        if (scrollNeeded_ && (PtInRect(&scrollLeftRect_,  clientPt)
+                           || PtInRect(&scrollRightRect_, clientPt)))       return HTCLIENT;
+        if (settings_.showTrayIcons) {
+            for (auto& r : trayIconRects_)
+                if (PtInRect(&r, clientPt)) return HTCLIENT;
+        }
+        if (settings_.showStatusZone) {
+            if (PtInRect(&volIconRect_, clientPt) ||
+                PtInRect(&netIconRect_, clientPt) ||
+                PtInRect(&batIconRect_, clientPt))  return HTCLIENT;
+        }
+        return HTCAPTION;
+    }
+
+    case WM_EXITSIZEMOVE: {
+        if (settings_.position == TaskbarPosition::Floating) {
+            RECT wrc;
+            GetWindowRect(hwnd, &wrc);
+            settings_.floatX     = wrc.left;
+            settings_.floatY     = wrc.top;
+            settings_.floatWidth = (wrc.right - wrc.left) * 96 / dpi_;
+            SaveSettings(settings_);
+        }
+        return 0;
+    }
 
     case WM_SIZE: {
         int w = LOWORD(lParam);

@@ -316,8 +316,9 @@ bool ExportSettingsToFile(const Settings& s)
     wInt("position",  static_cast<int>(s.position));
     wInt("theme",     static_cast<int>(s.theme));
     wInt("thickness", s.thickness);
-    wInt("floatX",    s.floatX);
-    wInt("floatY",    s.floatY);
+    wInt("floatX",     s.floatX);
+    wInt("floatY",     s.floatY);
+    wInt("floatWidth", s.floatWidth);
     wInt("taskbarMonitorMode",          static_cast<int>(s.taskbarMonitorMode));
     wBool("showAppMenuOnAllMonitors",   s.showAppMenuOnAllMonitors);
     wBool("showCurrentMonitorAppsOnly", s.showCurrentMonitorAppsOnly);
@@ -527,6 +528,7 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     ri("thickness",  ns.thickness);
     ri("floatX",     ns.floatX);
     ri("floatY",     ns.floatY);
+    ri("floatWidth", ns.floatWidth);
     rb("showAppMenuOnAllMonitors",   ns.showAppMenuOnAllMonitors);
     rb("showCurrentMonitorAppsOnly", ns.showCurrentMonitorAppsOnly);
     ri("maxButtonWidth",    ns.maxButtonWidth);

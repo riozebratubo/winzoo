@@ -1,7 +1,9 @@
 #include "TrayIconProvider.h"
+#include "TrayNotifyProvider.h"
 #include <commctrl.h>
 #include <psapi.h>
 #include <shellapi.h>
+#include <objbase.h>
 
 // Layout of a notification-area button's dwData field in Explorer's process (x64).
 // This is an undocumented but well-known structure used by Explorer.
@@ -16,7 +18,9 @@ struct TrayDataBase {
 #pragma pack(pop)
 
 // Size of the raw TRAYDATA blob we read for icon probing.
-static constexpr SIZE_T kTrayDataReadSize = 64;
+// Windows 11 21H2+ grew the internal ICONDATA structure; the HICON can sit at
+// offset 88–120. 256 bytes covers all known layouts without significant cost.
+static constexpr SIZE_T kTrayDataReadSize = 256;
 
 // Helper: read a block from another process.
 static bool ReadRemote(HANDLE hProc, LPCVOID remote, void* local, SIZE_T size)
@@ -392,19 +396,175 @@ static void EnumerateToolbarButtons(HWND hToolbar, HWND hParentForCapture,
     CloseHandle(hProc);
 }
 
-std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIcon,
-                                              bool includeOverflow)
+// ── ITrayNotify COM-based enumeration ────────────────────────────────────────
+
+// INotificationCB implementation: Explorer calls Notify() once per registered
+// Shell_NotifyIcon icon when we call ITrayNotify::RegisterCallback.
+class TrayNotifyCB final : public INotificationCB
 {
-    // Locate the notification area toolbar inside Explorer.
-    // Windows 10 hierarchy: Shell_TrayWnd → TrayNotifyWnd → SysPager → ToolbarWindow32
-    // Windows 11 hierarchy: Shell_TrayWnd → TrayNotifyWnd → ToolbarWindow32 (no SysPager)
+    std::vector<TrayIconEntry>& out_;
+    LONG refs_ = 1;
+public:
+    explicit TrayNotifyCB(std::vector<TrayIconEntry>& out) : out_(out) {}
+
+    HRESULT STDMETHODCALLTYPE Notify(ULONG_PTR, NOTIFYITEM* item) override {
+        if (!item) return S_OK;
+        // Do NOT filter on IsWindow(hWnd): system icons (Bluetooth, Eject
+        // Hardware, etc.) can arrive with a null or destroyed hWnd and are
+        // still valid tray registrations.
+        TrayIconEntry e = {};
+        e.hWnd  = item->hWnd;
+        e.uID   = item->uID;
+        // uCallbackMsg is not in NOTIFYITEM; filled in by EnrichCallbackMsgs().
+        e.hIcon = item->hIcon ? CopyIcon(item->hIcon) : nullptr;
+        if (item->pszTip)     e.tooltip = item->pszTip;
+        if (item->pszExeName) e.exeName = item->pszExeName;
+        // Derive exePath for exe-icon fallback.
+        if (item->hWnd) {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(item->hWnd, &pid);
+            if (pid) {
+                HANDLE hOwner = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,
+                                            FALSE, pid);
+                if (hOwner) {
+                    wchar_t path[MAX_PATH] = {};
+                    DWORD sz = MAX_PATH;
+                    if (QueryFullProcessImageNameW(hOwner, 0, path, &sz))
+                        e.exePath = path;
+                    CloseHandle(hOwner);
+                }
+            }
+        }
+        e.orderKey = e.exeName + L"|" + std::to_wstring(e.uID);
+        out_.push_back(std::move(e));
+        return S_OK;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override {
+        return static_cast<ULONG>(InterlockedIncrement(&refs_));
+    }
+    ULONG STDMETHODCALLTYPE Release() override {
+        LONG r = InterlockedDecrement(&refs_);
+        if (!r) delete this;
+        return static_cast<ULONG>(r);
+    }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (riid == IID_IUnknown || riid == __uuidof(INotificationCB))
+            { *ppv = this; AddRef(); return S_OK; }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+};
+
+// Try to enumerate tray icons via ITrayNotify.
+// Returns an empty vector on any failure; caller falls back to toolbar approach.
+static std::vector<TrayIconEntry> EnumerateTrayIconsViaCOM()
+{
+    ITrayNotify* pTN = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_TrayNotify, nullptr,
+                                CLSCTX_LOCAL_SERVER,
+                                __uuidof(ITrayNotify),
+                                reinterpret_cast<void**>(&pTN))))
+        return {};
+
+    std::vector<TrayIconEntry> result;
+    auto* cb = new TrayNotifyCB(result);
+    ULONG_PTR handle = 0;
+    HRESULT hr = pTN->RegisterCallback(cb, &handle);
+    if (SUCCEEDED(hr)) {
+        // RegisterCallback delivers all current icons synchronously via COM's
+        // STA re-entrant dispatch before returning. No Refresh() needed, and
+        // calling it can fault on Windows 11 builds with a different vtable.
+        pTN->UnregisterCallback(&handle);
+    }
+    cb->Release();
+    pTN->Release();
+
+    if (FAILED(hr) || result.empty()) return {};
+    return result;
+}
+
+// Locate Explorer's main tray toolbar (Windows 10/11 compatible).
+static HWND FindTrayToolbar()
+{
+    HWND hTray = FindWindowW(L"Shell_TrayWnd", nullptr);
+    if (!hTray) return nullptr;
+    HWND hNotify = FindWindowExW(hTray, nullptr, L"TrayNotifyWnd", nullptr);
+    if (!hNotify) return nullptr;
+    HWND hPager = FindWindowExW(hNotify, nullptr, L"SysPager", nullptr);
+    if (hPager) {
+        HWND h = FindWindowExW(hPager, nullptr, L"ToolbarWindow32", nullptr);
+        if (h) return h;
+    }
+    return FindWindowExW(hNotify, nullptr, L"ToolbarWindow32", nullptr);
+}
+
+// Fill in uCallbackMsg for each entry by reading only the 16-byte TrayDataBase
+// from Explorer's toolbar buttons. No icon extraction is performed.
+static void EnrichCallbackMsgs(HWND hToolbar,
+                                std::vector<TrayIconEntry>& icons)
+{
+    if (!hToolbar || icons.empty()) return;
+
+    DWORD_PTR btnCountResult = 0;
+    if (!SendMessageTimeoutW(hToolbar, TB_BUTTONCOUNT, 0, 0,
+                             SMTO_ABORTIFHUNG, 500, &btnCountResult))
+        return;
+    int nButtons = static_cast<int>(btnCountResult);
+    if (nButtons <= 0) return;
+
+    DWORD explorerPid = 0;
+    GetWindowThreadProcessId(hToolbar, &explorerPid);
+    if (!explorerPid) return;
+
+    HANDLE hProc = OpenProcess(
+        PROCESS_VM_READ | PROCESS_VM_OPERATION | PROCESS_VM_WRITE,
+        FALSE, explorerPid);
+    if (!hProc) return;
+
+    const SIZE_T kBufSize = sizeof(TBBUTTON) + sizeof(TrayDataBase) + 64;
+    LPVOID pShared = VirtualAllocEx(hProc, nullptr, kBufSize,
+                                    MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!pShared) { CloseHandle(hProc); return; }
+
+    for (int i = 0; i < nButtons; ++i) {
+        SendMessageTimeoutW(hToolbar, TB_GETBUTTON, static_cast<WPARAM>(i),
+                            reinterpret_cast<LPARAM>(pShared),
+                            SMTO_ABORTIFHUNG, 500, nullptr);
+        TBBUTTON btn = {};
+        if (!ReadRemote(hProc, pShared, &btn, sizeof(btn))) continue;
+        if (!btn.dwData) continue;
+
+        TrayDataBase base = {};
+        if (!ReadRemote(hProc, reinterpret_cast<LPCVOID>(btn.dwData),
+                        &base, sizeof(base)))
+            continue;
+        if (!base.hWnd || !base.uCallbackMsg) continue;
+
+        for (auto& e : icons) {
+            if (e.hWnd == base.hWnd && e.uID == base.uID) {
+                e.uCallbackMsg = base.uCallbackMsg;
+                break;
+            }
+        }
+    }
+
+    VirtualFreeEx(hProc, pShared, 0, MEM_RELEASE);
+    CloseHandle(hProc);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Build the full toolbar-based icon list (both main toolbar and overflow).
+static std::vector<TrayIconEntry> EnumerateViaToolbar(int iconSizePx,
+                                                      bool fallbackExeIcon,
+                                                      bool includeOverflow)
+{
     HWND hTray = FindWindowW(L"Shell_TrayWnd", nullptr);
     if (!hTray) return {};
-
     HWND hNotify = FindWindowExW(hTray, nullptr, L"TrayNotifyWnd", nullptr);
     if (!hNotify) return {};
 
-    // Try Windows 10 path (SysPager wrapper) first, then Windows 11 direct child.
     HWND hToolbar = nullptr;
     {
         HWND hPager = FindWindowExW(hNotify, nullptr, L"SysPager", nullptr);
@@ -416,26 +576,51 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIc
     if (!hToolbar) return {};
 
     std::vector<TrayIconEntry> result;
-
-    // Enumerate the visible toolbar. When includeOverflow is true, also include
-    // buttons with TBSTATE_HIDDEN (which are the overflow/chevron-hidden icons
-    // on Windows 11 where they share the same toolbar).
     EnumerateToolbarButtons(hToolbar, hTray, iconSizePx, fallbackExeIcon,
                             /*skipHidden=*/!includeOverflow, result);
 
-    // On Windows 10 (or older Win11 builds), overflow icons may live in a
-    // separate NotifyIconOverflowWindow toolbar.
     if (includeOverflow) {
         HWND hOverflow = FindWindowW(L"NotifyIconOverflowWindow", nullptr);
         if (hOverflow) {
             HWND hOverflowToolbar = FindWindowExW(hOverflow, nullptr,
                                                   L"ToolbarWindow32", nullptr);
-            if (hOverflowToolbar) {
+            if (hOverflowToolbar)
                 EnumerateToolbarButtons(hOverflowToolbar, hOverflow,
                                         iconSizePx, fallbackExeIcon,
                                         /*skipHidden=*/true, result);
-            }
         }
+    }
+    return result;
+}
+
+std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIcon,
+                                              bool includeOverflow)
+{
+    // Lead with ITrayNotify (COM): delivers hIcon directly from Explorer with no
+    // TRAYDATA probing, and now covers all registrations (IsWindow guard removed,
+    // Refresh() added) including system icons like Bluetooth and Eject Hardware.
+    auto result = EnumerateTrayIconsViaCOM();
+
+    // Always run the toolbar too — it provides uCallbackMsg (absent from
+    // NOTIFYITEM) and acts as a safety net for any icon ITrayNotify misses.
+    auto tbResult = EnumerateViaToolbar(iconSizePx, fallbackExeIcon, includeOverflow);
+
+    if (result.empty()) return tbResult;  // COM unavailable — use toolbar only.
+
+    // Fill in uCallbackMsg for COM entries via the lightweight TRAYDATA base read.
+    HWND hToolbar = FindTrayToolbar();
+    if (hToolbar) EnrichCallbackMsgs(hToolbar, result);
+
+    // Supplement: add toolbar entries whose hWnd is known (TRAYDATA readable) but
+    // whose hWnd+uID pair isn't already in the COM result.  Skip null-hWnd toolbar
+    // ghosts — they have no reliable identity and would only add blank slots.
+    for (auto& te : tbResult) {
+        if (!te.hWnd) continue;
+        bool already = false;
+        for (const auto& ce : result) {
+            if (ce.hWnd == te.hWnd && ce.uID == te.uID) { already = true; break; }
+        }
+        if (!already) result.push_back(std::move(te));
     }
 
     return result;

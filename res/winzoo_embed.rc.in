@@ -1,0 +1,2 @@
+#define IDR_WINZOO_COM_DLL 500
+IDR_WINZOO_COM_DLL  RCDATA  "@CMAKE_BINARY_DIR@/winzoo_com_embed.bin"

@@ -487,16 +487,19 @@ void TaskbarWindow::ComputeClockFontSizes()
         return;
     }
 
+    bool isVertical = settings_.position == TaskbarPosition::Left
+                   || settings_.position == TaskbarPosition::Right;
+    int baseW = isVertical ? EffectiveThicknessPx() : Scale(settings_.clockWidth, dpi_);
+
     if (dpi_                          == clockFitDpi_    &&
-        settings_.clockWidth          == clockFitW_      &&
+        baseW                         == clockFitW_      &&
         settings_.clockTimeFontSize   == clockFitTimePt_ &&
         settings_.clockDateFontSize   == clockFitDatePt_ &&
         settings_.clockTimeFormat     == clockFitTimeFmt_ &&
         settings_.clockDateFormat     == clockFitDateFmt_)
         return;
 
-    // Available pixel width for text inside the clock zone, with a small horizontal pad
-    int availW = Scale(settings_.clockWidth, dpi_) - Scale(4, dpi_) - 50;
+    int availW = baseW - Scale(4, dpi_) - 50;
 
     SYSTEMTIME st = {};
     GetLocalTime(&st);
@@ -519,7 +522,7 @@ void TaskbarWindow::ComputeClockFontSizes()
     fittedDatePt_ = datePt;
 
     clockFitDpi_    = dpi_;
-    clockFitW_      = settings_.clockWidth;
+    clockFitW_      = baseW;
     clockFitTimePt_ = settings_.clockTimeFontSize;
     clockFitDatePt_ = settings_.clockDateFontSize;
     clockFitTimeFmt_ = settings_.clockTimeFormat;

@@ -439,6 +439,21 @@ void TaskbarWindow::RefreshTrayIcons()
     if (fresh.empty() && !trayIcons_.empty())
         return;
 
+    // Deduplicate: keep only one icon per process. Apps like Task Manager register
+    // multiple icons (one per resource meter), but we show only one representative.
+    {
+        std::unordered_set<std::wstring> seen;
+        std::vector<TrayIconEntry> deduped;
+        for (auto& e : fresh) {
+            if (seen.insert(e.exeName).second) {
+                deduped.push_back(std::move(e));
+            } else {
+                if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
+            }
+        }
+        fresh = std::move(deduped);
+    }
+
     // --- Sort by settings_.trayIconOrder ---
     // Build an index map: orderKey → position in the saved order.
     std::vector<std::wstring>& order = settings_.trayIconOrder;

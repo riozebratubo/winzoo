@@ -3,6 +3,9 @@
 // Icons
 #define IDI_APPICON             101
 
+// Embedded resources
+#define IDR_WINZOO_COM_DLL      500
+
 // Dialogs
 #define IDD_SETTINGS            201
 

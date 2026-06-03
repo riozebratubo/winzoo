@@ -1,5 +1,6 @@
 #pragma once
 #include <windows.h>
+#include <string>
 
 // Intercepts ITaskbarList3 progress in two complementary ways:
 //  1. HKCU COM override: winzoo_com.dll is loaded instead of shell32's CTaskbarList
@@ -24,9 +25,10 @@ public:
 private:
     static LRESULT CALLBACK ProxyWndProc(HWND, UINT, WPARAM, LPARAM);
 
-    HWND    winzooHwnd_  = nullptr;
-    HWND    proxyHwnd_   = nullptr;
-    UINT    relayMsg_    = 0;
-    bool    registered_  = false;
-    HMODULE hHookDll_    = nullptr;
+    HWND         winzooHwnd_  = nullptr;
+    HWND         proxyHwnd_   = nullptr;
+    UINT         relayMsg_    = 0;
+    bool         registered_  = false;
+    HMODULE      hHookDll_    = nullptr;
+    std::wstring dllPath_;
 };

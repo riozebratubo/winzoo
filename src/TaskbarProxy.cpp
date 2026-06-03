@@ -1,5 +1,5 @@
 #include "TaskbarProxy.h"
-#include <string>
+#include "resource.h"
 
 static constexpr wchar_t kInProcKey[] =
     L"Software\\Classes\\CLSID\\{56FDF344-FD6D-11d0-958A-006097C9A090}\\InProcServer32";
@@ -24,12 +24,31 @@ bool TaskbarProxy::Install(HWND winzooHwnd) {
     if (!relayMsg_) return false;
     winzooHwnd_  = winzooHwnd;
 
-    // --- COM DLL registration (HKCU override) ---
+    // --- Extract embedded DLL to disk ---
     wchar_t exePath[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
-    if (lastSlash) *(lastSlash + 1) = L'\0';
-    std::wstring dllPath = std::wstring(exePath) + L"winzoo_com.dll";
+    if (wchar_t* p = wcsrchr(exePath, L'\\')) *(p + 1) = L'\0';
+    dllPath_ = std::wstring(exePath) + L"winzoo_com.dll";
+
+    DeleteFileW(dllPath_.c_str());
+    HRSRC hRes = FindResource(nullptr, MAKEINTRESOURCE(IDR_WINZOO_COM_DLL), RT_RCDATA);
+    if (hRes) {
+        HGLOBAL hGlob = LoadResource(nullptr, hRes);
+        LPVOID  pData = LockResource(hGlob);
+        DWORD   sz    = SizeofResource(nullptr, hRes);
+        if (pData && sz) {
+            HANDLE hf = CreateFileW(dllPath_.c_str(), GENERIC_WRITE, 0, nullptr,
+                                    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (hf != INVALID_HANDLE_VALUE) {
+                DWORD written = 0;
+                WriteFile(hf, pData, sz, &written, nullptr);
+                CloseHandle(hf);
+            }
+        }
+    }
+
+    // --- COM DLL registration (HKCU override) ---
+    const std::wstring& dllPath = dllPath_;
 
     HKEY hKey = nullptr;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, kInProcKey, 0, nullptr, 0,
@@ -117,4 +136,9 @@ void TaskbarProxy::Uninstall() {
     RegDeleteTreeW(HKEY_CURRENT_USER, kClsidKey);
     registered_ = false;
     relayMsg_   = 0;
+
+    if (!dllPath_.empty()) {
+        DeleteFileW(dllPath_.c_str());
+        dllPath_.clear();
+    }
 }

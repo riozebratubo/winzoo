@@ -66,61 +66,55 @@ BEGIN
     CONTROL         "Pinned apps: separate per monitor", IDC_CHECK_PINNED_PER_MONITOR,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 128, 192, 10
 
-    CONTROL         "Show status zone (volume/network/battery)", IDC_CHECK_STATUS_ZONE,
+    CONTROL         "Open launched apps/dialogs on same monitor", IDC_CHECK_OPEN_SAME_MONITOR,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 142, 192, 10
 
-    LTEXT           "Status icon size (px):", IDC_LBL_STATUS_ICON_SZ, 20, 158, 90, 10
-    EDITTEXT        IDC_EDIT_STATUS_ICON_SZ,                          116, 156, 28, 12,
-                    ES_NUMBER | WS_TABSTOP
-    CONTROL         "", IDC_SPIN_STATUS_ICON_SZ, "msctls_updown32",
-                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    144, 156, 12, 12
-
-    CONTROL         "Show tray icons (notification area)", IDC_CHECK_TRAY_ICONS,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 174, 192, 10
-
-    CONTROL         "Hide winzoo custom sound and network icons", IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 186, 184, 10
-
-    CONTROL         "Fallback to app exe icon when tray icon unavailable", IDC_CHECK_TRAY_FALLBACK_EXE,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 198, 210, 10
-
-    CONTROL         "Show overflow (hidden) tray icons", IDC_CHECK_TRAY_OVERFLOW,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 210, 184, 10
-
-    LTEXT           "Tray icon size (px):",    IDC_LBL_TRAY_ICON_SIZE,    20, 228, 90, 10
-    EDITTEXT        IDC_EDIT_TRAY_ICON_SIZE,                              116, 226, 28, 12,
-                    ES_NUMBER | WS_TABSTOP
-    CONTROL         "", IDC_SPIN_TRAY_ICON_SIZE, "msctls_updown32",
-                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    144, 226, 12, 12
-
-    LTEXT           "Tray icon padding (px):", IDC_LBL_TRAY_ICON_PADDING, 20, 244, 90, 10
-    EDITTEXT        IDC_EDIT_TRAY_ICON_PADDING,                           116, 242, 28, 12,
-                    ES_NUMBER | WS_TABSTOP
-    CONTROL         "", IDC_SPIN_TRAY_ICON_PADDING, "msctls_updown32",
-                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    144, 242, 12, 12
-
-    LTEXT           "Tray icon margin (px):",  IDC_LBL_TRAY_ICON_MARGIN,  20, 260, 90, 10
-    EDITTEXT        IDC_EDIT_TRAY_ICON_MARGIN,                            116, 258, 28, 12,
-                    ES_NUMBER | WS_TABSTOP
-    CONTROL         "", IDC_SPIN_TRAY_ICON_MARGIN, "msctls_updown32",
-                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    144, 258, 12, 12
-
-    CONTROL         "Open launched apps/dialogs on same monitor", IDC_CHECK_OPEN_SAME_MONITOR,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 276, 192, 10
-
     CONTROL         "Show app titles in left/right position", IDC_CHECK_VERTICAL_TITLES,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 292, 192, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 158, 192, 10
 
-    LTEXT           "Title button height (px):", IDC_LBL_VERTICAL_BTN_H, 28, 308, 90, 10
-    EDITTEXT        IDC_EDIT_VERTICAL_BTN_H,                             120, 306, 28, 12,
+    LTEXT           "Title button height (px):", IDC_LBL_VERTICAL_BTN_H, 28, 176, 90, 10
+    EDITTEXT        IDC_EDIT_VERTICAL_BTN_H,                             120, 174, 28, 12,
                     ES_NUMBER | WS_TABSTOP
     CONTROL         "", IDC_SPIN_VERTICAL_BTN_H, "msctls_updown32",
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    148, 306, 12, 12
+                    148, 174, 12, 12
+
+    /* System Tray tab */
+    CONTROL         "Show tray icons (notification area)", IDC_CHECK_TRAY_ICONS,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 28, 192, 10
+
+    CONTROL         "Fallback to app exe icon when tray icon unavailable", IDC_CHECK_TRAY_FALLBACK_EXE,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 42, 210, 10
+
+    CONTROL         "Show overflow (hidden) tray icons", IDC_CHECK_TRAY_OVERFLOW,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 56, 184, 10
+
+    LTEXT           "Icon size (px):",         IDC_LBL_TRAY_ICON_SIZE,    12, 74, 90, 10
+    EDITTEXT        IDC_EDIT_TRAY_ICON_SIZE,                              116, 72, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_TRAY_ICON_SIZE, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    144, 72, 12, 12
+
+    LTEXT           "Icon padding (px):",      IDC_LBL_TRAY_ICON_PADDING, 12, 90, 90, 10
+    EDITTEXT        IDC_EDIT_TRAY_ICON_PADDING,                           116, 88, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_TRAY_ICON_PADDING, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    144, 88, 12, 12
+
+    LTEXT           "Gap between icons (px):", IDC_LBL_TRAY_ICON_MARGIN,  12, 106, 90, 10
+    EDITTEXT        IDC_EDIT_TRAY_ICON_MARGIN,                            116, 104, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_TRAY_ICON_MARGIN, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    144, 104, 12, 12
+
+    CONTROL         "Show winzoo custom system tray space", IDC_CHECK_STATUS_ZONE,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 122, 192, 10
+
+    CONTROL         "Show winzoo custom sound and network icons", IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 136, 184, 10
 
     /* App Buttons tab */
     LTEXT           "Max btn width (px):", IDC_LBL_MAXBTNW,   12,  30,  82, 10

@@ -30,12 +30,11 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     MinimizedIndicatorType minimizedIndicatorType = MinimizedIndicatorType::SmallRectangle;
     int             minimizedIndicatorW    = 10;
     int             minimizedIndicatorH    = 4;
-    bool showStatusZone    = true;   // show volume / network / battery icons
+    bool showStatusZone    = false;  // show volume / network / battery icons
     bool showLangIndicator = true;   // show current keyboard/input language (e.g. "EN", "JA")
-    int  statusIconSize    = 22;     // icon side length in logical pixels
 
     bool showTrayIcons     = true;   // show notification-area (system tray) icons
-    bool hideDefaultTrayIcons = true; // when true, hides winzoo's custom volume/network status zone icons
+    bool showWinzooCustomIcons = false; // when true, shows winzoo's custom volume/network in the status zone
     bool trayIconFallbackExe = false; // fall back to app's exe icon when tray icon can't be retrieved
     bool showOverflowTrayIcons = true; // include hidden (overflow/chevron) tray icons
     int  trayIconSize      = 22;     // icon side length in logical pixels

@@ -29,7 +29,7 @@ static constexpr const wchar_t* kTaskbarMonitorModes[] = {
 
 struct DlgData {
     Settings* settings;
-    HWND      hScrollHosts[4] = {};
+    HWND      hScrollHosts[5] = {};
     // Layout metrics (dialog client coordinates, set in WM_INITDIALOG, used by WM_SIZE)
     bool layoutReady    = false;
     int  tabL           = 0;  // tab control left
@@ -215,15 +215,6 @@ static const int kGeneralControls[] = {
     IDC_CHECK_APPMENU_ALL_MONITORS,
     IDC_CHECK_CURRENT_MONITOR_APPS,
     IDC_CHECK_PINNED_PER_MONITOR,
-    IDC_CHECK_STATUS_ZONE,
-    IDC_LBL_STATUS_ICON_SZ, IDC_EDIT_STATUS_ICON_SZ, IDC_SPIN_STATUS_ICON_SZ,
-    IDC_CHECK_TRAY_ICONS,
-    IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
-    IDC_CHECK_TRAY_FALLBACK_EXE,
-    IDC_CHECK_TRAY_OVERFLOW,
-    IDC_LBL_TRAY_ICON_SIZE,    IDC_EDIT_TRAY_ICON_SIZE,    IDC_SPIN_TRAY_ICON_SIZE,
-    IDC_LBL_TRAY_ICON_PADDING, IDC_EDIT_TRAY_ICON_PADDING, IDC_SPIN_TRAY_ICON_PADDING,
-    IDC_LBL_TRAY_ICON_MARGIN,  IDC_EDIT_TRAY_ICON_MARGIN,  IDC_SPIN_TRAY_ICON_MARGIN,
     IDC_CHECK_OPEN_SAME_MONITOR,
     IDC_CHECK_VERTICAL_TITLES,
     IDC_LBL_VERTICAL_BTN_H, IDC_EDIT_VERTICAL_BTN_H, IDC_SPIN_VERTICAL_BTN_H,
@@ -286,11 +277,23 @@ static const int kAppMenuControls[] = {
     0
 };
 
-static const int* kTabGroups[] = { kGeneralControls, kAppBtnControls, kClockControls, kAppMenuControls };
+static const int kSysTrayControls[] = {
+    IDC_CHECK_TRAY_ICONS,
+    IDC_CHECK_TRAY_FALLBACK_EXE,
+    IDC_CHECK_TRAY_OVERFLOW,
+    IDC_LBL_TRAY_ICON_SIZE,    IDC_EDIT_TRAY_ICON_SIZE,    IDC_SPIN_TRAY_ICON_SIZE,
+    IDC_LBL_TRAY_ICON_PADDING, IDC_EDIT_TRAY_ICON_PADDING, IDC_SPIN_TRAY_ICON_PADDING,
+    IDC_LBL_TRAY_ICON_MARGIN,  IDC_EDIT_TRAY_ICON_MARGIN,  IDC_SPIN_TRAY_ICON_MARGIN,
+    IDC_CHECK_STATUS_ZONE,
+    IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
+    0
+};
+
+static const int* kTabGroups[] = { kGeneralControls, kAppBtnControls, kClockControls, kAppMenuControls, kSysTrayControls };
 
 static void ShowTab(HWND hwnd, int tab, DlgData* data)
 {
-    for (int g = 0; g < 4; ++g) {
+    for (int g = 0; g < 5; ++g) {
         bool visible = (g == tab);
         HWND hHost = (data && data->hScrollHosts[g]) ? data->hScrollHosts[g] : nullptr;
         if (hHost) {
@@ -398,10 +401,11 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
 {
     const Settings& s = *data->settings;
 
-    HWND hGen = TabHost(data, 0, hwnd);
-    HWND hBtn = TabHost(data, 1, hwnd);
-    HWND hClk = TabHost(data, 2, hwnd);
-    HWND hAm  = TabHost(data, 3, hwnd);
+    HWND hGen  = TabHost(data, 0, hwnd);
+    HWND hBtn  = TabHost(data, 1, hwnd);
+    HWND hClk  = TabHost(data, 2, hwnd);
+    HWND hAm   = TabHost(data, 3, hwnd);
+    HWND hTray = TabHost(data, 4, hwnd);
 
     // General tab
     SendMessageW(GetDlgItem(hGen, IDC_COMBO_POSITION), CB_SETCURSEL, static_cast<WPARAM>(s.position), 0);
@@ -415,20 +419,6 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
                    s.showCurrentMonitorAppsOnly ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hGen, IDC_CHECK_PINNED_PER_MONITOR,
                    s.pinnedAppsPerMonitor ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hGen, IDC_CHECK_STATUS_ZONE,
-                   s.showStatusZone ? BST_CHECKED : BST_UNCHECKED);
-    SendMessageW(GetDlgItem(hGen, IDC_SPIN_STATUS_ICON_SZ), UDM_SETPOS32, 0, s.statusIconSize);
-    CheckDlgButton(hGen, IDC_CHECK_TRAY_ICONS,
-                   s.showTrayIcons ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hGen, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
-                   s.hideDefaultTrayIcons ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hGen, IDC_CHECK_TRAY_FALLBACK_EXE,
-                   s.trayIconFallbackExe ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hGen, IDC_CHECK_TRAY_OVERFLOW,
-                   s.showOverflowTrayIcons ? BST_CHECKED : BST_UNCHECKED);
-    SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_SIZE),    UDM_SETPOS32, 0, s.trayIconSize);
-    SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_PADDING), UDM_SETPOS32, 0, s.trayIconPadding);
-    SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_MARGIN),  UDM_SETPOS32, 0, s.trayIconMargin);
     CheckDlgButton(hGen, IDC_CHECK_OPEN_SAME_MONITOR,
                    s.openAppsOnSameMonitor ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hGen, IDC_CHECK_VERTICAL_TITLES,
@@ -436,6 +426,21 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
     SendMessageW(GetDlgItem(hGen, IDC_SPIN_VERTICAL_BTN_H), UDM_SETPOS32, 0, s.leftRightHeight);
     SetVerticalTitleControlsEnabled(hGen, s.showTitlesOnVertical);
     SetAllMonitorsControlsEnabled(hGen, s.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
+
+    // System Tray tab
+    CheckDlgButton(hTray, IDC_CHECK_TRAY_ICONS,
+                   s.showTrayIcons ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hTray, IDC_CHECK_TRAY_FALLBACK_EXE,
+                   s.trayIconFallbackExe ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hTray, IDC_CHECK_TRAY_OVERFLOW,
+                   s.showOverflowTrayIcons ? BST_CHECKED : BST_UNCHECKED);
+    SendMessageW(GetDlgItem(hTray, IDC_SPIN_TRAY_ICON_SIZE),    UDM_SETPOS32, 0, s.trayIconSize);
+    SendMessageW(GetDlgItem(hTray, IDC_SPIN_TRAY_ICON_PADDING), UDM_SETPOS32, 0, s.trayIconPadding);
+    SendMessageW(GetDlgItem(hTray, IDC_SPIN_TRAY_ICON_MARGIN),  UDM_SETPOS32, 0, s.trayIconMargin);
+    CheckDlgButton(hTray, IDC_CHECK_STATUS_ZONE,
+                   s.showStatusZone ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hTray, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
+                   s.showWinzooCustomIcons ? BST_CHECKED : BST_UNCHECKED);
 
     // App Buttons tab
     SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MAXBTNW),        UDM_SETPOS32, 0, s.maxButtonWidth);
@@ -558,19 +563,12 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                            data->settings->showCurrentMonitorAppsOnly ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(hwnd, IDC_CHECK_PINNED_PER_MONITOR,
                            data->settings->pinnedAppsPerMonitor ? BST_CHECKED : BST_UNCHECKED);
-            CheckDlgButton(hwnd, IDC_CHECK_STATUS_ZONE,
-                           data->settings->showStatusZone ? BST_CHECKED : BST_UNCHECKED);
-            {
-                HWND hSzSpin = GetDlgItem(hwnd, IDC_SPIN_STATUS_ICON_SZ);
-                HWND hSzEdit = GetDlgItem(hwnd, IDC_EDIT_STATUS_ICON_SZ);
-                SendMessageW(hSzSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hSzEdit), 0);
-                SendMessageW(hSzSpin, UDM_SETRANGE32, 12, 48);
-                SendMessageW(hSzSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(data->settings->statusIconSize));
-            }
             CheckDlgButton(hwnd, IDC_CHECK_TRAY_ICONS,
                            data->settings->showTrayIcons ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_STATUS_ZONE,
+                           data->settings->showStatusZone ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(hwnd, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
-                           data->settings->hideDefaultTrayIcons ? BST_CHECKED : BST_UNCHECKED);
+                           data->settings->showWinzooCustomIcons ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(hwnd, IDC_CHECK_TRAY_FALLBACK_EXE,
                            data->settings->trayIconFallbackExe ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(hwnd, IDC_CHECK_TRAY_OVERFLOW,
@@ -728,11 +726,13 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         HWND hTab = GetDlgItem(hwnd, IDC_TAB_SETTINGS);
         TCITEMW tci = {};
         tci.mask = TCIF_TEXT;
-        wchar_t t0[] = L"General", t1[] = L"App Buttons", t2[] = L"System Clock", t3[] = L"App Menu";
+        wchar_t t0[] = L"General", t1[] = L"App Buttons", t2[] = L"System Clock",
+                t3[] = L"App Menu",  t4[] = L"System Tray";
         tci.pszText = t0; TabCtrl_InsertItem(hTab, 0, &tci);
         tci.pszText = t1; TabCtrl_InsertItem(hTab, 1, &tci);
         tci.pszText = t2; TabCtrl_InsertItem(hTab, 2, &tci);
         tci.pszText = t3; TabCtrl_InsertItem(hTab, 3, &tci);
+        tci.pszText = t4; TabCtrl_InsertItem(hTab, 4, &tci);
 
         // Disable visual styles on checkboxes so they respect the transparent
         // background brush from WM_CTLCOLORBTN instead of painting their own.
@@ -824,7 +824,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             int panelW = content.right  - content.left;
             int panelH = content.bottom - content.top;
 
-            for (int g = 0; g < 4; ++g)
+            for (int g = 0; g < 5; ++g)
                 data->hScrollHosts[g] = CreateTabScrollHost(hwnd, kTabGroups[g],
                     content.left, content.top, panelW, panelH);
         }
@@ -918,7 +918,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         int panelW = content.right  - content.left;
         int panelH = content.bottom - content.top;
 
-        HDWP hdwp = BeginDeferWindowPos(4 + 4 + 3);  // 1 tab + 4 hosts + 3 buttons
+        HDWP hdwp = BeginDeferWindowPos(1 + 5 + 3);  // 1 tab + 5 hosts + 3 buttons
 
         // Resize tab control
         hdwp = DeferWindowPos(hdwp, hTabCtrl2, nullptr,
@@ -926,7 +926,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                               SWP_NOZORDER | SWP_NOACTIVATE);
 
         // Resize each scroll host
-        for (int g = 0; g < 4; ++g) {
+        for (int g = 0; g < 5; ++g) {
             if (data->hScrollHosts[g])
                 hdwp = DeferWindowPos(hdwp, data->hScrollHosts[g], nullptr,
                                       content.left, content.top, panelW, panelH,
@@ -949,7 +949,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         EndDeferWindowPos(hdwp);
 
         // Update scrollbar page size and clamp scroll position for each host
-        for (int g = 0; g < 4; ++g) {
+        for (int g = 0; g < 5; ++g) {
             HWND hH = data->hScrollHosts[g];
             if (!hH) continue;
             SCROLLINFO si = {};
@@ -1196,9 +1196,10 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         }
         if (LOWORD(wParam) == IDOK && data) {
             HWND hGen = TabHost(data, 0, hwnd);
-            HWND hBtn = TabHost(data, 1, hwnd);
-            HWND hClk = TabHost(data, 2, hwnd);
-            HWND hAm  = TabHost(data, 3, hwnd);
+            HWND hBtn  = TabHost(data, 1, hwnd);
+            HWND hClk  = TabHost(data, 2, hwnd);
+            HWND hAm   = TabHost(data, 3, hwnd);
+            HWND hTray = TabHost(data, 4, hwnd);
 
             HWND hPos   = GetDlgItem(hGen, IDC_COMBO_POSITION);
             HWND hTheme = GetDlgItem(hGen, IDC_COMBO_THEME);
@@ -1223,32 +1224,6 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                     IsDlgButtonChecked(hGen, IDC_CHECK_CURRENT_MONITOR_APPS) == BST_CHECKED;
                 data->settings->pinnedAppsPerMonitor =
                     IsDlgButtonChecked(hGen, IDC_CHECK_PINNED_PER_MONITOR) == BST_CHECKED;
-                data->settings->showStatusZone =
-                    IsDlgButtonChecked(hGen, IDC_CHECK_STATUS_ZONE) == BST_CHECKED;
-                {
-                    int sz = static_cast<int>(
-                        SendMessageW(GetDlgItem(hGen, IDC_SPIN_STATUS_ICON_SZ), UDM_GETPOS32, 0, 0));
-                    if (sz >= 12 && sz <= 48) data->settings->statusIconSize = sz;
-                }
-                data->settings->showTrayIcons =
-                    IsDlgButtonChecked(hGen, IDC_CHECK_TRAY_ICONS) == BST_CHECKED;
-                data->settings->hideDefaultTrayIcons =
-                    IsDlgButtonChecked(hGen, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS) == BST_CHECKED;
-                data->settings->trayIconFallbackExe =
-                    IsDlgButtonChecked(hGen, IDC_CHECK_TRAY_FALLBACK_EXE) == BST_CHECKED;
-                data->settings->showOverflowTrayIcons =
-                    IsDlgButtonChecked(hGen, IDC_CHECK_TRAY_OVERFLOW) == BST_CHECKED;
-                {
-                    int tsz = static_cast<int>(
-                        SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_SIZE), UDM_GETPOS32, 0, 0));
-                    if (tsz >= 12 && tsz <= 48) data->settings->trayIconSize = tsz;
-                    int tpad = static_cast<int>(
-                        SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_PADDING), UDM_GETPOS32, 0, 0));
-                    if (tpad >= 0 && tpad <= 20) data->settings->trayIconPadding = tpad;
-                    int tmar = static_cast<int>(
-                        SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_MARGIN), UDM_GETPOS32, 0, 0));
-                    if (tmar >= 0 && tmar <= 20) data->settings->trayIconMargin = tmar;
-                }
                 data->settings->openAppsOnSameMonitor =
                     IsDlgButtonChecked(hGen, IDC_CHECK_OPEN_SAME_MONITOR) == BST_CHECKED;
                 data->settings->showTitlesOnVertical =
@@ -1258,6 +1233,29 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                         SendMessageW(GetDlgItem(hGen, IDC_SPIN_VERTICAL_BTN_H), UDM_GETPOS32, 0, 0));
                     if (vh >= 20 && vh <= 600) data->settings->leftRightHeight = vh;
                 }
+            }
+
+            // System Tray tab
+            {
+                data->settings->showTrayIcons =
+                    IsDlgButtonChecked(hTray, IDC_CHECK_TRAY_ICONS) == BST_CHECKED;
+                data->settings->trayIconFallbackExe =
+                    IsDlgButtonChecked(hTray, IDC_CHECK_TRAY_FALLBACK_EXE) == BST_CHECKED;
+                data->settings->showOverflowTrayIcons =
+                    IsDlgButtonChecked(hTray, IDC_CHECK_TRAY_OVERFLOW) == BST_CHECKED;
+                int tsz = static_cast<int>(
+                    SendMessageW(GetDlgItem(hTray, IDC_SPIN_TRAY_ICON_SIZE), UDM_GETPOS32, 0, 0));
+                if (tsz >= 12 && tsz <= 48) data->settings->trayIconSize = tsz;
+                int tpad = static_cast<int>(
+                    SendMessageW(GetDlgItem(hTray, IDC_SPIN_TRAY_ICON_PADDING), UDM_GETPOS32, 0, 0));
+                if (tpad >= 0 && tpad <= 20) data->settings->trayIconPadding = tpad;
+                int tmar = static_cast<int>(
+                    SendMessageW(GetDlgItem(hTray, IDC_SPIN_TRAY_ICON_MARGIN), UDM_GETPOS32, 0, 0));
+                if (tmar >= 0 && tmar <= 20) data->settings->trayIconMargin = tmar;
+                data->settings->showStatusZone =
+                    IsDlgButtonChecked(hTray, IDC_CHECK_STATUS_ZONE) == BST_CHECKED;
+                data->settings->showWinzooCustomIcons =
+                    IsDlgButtonChecked(hTray, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS) == BST_CHECKED;
             }
 
             int maxW = static_cast<int>(

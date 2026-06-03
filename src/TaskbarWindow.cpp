@@ -675,14 +675,14 @@ void TaskbarWindow::LayoutButtons()
                     settings_.position != TaskbarPosition::Right);
     int pad      = Scale(2, dpi_);
     // Status icons use the configured size (DPI-scaled), clamped to fit the taskbar
-    int statusIconW = std::min(Scale(settings_.statusIconSize, dpi_), h - 2 * pad);
+    int statusIconW = std::min(Scale(settings_.trayIconSize, dpi_), h - 2 * pad);
 
     // Status zone width (only on horizontal bars)
     int statusZoneW = 0;
     int langW = 0;
     if (settings_.showStatusZone && isHoriz) {
-        if (statusData_.volAvailable && !settings_.hideDefaultTrayIcons) statusZoneW += statusIconW;
-        if (statusData_.netAvailable && !settings_.hideDefaultTrayIcons) statusZoneW += statusIconW;
+        if (statusData_.volAvailable && settings_.showWinzooCustomIcons) statusZoneW += statusIconW;
+        if (statusData_.netAvailable && settings_.showWinzooCustomIcons) statusZoneW += statusIconW;
         if (statusData_.batAvailable) statusZoneW += statusIconW;
     }
     if (settings_.showLangIndicator && isHoriz && !currentLangText_.empty()) {
@@ -740,11 +740,11 @@ void TaskbarWindow::LayoutButtons()
         int iconBot = iconTop + statusIconW;
         int x = statusZoneRect_.left;
         if (settings_.showStatusZone) {
-            if (statusData_.volAvailable && !settings_.hideDefaultTrayIcons) {
+            if (statusData_.volAvailable && settings_.showWinzooCustomIcons) {
                 volIconRect_ = { x, iconTop, x + statusIconW, iconBot };
                 x += statusIconW;
             }
-            if (statusData_.netAvailable && !settings_.hideDefaultTrayIcons) {
+            if (statusData_.netAvailable && settings_.showWinzooCustomIcons) {
                 netIconRect_ = { x, iconTop, x + statusIconW, iconBot };
                 x += statusIconW;
             }
@@ -1545,12 +1545,12 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (status.visible) {
             status.rect = statusZoneRect_;
             if (settings_.showStatusZone) {
-                status.volAvailable = statusData_.volAvailable && !settings_.hideDefaultTrayIcons;
+                status.volAvailable = statusData_.volAvailable && settings_.showWinzooCustomIcons;
                 status.volRect      = volIconRect_;
                 status.volLevel     = statusData_.volLevel;
                 status.volMuted     = statusData_.volMuted;
                 status.volHovered   = (hoveredStatus_ == 1);
-                status.netAvailable = statusData_.netAvailable && !settings_.hideDefaultTrayIcons;
+                status.netAvailable = statusData_.netAvailable && settings_.showWinzooCustomIcons;
                 status.netRect      = netIconRect_;
                 status.netConnected = statusData_.netConnected;
                 status.netHovered   = (hoveredStatus_ == 2);
@@ -1709,8 +1709,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
         int newHovStatus = 0;
         if (settings_.showStatusZone) {
-            if (statusData_.volAvailable && !settings_.hideDefaultTrayIcons && PtInRect(&volIconRect_, pt)) newHovStatus = 1;
-            else if (statusData_.netAvailable && !settings_.hideDefaultTrayIcons && PtInRect(&netIconRect_, pt)) newHovStatus = 2;
+            if (statusData_.volAvailable && settings_.showWinzooCustomIcons && PtInRect(&volIconRect_, pt)) newHovStatus = 1;
+            else if (statusData_.netAvailable && settings_.showWinzooCustomIcons && PtInRect(&netIconRect_, pt)) newHovStatus = 2;
             else if (statusData_.batAvailable && PtInRect(&batIconRect_, pt)) newHovStatus = 3;
         }
         if (newHovStatus == 0 && settings_.showLangIndicator &&

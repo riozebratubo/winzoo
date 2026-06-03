@@ -333,9 +333,8 @@ bool ExportSettingsToFile(const Settings& s)
     wInt("minimizedIndicatorH",    s.minimizedIndicatorH);
     wBool("showStatusZone",   s.showStatusZone);
     wBool("showLangIndicator", s.showLangIndicator);
-    wInt("statusIconSize",    s.statusIconSize);
     wBool("showTrayIcons",    s.showTrayIcons);
-    wBool("hideDefaultTrayIcons", s.hideDefaultTrayIcons);
+    wBool("showWinzooCustomIcons", s.showWinzooCustomIcons);
     wBool("trayIconFallbackExe", s.trayIconFallbackExe);
     wBool("showOverflowTrayIcons", s.showOverflowTrayIcons);
     wInt("trayIconSize",      s.trayIconSize);
@@ -544,9 +543,8 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     ri("minimizedIndicatorH", ns.minimizedIndicatorH);
     rb("showStatusZone",   ns.showStatusZone);
     rb("showLangIndicator", ns.showLangIndicator);
-    ri("statusIconSize",   ns.statusIconSize);
     rb("showTrayIcons",    ns.showTrayIcons);
-    rb("hideDefaultTrayIcons", ns.hideDefaultTrayIcons);
+    rb("showWinzooCustomIcons", ns.showWinzooCustomIcons);
     rb("trayIconFallbackExe", ns.trayIconFallbackExe);
     rb("showOverflowTrayIcons", ns.showOverflowTrayIcons);
     ri("trayIconSize",     ns.trayIconSize);

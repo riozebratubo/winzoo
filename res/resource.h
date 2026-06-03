@@ -127,9 +127,6 @@
 
 // General tab — system status zone
 #define IDC_CHECK_STATUS_ZONE               1145
-#define IDC_LBL_STATUS_ICON_SZ              1146
-#define IDC_EDIT_STATUS_ICON_SZ             1147
-#define IDC_SPIN_STATUS_ICON_SZ             1148
 
 // General tab — notification-area (tray) icons
 #define IDC_CHECK_TRAY_ICONS                1149

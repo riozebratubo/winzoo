@@ -236,11 +236,8 @@ Settings LoadSettings()
     if (s.minimizedIndicatorH > 20) s.minimizedIndicatorH = 20;
     if (key.ReadDword(L"ShowStatusZone",    val)) s.showStatusZone    = val != 0;
     if (key.ReadDword(L"ShowLangIndicator", val)) s.showLangIndicator = val != 0;
-    if (key.ReadDword(L"StatusIconSize",    val)) s.statusIconSize    = static_cast<int>(val);
-    if (s.statusIconSize < 12) s.statusIconSize = 12;
-    if (s.statusIconSize > 48) s.statusIconSize = 48;
     if (key.ReadDword(L"ShowTrayIcons",     val)) s.showTrayIcons     = val != 0;
-    if (key.ReadDword(L"HideDefaultTrayIcons", val)) s.hideDefaultTrayIcons = val != 0;
+    if (key.ReadDword(L"ShowWinzooCustomIcons", val)) s.showWinzooCustomIcons = val != 0;
     if (key.ReadDword(L"ShowOverflowTrayIcons", val)) s.showOverflowTrayIcons = val != 0;
     if (key.ReadDword(L"TrayIconSize",      val)) s.trayIconSize      = static_cast<int>(val);
     if (s.trayIconSize    < 12) s.trayIconSize    = 12;
@@ -384,9 +381,8 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"MinimizedIndicatorH",    static_cast<DWORD>(s.minimizedIndicatorH));
     key.WriteDword(L"ShowStatusZone",    s.showStatusZone    ? 1u : 0u);
     key.WriteDword(L"ShowLangIndicator", s.showLangIndicator ? 1u : 0u);
-    key.WriteDword(L"StatusIconSize",    static_cast<DWORD>(s.statusIconSize));
     key.WriteDword(L"ShowTrayIcons",     s.showTrayIcons     ? 1u : 0u);
-    key.WriteDword(L"HideDefaultTrayIcons", s.hideDefaultTrayIcons ? 1u : 0u);
+    key.WriteDword(L"ShowWinzooCustomIcons", s.showWinzooCustomIcons ? 1u : 0u);
     key.WriteDword(L"ShowOverflowTrayIcons", s.showOverflowTrayIcons ? 1u : 0u);
     key.WriteDword(L"TrayIconSize",      static_cast<DWORD>(s.trayIconSize));
     key.WriteDword(L"TrayIconPadding",   static_cast<DWORD>(s.trayIconPadding));

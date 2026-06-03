@@ -79,7 +79,7 @@ BEGIN
     CONTROL         "Show tray icons (notification area)", IDC_CHECK_TRAY_ICONS,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 174, 192, 10
 
-    CONTROL         "Hide default system icons (sound, network)", IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
+    CONTROL         "Hide winzoo custom sound and network icons", IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 186, 184, 10
 
     CONTROL         "Fallback to app exe icon when tray icon unavailable", IDC_CHECK_TRAY_FALLBACK_EXE,

@@ -35,7 +35,7 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     int  statusIconSize    = 22;     // icon side length in logical pixels
 
     bool showTrayIcons     = true;   // show notification-area (system tray) icons
-    bool hideDefaultTrayIcons = true; // hide explorer.exe-owned default icons (sound, network) from tray
+    bool hideDefaultTrayIcons = true; // when true, hides winzoo's custom volume/network status zone icons
     bool trayIconFallbackExe = false; // fall back to app's exe icon when tray icon can't be retrieved
     bool showOverflowTrayIcons = true; // include hidden (overflow/chevron) tray icons
     int  trayIconSize      = 22;     // icon side length in logical pixels

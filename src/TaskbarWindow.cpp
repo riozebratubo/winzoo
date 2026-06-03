@@ -439,19 +439,42 @@ void TaskbarWindow::RefreshTrayIcons()
     if (fresh.empty() && !trayIcons_.empty())
         return;
 
-    // Deduplicate: keep only one icon per process. Apps like Task Manager register
-    // multiple icons (one per resource meter), but we show only one representative.
+    // Deduplicate: keep one icon per callback window (hWnd). This collapses apps
+    // like Task Manager that register multiple icons from the same window (one per
+    // resource meter) into a single entry. Icons with no hWnd are kept as-is.
+    // Among duplicates, the entry with a valid hIcon is preferred over one without.
     {
-        std::unordered_set<std::wstring> seen;
         std::vector<TrayIconEntry> deduped;
         for (auto& e : fresh) {
-            if (seen.insert(e.exeName).second) {
+            if (!e.hWnd) {
+                deduped.push_back(std::move(e));
+                continue;
+            }
+            auto it = std::find_if(deduped.begin(), deduped.end(),
+                [&](const TrayIconEntry& d) { return d.hWnd == e.hWnd; });
+            if (it == deduped.end()) {
                 deduped.push_back(std::move(e));
             } else {
+                if (!it->hIcon && e.hIcon) {
+                    // Upgrade the incumbent's icon without changing its other fields
+                    it->hIcon = e.hIcon;
+                    e.hIcon = nullptr;
+                }
                 if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
             }
         }
         fresh = std::move(deduped);
+    }
+
+    // For any surviving entry that still has no icon, fall back to the app's exe icon.
+    // This handles apps like Task Manager whose tray buttons are hidden in Explorer's
+    // toolbar (so PrintWindow captures nothing) and whose TRAYDATA HICON probe fails.
+    for (auto& e : fresh) {
+        if (!e.hIcon && !e.exePath.empty()) {
+            HICON hSmall = nullptr;
+            if (ExtractIconExW(e.exePath.c_str(), 0, nullptr, &hSmall, 1) && hSmall)
+                e.hIcon = hSmall;
+        }
     }
 
     // --- Sort by settings_.trayIconOrder ---

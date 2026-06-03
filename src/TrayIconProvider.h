@@ -11,6 +11,7 @@ struct TrayIconEntry {
     HICON        hIcon;        // caller must DestroyIcon when done
     std::wstring tooltip;      // tooltip text
     std::wstring exeName;      // basename e.g. "Discord.exe"
+    std::wstring exePath;      // full path e.g. "C:\...\Discord.exe", used for icon fallback
     std::wstring orderKey;     // exeName + "|" + str(uID), stable per-session key
 };
 

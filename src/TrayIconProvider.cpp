@@ -332,6 +332,7 @@ static void EnumerateToolbarButtons(HWND hToolbar, HWND hParentForCapture,
             }
         }
         if (!exeFullPath.empty()) {
+            entry.exePath = exeFullPath;
             auto slash = exeFullPath.rfind(L'\\');
             entry.exeName = (slash != std::wstring::npos)
                             ? exeFullPath.substr(slash + 1) : exeFullPath;

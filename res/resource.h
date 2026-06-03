@@ -198,6 +198,12 @@
 #define IDC_LBL_SEPARATOR_COLOR             1182
 #define IDC_BTN_SEPARATOR_COLOR             1183
 
+// General tab — vertical (left/right) title settings
+#define IDC_CHECK_VERTICAL_TITLES           1184
+#define IDC_LBL_VERTICAL_BTN_H             1185
+#define IDC_EDIT_VERTICAL_BTN_H            1186
+#define IDC_SPIN_VERTICAL_BTN_H            1187
+
 // App Buttons — progress bars
 #define IDC_CHECK_PROGRESSBAR               1168
 #define IDC_CHECK_PROGRESSBAR_THEMECLR      1169

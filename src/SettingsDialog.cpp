@@ -225,6 +225,8 @@ static const int kGeneralControls[] = {
     IDC_LBL_TRAY_ICON_PADDING, IDC_EDIT_TRAY_ICON_PADDING, IDC_SPIN_TRAY_ICON_PADDING,
     IDC_LBL_TRAY_ICON_MARGIN,  IDC_EDIT_TRAY_ICON_MARGIN,  IDC_SPIN_TRAY_ICON_MARGIN,
     IDC_CHECK_OPEN_SAME_MONITOR,
+    IDC_CHECK_VERTICAL_TITLES,
+    IDC_LBL_VERTICAL_BTN_H, IDC_EDIT_VERTICAL_BTN_H, IDC_SPIN_VERTICAL_BTN_H,
     0
 };
 static const int kAppBtnControls[] = {
@@ -375,6 +377,13 @@ static void SetProgressBarControlsEnabled(HWND hwnd, bool pbEnabled, bool useThe
     EnableWindow(GetDlgItem(hwnd, IDC_SPIN_PROGRESSBAR_HEIGHT),pbEnabled ? TRUE : FALSE);
 }
 
+static void SetVerticalTitleControlsEnabled(HWND hwnd, bool enabled)
+{
+    EnableWindow(GetDlgItem(hwnd, IDC_LBL_VERTICAL_BTN_H),  enabled ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_VERTICAL_BTN_H), enabled ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_SPIN_VERTICAL_BTN_H), enabled ? TRUE : FALSE);
+}
+
 static void SetAllMonitorsControlsEnabled(HWND hwnd, bool enabled)
 {
     EnableWindow(GetDlgItem(hwnd, IDC_CHECK_APPMENU_ALL_MONITORS),  enabled ? TRUE : FALSE);
@@ -422,6 +431,10 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
     SendMessageW(GetDlgItem(hGen, IDC_SPIN_TRAY_ICON_MARGIN),  UDM_SETPOS32, 0, s.trayIconMargin);
     CheckDlgButton(hGen, IDC_CHECK_OPEN_SAME_MONITOR,
                    s.openAppsOnSameMonitor ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hGen, IDC_CHECK_VERTICAL_TITLES,
+                   s.showTitlesOnVertical ? BST_CHECKED : BST_UNCHECKED);
+    SendMessageW(GetDlgItem(hGen, IDC_SPIN_VERTICAL_BTN_H), UDM_SETPOS32, 0, s.leftRightHeight);
+    SetVerticalTitleControlsEnabled(hGen, s.showTitlesOnVertical);
     SetAllMonitorsControlsEnabled(hGen, s.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
 
     // App Buttons tab
@@ -579,6 +592,17 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             }
             CheckDlgButton(hwnd, IDC_CHECK_OPEN_SAME_MONITOR,
                            data->settings->openAppsOnSameMonitor ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_VERTICAL_TITLES,
+                           data->settings->showTitlesOnVertical ? BST_CHECKED : BST_UNCHECKED);
+            {
+                HWND hVHSpin = GetDlgItem(hwnd, IDC_SPIN_VERTICAL_BTN_H);
+                HWND hVHEdit = GetDlgItem(hwnd, IDC_EDIT_VERTICAL_BTN_H);
+                SendMessageW(hVHSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hVHEdit), 0);
+                SendMessageW(hVHSpin, UDM_SETRANGE32, 20, 600);
+                SendMessageW(hVHSpin, UDM_SETPOS32,   0,
+                             static_cast<LPARAM>(data->settings->leftRightHeight));
+            }
+            SetVerticalTitleControlsEnabled(hwnd, data->settings->showTitlesOnVertical);
             SetAllMonitorsControlsEnabled(hwnd, allMonitors);
         }
 
@@ -722,6 +746,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             IDC_CHECK_STATUS_ZONE, IDC_CHECK_TRAY_ICONS, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
             IDC_CHECK_TRAY_FALLBACK_EXE, IDC_CHECK_TRAY_OVERFLOW,
             IDC_CHECK_OPEN_SAME_MONITOR,
+            IDC_CHECK_VERTICAL_TITLES,
             IDC_CHECK_APPMENU_SIDEBAR,
             IDC_CHECK_APPMENU_SIDEBAR_EXPLORER,
             IDC_CHECK_APPMENU_SIDEBAR_SETTINGS,
@@ -1098,6 +1123,12 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             SetClockControlsEnabled(hClk, checked);
             return TRUE;
         }
+        if (LOWORD(wParam) == IDC_CHECK_VERTICAL_TITLES && data) {
+            HWND hGen = TabHost(data, 0, hwnd);
+            bool checked = IsDlgButtonChecked(hGen, IDC_CHECK_VERTICAL_TITLES) == BST_CHECKED;
+            SetVerticalTitleControlsEnabled(hGen, checked);
+            return TRUE;
+        }
         if (LOWORD(wParam) == IDC_COMBO_TASKBAR_MONITOR
             && HIWORD(wParam) == CBN_SELCHANGE)
         {
@@ -1220,6 +1251,13 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 }
                 data->settings->openAppsOnSameMonitor =
                     IsDlgButtonChecked(hGen, IDC_CHECK_OPEN_SAME_MONITOR) == BST_CHECKED;
+                data->settings->showTitlesOnVertical =
+                    IsDlgButtonChecked(hGen, IDC_CHECK_VERTICAL_TITLES) == BST_CHECKED;
+                {
+                    int vh = static_cast<int>(
+                        SendMessageW(GetDlgItem(hGen, IDC_SPIN_VERTICAL_BTN_H), UDM_GETPOS32, 0, 0));
+                    if (vh >= 20 && vh <= 600) data->settings->leftRightHeight = vh;
+                }
             }
 
             int maxW = static_cast<int>(

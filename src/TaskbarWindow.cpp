@@ -183,6 +183,16 @@ void TaskbarWindow::SetMonitor(HMONITOR hMonitor, bool isPrimary)
                      || settings_.taskbarMonitorMode == TaskbarMonitorMode::Primary;
 }
 
+int TaskbarWindow::EffectiveThicknessPx() const
+{
+    bool isVertical = settings_.position == TaskbarPosition::Left
+                   || settings_.position == TaskbarPosition::Right;
+    int raw = (isVertical && settings_.showTitlesOnVertical)
+            ? settings_.leftRightHeight
+            : settings_.thickness;
+    return Scale(raw, dpi_);
+}
+
 RECT TaskbarWindow::CalculateWindowRect() const
 {
     // Use the assigned monitor; fall back to primary if not set
@@ -194,15 +204,16 @@ RECT TaskbarWindow::CalculateWindowRect() const
     GetMonitorInfo(hMon, &mi);
     RECT mon = mi.rcMonitor;
 
-    int thick = Scale(settings_.thickness, dpi_);
+    int thick   = Scale(settings_.thickness, dpi_);
+    int thickLR = EffectiveThicknessPx();
 
     switch (settings_.position) {
     case TaskbarPosition::Top:
         return { mon.left, mon.top, mon.right, mon.top + thick };
     case TaskbarPosition::Left:
-        return { mon.left, mon.top, mon.left + thick, mon.bottom };
+        return { mon.left, mon.top, mon.left + thickLR, mon.bottom };
     case TaskbarPosition::Right:
-        return { mon.right - thick, mon.top, mon.right, mon.bottom };
+        return { mon.right - thickLR, mon.top, mon.right, mon.bottom };
     case TaskbarPosition::Floating:
         return { settings_.floatX, settings_.floatY,
                  settings_.floatX + Scale(400, dpi_),
@@ -241,7 +252,7 @@ void TaskbarWindow::ApplySettings(const Settings& s)
     SaveSettings(s);
 
     if (settings_.position != TaskbarPosition::Floating) {
-        appBar_.SetPosition(settings_.position, Scale(settings_.thickness, dpi_));
+        appBar_.SetPosition(settings_.position, EffectiveThicknessPx());
         RECT rc = appBar_.GetReservedRect();
         SetWindowPos(hwnd_, HWND_TOPMOST,
                      rc.left, rc.top,
@@ -468,9 +479,58 @@ void TaskbarWindow::RefreshTrayIcons()
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
+void TaskbarWindow::ComputeClockFontSizes()
+{
+    if (!settings_.showClock) {
+        fittedTimePt_ = settings_.clockTimeFontSize;
+        fittedDatePt_ = settings_.clockDateFontSize;
+        return;
+    }
+
+    if (dpi_                          == clockFitDpi_    &&
+        settings_.clockWidth          == clockFitW_      &&
+        settings_.clockTimeFontSize   == clockFitTimePt_ &&
+        settings_.clockDateFontSize   == clockFitDatePt_ &&
+        settings_.clockTimeFormat     == clockFitTimeFmt_ &&
+        settings_.clockDateFormat     == clockFitDateFmt_)
+        return;
+
+    // Available pixel width for text inside the clock zone, with a small horizontal pad
+    int availW = Scale(settings_.clockWidth, dpi_) - Scale(4, dpi_) - 50;
+
+    SYSTEMTIME st = {};
+    GetLocalTime(&st);
+    std::wstring timeSample = ApplyClockPattern(settings_.clockTimeFormat, st, true);
+    std::wstring dateSample = ApplyClockPattern(settings_.clockDateFormat, st, false);
+
+    int timePt = settings_.clockTimeFontSize;
+    while (timePt > 6 && availW > 0) {
+        if (renderer_.MeasureSmallText(timeSample, timePt, dpi_) <= availW) break;
+        --timePt;
+    }
+
+    int datePt = settings_.clockDateFontSize;
+    while (datePt > 6 && availW > 0) {
+        if (renderer_.MeasureSmallText(dateSample, datePt, dpi_) <= availW) break;
+        --datePt;
+    }
+
+    fittedTimePt_ = timePt;
+    fittedDatePt_ = datePt;
+
+    clockFitDpi_    = dpi_;
+    clockFitW_      = settings_.clockWidth;
+    clockFitTimePt_ = settings_.clockTimeFontSize;
+    clockFitDatePt_ = settings_.clockDateFontSize;
+    clockFitTimeFmt_ = settings_.clockTimeFormat;
+    clockFitDateFmt_ = settings_.clockDateFormat;
+}
+
 void TaskbarWindow::LayoutButtons()
 {
     if (!hwnd_) return;
+
+    ComputeClockFontSizes();
 
     RECT client;
     GetClientRect(hwnd_, &client);
@@ -694,7 +754,11 @@ void TaskbarWindow::LayoutButtons()
     } else {
         // Vertical layout
         int arrowW = Scale(20, dpi_);
-        int btnH   = Scale(36, dpi_);
+        bool showTitles = settings_.showTitlesOnVertical;
+        int btnH = Scale(settings_.thickness, dpi_);
+
+        for (auto* btn : visiblePinned) btn->iconOnly = !showTitles;
+        for (auto* btn : visibleTask)   btn->iconOnly = !showTitles;
 
         // --- Pinned zone ---
         int pinnedZoneEnd = startSz;
@@ -1295,7 +1359,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         }
         if (tray) ShowWindow(tray, SW_HIDE);
         appBar_.Unregister();
-        appBar_.Register(hwnd_, settings_.position, Scale(settings_.thickness, dpi_));
+        appBar_.Register(hwnd_, settings_.position, EffectiveThicknessPx());
         RECT rc = appBar_.GetReservedRect();
         SetWindowPos(hwnd_, HWND_TOPMOST,
                      rc.left, rc.top,
@@ -1318,8 +1382,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         ReleaseDC(hwnd, hdc);
 
         if (settings_.position != TaskbarPosition::Floating)
-            appBar_.Register(hwnd_, settings_.position,
-                             Scale(settings_.thickness, dpi_));
+            appBar_.Register(hwnd_, settings_.position, EffectiveThicknessPx());
 
         shellHookMsg_ = tracker_.ShellHookMessage();
         if (shellHookMsg_ == 0)
@@ -1369,8 +1432,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             clock.rect     = clockRect_;
             clock.timeLine = ApplyClockPattern(settings_.clockTimeFormat, st, true);
             clock.dateLine = ApplyClockPattern(settings_.clockDateFormat, st, false);
-            clock.timeFontPt = settings_.clockTimeFontSize;
-            clock.dateFontPt = settings_.clockDateFontSize;
+            clock.timeFontPt = fittedTimePt_;
+            clock.dateFontPt = fittedDatePt_;
             clock.lineSpacing = settings_.clockLineSpacing;
             clock.timeColor  = settings_.clockTimeColor;
             clock.dateColor  = settings_.clockDateColor;
@@ -1949,8 +2012,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_DISPLAYCHANGE: {
         appBar_.Unregister();
-        appBar_.Register(hwnd_, settings_.position,
-                         Scale(settings_.thickness, dpi_));
+        appBar_.Register(hwnd_, settings_.position, EffectiveThicknessPx());
         RECT rc = appBar_.GetReservedRect();
         SetWindowPos(hwnd_, HWND_TOPMOST,
                      rc.left, rc.top,

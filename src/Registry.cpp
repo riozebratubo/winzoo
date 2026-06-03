@@ -233,6 +233,7 @@ Settings LoadSettings()
     if (s.minimizedIndicatorH < 1)  s.minimizedIndicatorH = 1;
     if (s.minimizedIndicatorH > 20) s.minimizedIndicatorH = 20;
     if (key.ReadDword(L"ShowStatusZone",    val)) s.showStatusZone    = val != 0;
+    if (key.ReadDword(L"ShowLangIndicator", val)) s.showLangIndicator = val != 0;
     if (key.ReadDword(L"StatusIconSize",    val)) s.statusIconSize    = static_cast<int>(val);
     if (s.statusIconSize < 12) s.statusIconSize = 12;
     if (s.statusIconSize > 48) s.statusIconSize = 48;
@@ -324,6 +325,12 @@ Settings LoadSettings()
     if (key.ReadDword(L"ShowPinnedAppsAsButtons", val)) s.showPinnedAppsAsButtons = val != 0;
     if (key.ReadDword(L"ShowSeparators",          val)) s.showSeparators          = val != 0;
     if (key.ReadDword(L"SeparatorColor",          val)) s.separatorColor          = static_cast<COLORREF>(val);
+    if (key.ReadDword(L"ShowTitlesOnVertical",    val)) s.showTitlesOnVertical    = val != 0;
+    if (key.ReadDword(L"LeftRightHeight",         val)) {
+        s.leftRightHeight = static_cast<int>(val);
+        if (s.leftRightHeight < 20)  s.leftRightHeight = 20;
+        if (s.leftRightHeight > 600) s.leftRightHeight = 600;
+    }
 
     // Clamp App Menu values
     if (s.appMenuWidth        < 120)  s.appMenuWidth        = 120;
@@ -373,6 +380,7 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"MinimizedIndicatorW",    static_cast<DWORD>(s.minimizedIndicatorW));
     key.WriteDword(L"MinimizedIndicatorH",    static_cast<DWORD>(s.minimizedIndicatorH));
     key.WriteDword(L"ShowStatusZone",    s.showStatusZone    ? 1u : 0u);
+    key.WriteDword(L"ShowLangIndicator", s.showLangIndicator ? 1u : 0u);
     key.WriteDword(L"StatusIconSize",    static_cast<DWORD>(s.statusIconSize));
     key.WriteDword(L"ShowTrayIcons",     s.showTrayIcons     ? 1u : 0u);
     key.WriteDword(L"HideDefaultTrayIcons", s.hideDefaultTrayIcons ? 1u : 0u);
@@ -427,4 +435,6 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"ShowPinnedAppsAsButtons",  s.showPinnedAppsAsButtons ? 1u : 0u);
     key.WriteDword(L"ShowSeparators",           s.showSeparators ? 1u : 0u);
     key.WriteDword(L"SeparatorColor",           static_cast<DWORD>(s.separatorColor));
+    key.WriteDword(L"ShowTitlesOnVertical",     s.showTitlesOnVertical ? 1u : 0u);
+    key.WriteDword(L"LeftRightHeight",          static_cast<DWORD>(s.leftRightHeight));
 }

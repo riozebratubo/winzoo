@@ -58,6 +58,9 @@ private:
     // Tray icon management
     void RefreshTrayIcons();
 
+    void ComputeClockFontSizes();
+    int  EffectiveThicknessPx() const;
+
     // Combined-index helpers (0..P-1 = pinned, P..P+T-1 = task)
     int             TotalCount()        const;
     bool            IsPinnedIdx(int i)  const;
@@ -82,6 +85,8 @@ private:
     std::vector<RECT>              trayIconRects_;
     std::wstring    monitorDeviceName_;
     std::wstring    currentLangText_;    // e.g. "EN-US" — updated by kTimerActiveWindow
+    std::wstring    clockFitTimeFmt_;
+    std::wstring    clockFitDateFmt_;
     HKL             currentHkl_      = nullptr;
     ThemeColors     colors_         = {};
     Renderer        renderer_;
@@ -97,6 +102,12 @@ private:
 
     // 4-byte aligned fields
     int             dpi_            = 96;
+    int             fittedTimePt_   = 0;
+    int             fittedDatePt_   = 0;
+    int             clockFitDpi_    = 0;
+    int             clockFitW_      = 0;
+    int             clockFitTimePt_ = 0;
+    int             clockFitDatePt_ = 0;
     int             hoveredIdx_     = -1;  // combined index
     int             hoveredScroll_  = 0;
     int             hoveredStatus_  = 0;   // 0=none 1=vol 2=net 3=bat

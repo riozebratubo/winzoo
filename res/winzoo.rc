@@ -112,6 +112,16 @@ BEGIN
     CONTROL         "Open launched apps/dialogs on same monitor", IDC_CHECK_OPEN_SAME_MONITOR,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 276, 192, 10
 
+    CONTROL         "Show app titles in left/right position", IDC_CHECK_VERTICAL_TITLES,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 292, 192, 10
+
+    LTEXT           "Title button height (px):", IDC_LBL_VERTICAL_BTN_H, 28, 308, 90, 10
+    EDITTEXT        IDC_EDIT_VERTICAL_BTN_H,                             120, 306, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_VERTICAL_BTN_H, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    148, 306, 12, 12
+
     /* App Buttons tab */
     LTEXT           "Max btn width (px):", IDC_LBL_MAXBTNW,   12,  30,  82, 10
     EDITTEXT        IDC_EDIT_MAXBTNW,                         96,  28,  28, 12,

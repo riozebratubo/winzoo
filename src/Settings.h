@@ -14,6 +14,7 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     TaskbarPosition position  = TaskbarPosition::Bottom;
     ThemePreset     theme     = ThemePreset::Dark;
     int             thickness = 48;
+    int             leftRightHeight  = 300;   // taskbar width in vertical (left/right) mode when titles are shown
     int             floatX           = 100;
     int             floatY           = 100;
     TaskbarMonitorMode taskbarMonitorMode        = TaskbarMonitorMode::AllMonitors;
@@ -94,6 +95,7 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     COLORREF progressBarColor         = RGB(0, 84, 153);
     int      progressBarHeight        = 3;   // logical px, range 1–10
 
+    bool showTitlesOnVertical = false;   // show app titles in left/right position
     bool openAppsOnSameMonitor = false;  // open launched apps/dialogs on the taskbar's monitor
 
     // Settings dialog geometry (0 = not yet saved, use default centering)

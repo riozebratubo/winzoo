@@ -376,6 +376,8 @@ bool ExportSettingsToFile(const Settings& s)
     wBool("openAppsOnSameMonitor", s.openAppsOnSameMonitor);
     wInt("buttonOutlineRadius",        s.buttonOutlineRadius);
     wBool("showPinnedAppsAsButtons",   s.showPinnedAppsAsButtons);
+    wBool("showTitlesOnVertical",      s.showTitlesOnVertical);
+    wInt("leftRightHeight",            s.leftRightHeight);
     wBool("showSeparators",            s.showSeparators);
     wUInt("separatorColor",            static_cast<unsigned int>(s.separatorColor));
     wBool("showProgressBars",          s.showProgressBars);
@@ -591,6 +593,8 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     rb("openAppsOnSameMonitor", ns.openAppsOnSameMonitor);
     ri("buttonOutlineRadius",       ns.buttonOutlineRadius);
     rb("showPinnedAppsAsButtons",   ns.showPinnedAppsAsButtons);
+    rb("showTitlesOnVertical",      ns.showTitlesOnVertical);
+    ri("leftRightHeight",           ns.leftRightHeight);
     rb("showSeparators",            ns.showSeparators);
     { size_t p = FindValue(content, "separatorColor");
       unsigned int v = 0;

@@ -92,7 +92,9 @@ public:
                const TrayZoneInfo& tray = {},
                const ProgressBarOptions& progressBar = {},
                int buttonBorderRadius = 0,
-               bool showPinnedAsButtons = false);
+               bool showPinnedAsButtons = false,
+               bool showSeparators = false,
+               COLORREF separatorColor = RGB(70, 70, 70));
 
     int MeasureSmallText(const std::wstring& text, int datePt, int dpi);
 

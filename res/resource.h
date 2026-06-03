@@ -193,6 +193,11 @@
 // App Buttons — pinned apps visual style
 #define IDC_CHECK_SHOW_PINNED_AS_BUTTONS    1180
 
+// App Buttons — separator lines
+#define IDC_CHECK_SHOW_SEPARATORS           1181
+#define IDC_LBL_SEPARATOR_COLOR             1182
+#define IDC_BTN_SEPARATOR_COLOR             1183
+
 // App Buttons — progress bars
 #define IDC_CHECK_PROGRESSBAR               1168
 #define IDC_CHECK_PROGRESSBAR_THEMECLR      1169

@@ -289,7 +289,9 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
                      const TrayZoneInfo& tray,
                      const ProgressBarOptions& progressBar,
                      int buttonBorderRadius,
-                     bool showPinnedAsButtons)
+                     bool showPinnedAsButtons,
+                     bool showSeparators,
+                     COLORREF separatorColor)
 {
     if (!hdcMem_) return;
 
@@ -365,12 +367,14 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
         int gap   = MulDiv(clock.lineSpacing, dpi, 96) / 2; // half-gap applied to each side
 
         // Divider line on the leading edge of the clock area
-        HPEN divPen = CreatePen(PS_SOLID, 1, colors.separator);
-        HPEN oldPen = static_cast<HPEN>(SelectObject(hdcMem_, divPen));
-        MoveToEx(hdcMem_, clock.rect.left - MulDiv(3, dpi, 96), clock.rect.top,    nullptr);
-        LineTo(  hdcMem_, clock.rect.left - MulDiv(3, dpi, 96), clock.rect.bottom);
-        SelectObject(hdcMem_, oldPen);
-        DeleteObject(divPen);
+        if (showSeparators) {
+            HPEN divPen = CreatePen(PS_SOLID, 1, separatorColor);
+            HPEN oldPen = static_cast<HPEN>(SelectObject(hdcMem_, divPen));
+            MoveToEx(hdcMem_, clock.rect.left - MulDiv(3, dpi, 96), clock.rect.top,    nullptr);
+            LineTo(  hdcMem_, clock.rect.left - MulDiv(3, dpi, 96), clock.rect.bottom);
+            SelectObject(hdcMem_, oldPen);
+            DeleteObject(divPen);
+        }
 
         SetBkMode(hdcMem_, TRANSPARENT);
 
@@ -424,18 +428,19 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
         DeleteObject(dotBr);
 
         // Thin separator on the trailing edge
-        HPEN sepPen = CreatePen(PS_SOLID, 1, colors.separator);
-        HPEN oldPen = static_cast<HPEN>(SelectObject(hdcMem_, sepPen));
-        // Vertical separator (assuming horizontal bar; works for vertical too)
-        MoveToEx(hdcMem_, startBtn.rect.right, startBtn.rect.top,    nullptr);
-        LineTo(  hdcMem_, startBtn.rect.right, startBtn.rect.bottom);
-        SelectObject(hdcMem_, oldPen);
-        DeleteObject(sepPen);
+        if (showSeparators) {
+            HPEN sepPen = CreatePen(PS_SOLID, 1, separatorColor);
+            HPEN oldPen = static_cast<HPEN>(SelectObject(hdcMem_, sepPen));
+            MoveToEx(hdcMem_, startBtn.rect.right, startBtn.rect.top,    nullptr);
+            LineTo(  hdcMem_, startBtn.rect.right, startBtn.rect.bottom);
+            SelectObject(hdcMem_, oldPen);
+            DeleteObject(sepPen);
+        }
     }
 
     // Pinned zone separator
-    if (pinnedSepX > 0) {
-        HPEN sepPen = CreatePen(PS_SOLID, 1, colors.separator);
+    if (showSeparators && pinnedSepX > 0) {
+        HPEN sepPen = CreatePen(PS_SOLID, 1, separatorColor);
         HPEN oldPen = static_cast<HPEN>(SelectObject(hdcMem_, sepPen));
         if (scroll.isHoriz) {
             MoveToEx(hdcMem_, pinnedSepX, 0, nullptr);
@@ -451,13 +456,15 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
     // Status zone (volume / network / battery)
     if (status.visible) {
         // Divider line on the leading edge of the status zone
-        HPEN divPen = CreatePen(PS_SOLID, 1, colors.separator);
-        HPEN oldPen = static_cast<HPEN>(SelectObject(hdcMem_, divPen));
-        int divX = status.rect.left - MulDiv(3, dpi, 96);
-        MoveToEx(hdcMem_, divX, status.rect.top,    nullptr);
-        LineTo  (hdcMem_, divX, status.rect.bottom);
-        SelectObject(hdcMem_, oldPen);
-        DeleteObject(divPen);
+        if (showSeparators) {
+            HPEN divPen = CreatePen(PS_SOLID, 1, separatorColor);
+            HPEN oldPen = static_cast<HPEN>(SelectObject(hdcMem_, divPen));
+            int divX = status.rect.left - MulDiv(3, dpi, 96);
+            MoveToEx(hdcMem_, divX, status.rect.top,    nullptr);
+            LineTo  (hdcMem_, divX, status.rect.bottom);
+            SelectObject(hdcMem_, oldPen);
+            DeleteObject(divPen);
+        }
 
         COLORREF iconCol = colors.textDimmed;
         if (status.volAvailable) {

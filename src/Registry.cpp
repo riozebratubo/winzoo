@@ -322,6 +322,8 @@ Settings LoadSettings()
         if (s.buttonOutlineRadius > 32) s.buttonOutlineRadius = 32;
     }
     if (key.ReadDword(L"ShowPinnedAppsAsButtons", val)) s.showPinnedAppsAsButtons = val != 0;
+    if (key.ReadDword(L"ShowSeparators",          val)) s.showSeparators          = val != 0;
+    if (key.ReadDword(L"SeparatorColor",          val)) s.separatorColor          = static_cast<COLORREF>(val);
 
     // Clamp App Menu values
     if (s.appMenuWidth        < 120)  s.appMenuWidth        = 120;
@@ -423,4 +425,6 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"ProgressBarHeight",        static_cast<DWORD>(s.progressBarHeight));
     key.WriteDword(L"ButtonOutlineRadius",      static_cast<DWORD>(s.buttonOutlineRadius));
     key.WriteDword(L"ShowPinnedAppsAsButtons",  s.showPinnedAppsAsButtons ? 1u : 0u);
+    key.WriteDword(L"ShowSeparators",           s.showSeparators ? 1u : 0u);
+    key.WriteDword(L"SeparatorColor",           static_cast<DWORD>(s.separatorColor));
 }

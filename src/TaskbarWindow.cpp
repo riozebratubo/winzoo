@@ -1470,7 +1470,9 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                             settings_.progressBarHeight
                         },
                         settings_.buttonOutlineRadius,
-                        settings_.showPinnedAppsAsButtons);
+                        settings_.showPinnedAppsAsButtons,
+                        settings_.showSeparators,
+                        settings_.separatorColor);
         EndPaint(hwnd, &ps);
         return 0;
     }

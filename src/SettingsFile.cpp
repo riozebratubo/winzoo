@@ -376,6 +376,8 @@ bool ExportSettingsToFile(const Settings& s)
     wBool("openAppsOnSameMonitor", s.openAppsOnSameMonitor);
     wInt("buttonOutlineRadius",        s.buttonOutlineRadius);
     wBool("showPinnedAppsAsButtons",   s.showPinnedAppsAsButtons);
+    wBool("showSeparators",            s.showSeparators);
+    wUInt("separatorColor",            static_cast<unsigned int>(s.separatorColor));
     wBool("showProgressBars",          s.showProgressBars);
     wBool("progressBarUseThemeColor", s.progressBarUseThemeColor);
     wUInt("progressBarColor",         static_cast<unsigned int>(s.progressBarColor));
@@ -589,6 +591,11 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     rb("openAppsOnSameMonitor", ns.openAppsOnSameMonitor);
     ri("buttonOutlineRadius",       ns.buttonOutlineRadius);
     rb("showPinnedAppsAsButtons",   ns.showPinnedAppsAsButtons);
+    rb("showSeparators",            ns.showSeparators);
+    { size_t p = FindValue(content, "separatorColor");
+      unsigned int v = 0;
+      if (p != std::string::npos && ParseUInt(content, p, v))
+          ns.separatorColor = static_cast<COLORREF>(v); }
     rb("showProgressBars",          ns.showProgressBars);
     rb("progressBarUseThemeColor", ns.progressBarUseThemeColor);
     ri("progressBarHeight",        ns.progressBarHeight);

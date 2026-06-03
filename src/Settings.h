@@ -86,6 +86,9 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     int      buttonOutlineRadius      = 0;    // corner radius of task button outline in logical px
     bool     showPinnedAppsAsButtons  = false; // draw outline + background for pinned-but-not-running buttons
 
+    bool     showSeparators   = false;
+    COLORREF separatorColor   = RGB(70, 70, 70);
+
     bool     showProgressBars         = true;
     bool     progressBarUseThemeColor = true;
     COLORREF progressBarColor         = RGB(0, 84, 153);

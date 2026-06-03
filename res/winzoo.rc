@@ -191,6 +191,13 @@ BEGIN
     CONTROL         "Show pinned apps as buttons", IDC_CHECK_SHOW_PINNED_AS_BUTTONS,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 266, 148, 10
 
+    CONTROL         "Show separator lines", IDC_CHECK_SHOW_SEPARATORS,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 282, 148, 10
+
+    LTEXT           "Color:", IDC_LBL_SEPARATOR_COLOR, 20, 298, 28, 10
+    CONTROL         "", IDC_BTN_SEPARATOR_COLOR, "Button",
+                    BS_OWNERDRAW | WS_TABSTOP, 52, 296, 44, 12
+
     /* System Clock tab */
     CONTROL         "Show clock", IDC_CHECK_SHOWCLOCK,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 28, 80, 12

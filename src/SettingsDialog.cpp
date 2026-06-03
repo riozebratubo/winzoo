@@ -243,6 +243,8 @@ static const int kAppBtnControls[] = {
     IDC_LBL_PROGRESSBAR_HEIGHT, IDC_EDIT_PROGRESSBAR_HEIGHT, IDC_SPIN_PROGRESSBAR_HEIGHT,
     IDC_LBL_BTN_OUTLINE_RADIUS, IDC_EDIT_BTN_OUTLINE_RADIUS, IDC_SPIN_BTN_OUTLINE_RADIUS,
     IDC_CHECK_SHOW_PINNED_AS_BUTTONS,
+    IDC_CHECK_SHOW_SEPARATORS,
+    IDC_LBL_SEPARATOR_COLOR, IDC_BTN_SEPARATOR_COLOR,
     0
 };
 static const int kClockControls[] = {
@@ -356,6 +358,12 @@ static void SetMinimizedIndicatorControlsEnabled(HWND hwnd, bool enabled)
         EnableWindow(GetDlgItem(hwnd, *id), sizeEnabled ? TRUE : FALSE);
 }
 
+static void SetSeparatorControlsEnabled(HWND hwnd, bool enabled)
+{
+    EnableWindow(GetDlgItem(hwnd, IDC_LBL_SEPARATOR_COLOR), enabled ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_BTN_SEPARATOR_COLOR), enabled ? TRUE : FALSE);
+}
+
 static void SetProgressBarControlsEnabled(HWND hwnd, bool pbEnabled, bool useTheme)
 {
     EnableWindow(GetDlgItem(hwnd, IDC_CHECK_PROGRESSBAR_THEMECLR), pbEnabled ? TRUE : FALSE);
@@ -445,6 +453,12 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
     SendMessageW(GetDlgItem(hBtn, IDC_SPIN_BTN_OUTLINE_RADIUS), UDM_SETPOS32, 0, s.buttonOutlineRadius);
     CheckDlgButton(hBtn, IDC_CHECK_SHOW_PINNED_AS_BUTTONS,
                    s.showPinnedAppsAsButtons ? BST_CHECKED : BST_UNCHECKED);
+
+    // Separator lines
+    CheckDlgButton(hBtn, IDC_CHECK_SHOW_SEPARATORS,
+                   s.showSeparators ? BST_CHECKED : BST_UNCHECKED);
+    InvalidateRect(GetDlgItem(hBtn, IDC_BTN_SEPARATOR_COLOR), nullptr, FALSE);
+    SetSeparatorControlsEnabled(hBtn, s.showSeparators);
 
     // Clock tab
     CheckDlgButton(hClk, IDC_CHECK_SHOWCLOCK, s.showClock ? BST_CHECKED : BST_UNCHECKED);
@@ -649,6 +663,11 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         CheckDlgButton(hwnd, IDC_CHECK_SHOW_PINNED_AS_BUTTONS,
                        data->settings->showPinnedAppsAsButtons ? BST_CHECKED : BST_UNCHECKED);
 
+        // Separator lines
+        CheckDlgButton(hwnd, IDC_CHECK_SHOW_SEPARATORS,
+                       data->settings->showSeparators ? BST_CHECKED : BST_UNCHECKED);
+        SetSeparatorControlsEnabled(hwnd, data->settings->showSeparators);
+
         // System Clock
         CheckDlgButton(hwnd, IDC_CHECK_SHOWCLOCK,
                        data->settings->showClock ? BST_CHECKED : BST_UNCHECKED);
@@ -697,6 +716,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             IDC_CHECK_MIDDLECLICK, IDC_CHECK_RIGHTCLICKGAP, IDC_CHECK_SHOWCLOCK,
             IDC_CHECK_MINIMIZED_INDICATOR, IDC_CHECK_PINNED_AS_BUTTONS,
             IDC_CHECK_PROGRESSBAR, IDC_CHECK_PROGRESSBAR_THEMECLR,
+            IDC_CHECK_SHOW_SEPARATORS,
             IDC_CHECK_APPMENU_ALL_MONITORS, IDC_CHECK_CURRENT_MONITOR_APPS,
             IDC_CHECK_PINNED_PER_MONITOR,
             IDC_CHECK_STATUS_ZONE, IDC_CHECK_TRAY_ICONS, IDC_CHECK_HIDE_DEFAULT_TRAY_ICONS,
@@ -993,15 +1013,17 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         auto* di = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
         if (!data) break;
         if (di->CtlID == IDC_BTN_TIMECOLOR || di->CtlID == IDC_BTN_DATECOLOR
-            || di->CtlID == IDC_BTN_PROGRESSBAR_COLOR)
+            || di->CtlID == IDC_BTN_PROGRESSBAR_COLOR || di->CtlID == IDC_BTN_SEPARATOR_COLOR)
         {
             COLORREF color;
             if (di->CtlID == IDC_BTN_TIMECOLOR)
                 color = data->settings->clockTimeColor;
             else if (di->CtlID == IDC_BTN_DATECOLOR)
                 color = data->settings->clockDateColor;
-            else
+            else if (di->CtlID == IDC_BTN_PROGRESSBAR_COLOR)
                 color = data->settings->progressBarColor;
+            else
+                color = data->settings->separatorColor;
             HBRUSH br = CreateSolidBrush(color);
             FillRect(di->hDC, &di->rcItem, br);
             DeleteObject(br);
@@ -1019,7 +1041,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 
     case WM_COMMAND:
         if ((LOWORD(wParam) == IDC_BTN_TIMECOLOR || LOWORD(wParam) == IDC_BTN_DATECOLOR
-             || LOWORD(wParam) == IDC_BTN_PROGRESSBAR_COLOR)
+             || LOWORD(wParam) == IDC_BTN_PROGRESSBAR_COLOR || LOWORD(wParam) == IDC_BTN_SEPARATOR_COLOR)
             && data)
         {
             COLORREF* colorField;
@@ -1030,8 +1052,11 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             } else if (LOWORD(wParam) == IDC_BTN_DATECOLOR) {
                 colorField = &data->settings->clockDateColor;
                 hTab = TabHost(data, 2, hwnd);
-            } else {
+            } else if (LOWORD(wParam) == IDC_BTN_PROGRESSBAR_COLOR) {
                 colorField = &data->settings->progressBarColor;
+                hTab = TabHost(data, 1, hwnd);
+            } else {
+                colorField = &data->settings->separatorColor;
                 hTab = TabHost(data, 1, hwnd);
             }
             static COLORREF customColors[16] = {};
@@ -1059,6 +1084,12 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             bool pb    = IsDlgButtonChecked(hBtn, IDC_CHECK_PROGRESSBAR) == BST_CHECKED;
             bool theme = IsDlgButtonChecked(hBtn, IDC_CHECK_PROGRESSBAR_THEMECLR) == BST_CHECKED;
             SetProgressBarControlsEnabled(hBtn, pb, theme);
+            return TRUE;
+        }
+        if (LOWORD(wParam) == IDC_CHECK_SHOW_SEPARATORS && data) {
+            HWND hBtn = TabHost(data, 1, hwnd);
+            bool on = IsDlgButtonChecked(hBtn, IDC_CHECK_SHOW_SEPARATORS) == BST_CHECKED;
+            SetSeparatorControlsEnabled(hBtn, on);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_SHOWCLOCK) {
@@ -1245,6 +1276,10 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             }
             data->settings->showPinnedAppsAsButtons =
                 IsDlgButtonChecked(hBtn, IDC_CHECK_SHOW_PINNED_AS_BUTTONS) == BST_CHECKED;
+
+            data->settings->showSeparators =
+                IsDlgButtonChecked(hBtn, IDC_CHECK_SHOW_SEPARATORS) == BST_CHECKED;
+            // separatorColor is updated immediately on pick
 
             data->settings->showClock =
                 IsDlgButtonChecked(hClk, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;

@@ -243,7 +243,7 @@ BEGIN
     CONTROL         "", IDC_BTN_DATECOLOR, "Button",
                     BS_OWNERDRAW | WS_TABSTOP, 150, 108, 44, 12
 
-    LTEXT           "Tokens — time: $hh $mm $ss  date: $dd $mm $yyyy $yy",
+    LTEXT           "Tokens for time: $hh $mm $ss / date: $dd $mm $yyyy $yy",
                     IDC_LBL_TOKENS, 12, 126, 200, 16
 
     /* App Menu tab */

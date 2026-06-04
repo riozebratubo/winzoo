@@ -1141,6 +1141,10 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
 void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
 {
     std::vector<MenuItem> items = {
+        { L"Run...",              IDM_RUN_DIALOG,        false, false, false },
+        { L"Task Manager",        IDM_TASK_MANAGER,      false, false, false },
+        { L"Power options...",    IDM_POWER_OPTIONS,     false, false, false },
+        { L"",                    0,                     true,  false, false },
         { L"Settings...",         IDM_SETTINGS,          false, false, false },
         { L"Export settings...",  IDM_EXPORT_SETTINGS,   false, false, false },
         { L"",                    0,                     true,  false, false },
@@ -1154,6 +1158,21 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
     UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
 
     switch (id) {
+    case IDM_RUN_DIALOG:
+        ShellExecuteW(hwnd_, L"open", L"rundll32.exe", L"shell32.dll,#61", nullptr, SW_SHOWNORMAL);
+        break;
+
+    case IDM_TASK_MANAGER:
+        ShellExecuteW(hwnd_, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL);
+        break;
+
+    case IDM_POWER_OPTIONS: {
+        POINT pt;
+        GetCursorPos(&pt);
+        AppMenuWindow::ShowPowerSubmenu(hwnd_, pt);
+        break;
+    }
+
     case IDM_SETTINGS:
         if (SettingsDialog::Show(hwnd_, settings_)) {
             App::Instance().PropagateSettings(settings_, this);

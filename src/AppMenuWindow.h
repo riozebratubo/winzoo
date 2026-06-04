@@ -21,6 +21,9 @@ public:
     // Call once at app startup.
     static void CachePowerOptions();
 
+    // Show a native power-options popup anchored at ptScreen and execute the chosen action.
+    static void ShowPowerSubmenu(HWND hwndOwner, POINT ptScreen);
+
     // Shows the app menu anchored to the start button rect.
     // Blocks until the menu (and any submenus) are dismissed.
     // Takes entries by value so the menu owns a stable snapshot.

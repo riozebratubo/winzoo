@@ -29,6 +29,7 @@ static void LaunchMenuApp(HWND hwndHint, bool useHint, const wchar_t* exe, const
 // ---------- cached power options ----------
 
 static std::vector<PowerOption> s_powerOptions;
+static void ExecutePowerAction(PowerOption::Action action);
 
 void AppMenuWindow::CachePowerOptions()
 {
@@ -46,6 +47,23 @@ void AppMenuWindow::CachePowerOptions()
 
     s_powerOptions.push_back({ L"Restart",   PowerOption::Restart });
     s_powerOptions.push_back({ L"Shut down", PowerOption::Shutdown });
+}
+
+void AppMenuWindow::ShowPowerSubmenu(HWND hwndOwner, POINT ptScreen)
+{
+    if (s_powerOptions.empty()) return;
+
+    HMENU hMenu = CreatePopupMenu();
+    for (int i = 0; std::cmp_less(i, s_powerOptions.size()); ++i)
+        AppendMenuW(hMenu, MF_STRING, i + 1, s_powerOptions[i].label.c_str());
+
+    int cmd = static_cast<int>(TrackPopupMenu(hMenu,
+        TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN,
+        ptScreen.x, ptScreen.y, 0, hwndOwner, nullptr));
+    DestroyMenu(hMenu);
+
+    if (cmd > 0)
+        ExecutePowerAction(s_powerOptions[cmd - 1].action);
 }
 
 // ---------- tree building ----------
@@ -579,10 +597,12 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
 
         // Collect visible buttons (bottom-aligned order: WinzooSettings, AllApps, Explorer, Settings, Power)
         struct BtnDef { int idx; const wchar_t* glyph; };
-        BtnDef btns[5];
+        BtnDef btns[7];
         int btnCount = 0;
-        btns[btnCount++] = { 3, L"\uE115" };  // Winzoo Settings
+        btns[btnCount++] = { 3, L"\uE946" };  // Winzoo Settings
         btns[btnCount++] = { 4, L"\uE8F1" };  // All Apps
+        btns[btnCount++] = { 5, L"\uE768" };  // Run dialog
+        btns[btnCount++] = { 6, L"\uE756" };  // Windows Terminal
         if (settings_->appMenuSidebarShowExplorer) btns[btnCount++] = { 0, L"\uE8B7" };
         if (settings_->appMenuSidebarShowSettings) btns[btnCount++] = { 1, L"\uE713" };
         if (settings_->appMenuSidebarShowPower)    btns[btnCount++] = { 2, L"\uE7E8" };
@@ -647,10 +667,12 @@ int AppMenuWindow::HitTestSidebarBtn(POINT ptClient) const
     if (ptClient.x < menuW_) return -1;
 
     // Collect enabled buttons in display order
-    int enabled[5];
+    int enabled[7];
     int enabledCount = 0;
     enabled[enabledCount++] = 3;  // Winzoo Settings (always visible)
     enabled[enabledCount++] = 4;  // All Apps (always visible)
+    enabled[enabledCount++] = 5;  // Run dialog (always visible)
+    enabled[enabledCount++] = 6;  // Windows Terminal (always visible)
     if (settings_->appMenuSidebarShowExplorer) enabled[enabledCount++] = 0;
     if (settings_->appMenuSidebarShowSettings) enabled[enabledCount++] = 1;
     if (settings_->appMenuSidebarShowPower)    enabled[enabledCount++] = 2;
@@ -798,7 +820,7 @@ void AppMenuWindow::ActivateSidebarBtn(int idx)
 
         // Position popup at the top-right of the power button
         int btnH = settings_ ? Scale(settings_->appMenuEntryHeight, dpi_) : Scale(36, dpi_);
-        int enabledCount = 2;  // Winzoo Settings + All Apps always present
+        int enabledCount = 4;  // Winzoo Settings + All Apps + Run dialog + Terminal always present
         if (settings_) {
             if (settings_->appMenuSidebarShowExplorer) ++enabledCount;
             if (settings_->appMenuSidebarShowSettings) ++enabledCount;
@@ -847,7 +869,7 @@ void AppMenuWindow::ActivateSidebarBtn(int idx)
         int btnH = settings_ ? Scale(settings_->appMenuEntryHeight, dpi_) : Scale(36, dpi_);
         POINT btnPt = { menuW_ + sidebarW_, 0 };
         // Find the button's vertical center (second button from top)
-        btnPt.y = menuH_ - (3 + (settings_->appMenuSidebarShowExplorer ? 1 : 0)
+        btnPt.y = menuH_ - (5 + (settings_->appMenuSidebarShowExplorer ? 1 : 0)
                               + (settings_->appMenuSidebarShowSettings ? 1 : 0)
                               + (settings_->appMenuSidebarShowPower ? 1 : 0)) * btnH + btnH;
         ClientToScreen(hwnd_, &btnPt);
@@ -868,6 +890,18 @@ void AppMenuWindow::ActivateSidebarBtn(int idx)
         } else {
             if (IsWindow(hwnd_)) SetForegroundWindow(hwnd_);
         }
+    } else if (idx == 5) {
+        // Open Windows Run dialog
+        ShellExecuteW(nullptr, L"open", L"rundll32.exe", L"shell32.dll,#61", nullptr, SW_SHOWNORMAL);
+        closeReason_ = AppMenuCloseReason::Selection;
+        done_ = true;
+        DestroyWindow(hwnd_);
+    } else if (idx == 6) {
+        // Open Windows Terminal
+        LaunchMenuApp(hwnd_, settings_->openAppsOnSameMonitor, L"wt.exe");
+        closeReason_ = AppMenuCloseReason::Selection;
+        done_ = true;
+        DestroyWindow(hwnd_);
     }
 }
 

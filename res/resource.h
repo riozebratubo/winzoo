@@ -67,6 +67,9 @@
 #define IDM_REBUILD_ICON_CACHE  304
 #define IDM_RESTART             305
 #define IDM_EXPORT_SETTINGS     306
+#define IDM_RUN_DIALOG          307
+#define IDM_TASK_MANAGER        308
+#define IDM_POWER_OPTIONS       309
 
 // Task button right-click menu item IDs
 #define IDM_OPEN_NEW_WINDOW     401

@@ -287,30 +287,51 @@ void AppMenuWindow::ApplyFilter()
 }
 
 // Subclass proc for the search EDIT control — forwards navigation keys to the menu.
+// Uses window properties to avoid private-member access from a static function:
+//   GWLP_USERDATA  — original WNDPROC
+//   "WinzooMenu"   — AppMenuWindow* (set once at creation, never changes)
+//   "WinzooMEF"    — non-null when user explicitly clicked the box (MEF = menu explicit focus)
 static LRESULT CALLBACK SearchEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    WNDPROC origProc = reinterpret_cast<WNDPROC>(
-        GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    WNDPROC origProc = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (!origProc) return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 
+    HWND hParent = GetParent(hwnd);
+
+    if (uMsg == WM_LBUTTONDOWN) {
+        // User explicitly clicked the search box — record that it owns input focus.
+        SetPropW(hwnd, L"WinzooMEF", reinterpret_cast<HANDLE>(1ULL));
+        // Fall through to default handling.
+    }
+
+    if (uMsg == WM_KILLFOCUS) {
+        RemovePropW(hwnd, L"WinzooMEF");
+        HWND hNewFocus = reinterpret_cast<HWND>(wParam);
+        // If focus is leaving to something other than our parent menu, close.
+        if (hNewFocus != hParent)
+            SendMessageW(hParent, WM_KILLFOCUS, wParam, lParam);
+    }
+
     if (uMsg == WM_KEYDOWN) {
+        bool explicitlyFocused = GetPropW(hwnd, L"WinzooMEF") != nullptr;
         switch (wParam) {
         case VK_ESCAPE:
         case VK_UP:
         case VK_DOWN:
         case VK_RETURN:
-            // Move focus to the parent menu so further keystrokes go there directly.
-            SetFocus(GetParent(hwnd));
-            return SendMessageW(GetParent(hwnd), uMsg, wParam, lParam);
+            // Forward to the parent menu for item navigation.
+            // Keep OS focus on the edit so backspace/typing still work.
+            return SendMessageW(hParent, uMsg, wParam, lParam);
+        case VK_LEFT:
+        case VK_RIGHT:
+            if (!explicitlyFocused) {
+                // Implicit focus — forward for grid/list navigation.
+                return SendMessageW(hParent, uMsg, wParam, lParam);
+            }
+            // User clicked the box deliberately — let the edit move its cursor.
+            break;
+        default: break;
         }
-    }
-
-    if (uMsg == WM_KILLFOCUS) {
-        HWND hNewFocus = reinterpret_cast<HWND>(wParam);
-        HWND hParent   = GetParent(hwnd);
-        // If focus is leaving to something other than our parent menu, close.
-        if (hNewFocus != hParent)
-            SendMessageW(hParent, WM_KILLFOCUS, wParam, lParam);
     }
 
     return CallWindowProcW(origProc, hwnd, uMsg, wParam, lParam);
@@ -834,6 +855,9 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                                      reinterpret_cast<LONG_PTR>(SearchEditSubclassProc)));
                 SetWindowLongPtrW(searchEdit_, GWLP_USERDATA,
                                  reinterpret_cast<LONG_PTR>(origProc));
+                // Store this pointer so the static subclass proc can reach us.
+                SetPropW(searchEdit_, L"WinzooMenu",
+                         static_cast<HANDLE>(static_cast<void*>(this)));
             }
         }
         return 0;

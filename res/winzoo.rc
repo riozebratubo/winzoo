@@ -42,42 +42,38 @@ BEGIN
     COMBOBOX        IDC_COMBO_POSITION,                       60,  28,  80, 80,
                     CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 
-    LTEXT           "Theme:",              IDC_LBL_THEME,     12,  48,  44, 10
-    COMBOBOX        IDC_COMBO_THEME,                          60,  46,  80, 80,
-                    CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-
-    LTEXT           "Bar thickness (px):", IDC_LBL_THICKNESS, 12,  66,  82, 10
-    EDITTEXT        IDC_EDIT_THICKNESS,                       96,  64,  28, 12,
+    LTEXT           "Bar thickness (px):", IDC_LBL_THICKNESS, 12,  48,  82, 10
+    EDITTEXT        IDC_EDIT_THICKNESS,                       96,  46,  28, 12,
                     ES_NUMBER | WS_TABSTOP
     CONTROL         "", IDC_SPIN_THICKNESS, "msctls_updown32",
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    124, 64, 12, 12
+                    124, 46, 12, 12
 
-    LTEXT           "Show taskbar:",       IDC_LBL_TASKBAR_MONITOR, 12, 84,  54, 10
-    COMBOBOX        IDC_COMBO_TASKBAR_MONITOR,                       70, 82, 100, 50,
+    LTEXT           "Show taskbar:",       IDC_LBL_TASKBAR_MONITOR, 12, 66,  54, 10
+    COMBOBOX        IDC_COMBO_TASKBAR_MONITOR,                       70, 64, 100, 50,
                     CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 
     CONTROL         "Show App Menu on all monitors", IDC_CHECK_APPMENU_ALL_MONITORS,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 100, 164, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 82, 164, 10
 
     CONTROL         "Show buttons for current monitor apps only", IDC_CHECK_CURRENT_MONITOR_APPS,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 114, 192, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 96, 192, 10
 
     CONTROL         "Pinned apps: separate per monitor", IDC_CHECK_PINNED_PER_MONITOR,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 128, 192, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 110, 192, 10
 
     CONTROL         "Open launched apps/dialogs on same monitor", IDC_CHECK_OPEN_SAME_MONITOR,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 142, 192, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 124, 192, 10
 
     CONTROL         "Show app titles in left/right position", IDC_CHECK_VERTICAL_TITLES,
-                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 158, 192, 10
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 140, 192, 10
 
-    LTEXT           "Title button height (px):", IDC_LBL_VERTICAL_BTN_H, 28, 176, 90, 10
-    EDITTEXT        IDC_EDIT_VERTICAL_BTN_H,                             120, 174, 28, 12,
+    LTEXT           "Title button height (px):", IDC_LBL_VERTICAL_BTN_H, 28, 158, 90, 10
+    EDITTEXT        IDC_EDIT_VERTICAL_BTN_H,                             120, 156, 28, 12,
                     ES_NUMBER | WS_TABSTOP
     CONTROL         "", IDC_SPIN_VERTICAL_BTN_H, "msctls_updown32",
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
-                    148, 174, 12, 12
+                    148, 156, 12, 12
 
     /* System Tray tab */
     CONTROL         "Show tray icons (notification area)", IDC_CHECK_TRAY_ICONS,

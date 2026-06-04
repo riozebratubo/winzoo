@@ -204,6 +204,13 @@
 #define IDC_EDIT_VERTICAL_BTN_H            1186
 #define IDC_SPIN_VERTICAL_BTN_H            1187
 
+// Visual tab — custom taskbar color override
+#define IDC_CHECK_CUSTOM_TASKBAR_COLOR      1200
+#define IDC_BTN_CUSTOM_TASKBAR_COLOR        1201
+
+// Visual tab — theme swatch buttons (IDC_THEME_SWATCH_BASE + themeIndex, 0..9)
+#define IDC_THEME_SWATCH_BASE               1300
+
 // App Buttons — progress bars
 #define IDC_CHECK_PROGRESSBAR               1168
 #define IDC_CHECK_PROGRESSBAR_THEMECLR      1169

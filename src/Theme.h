@@ -1,7 +1,12 @@
 #pragma once
 #include <windows.h>
 
-enum class ThemePreset { Dark, Light, Accent, Forest, Sunset };
+static constexpr int kThemePresetCount = 10;
+
+enum class ThemePreset {
+    Default = 0, Light, Ocean, Forest, Sunset,
+    Midnight, Rose, Nord, Slate, Mocha
+};
 
 struct ThemeColors {
     COLORREF background;
@@ -16,46 +21,78 @@ struct ThemeColors {
     COLORREF menuText;
     COLORREF separator;
     const wchar_t* name;
+    COLORREF taskbarBase;  // base taskbar color (used in swatch UI)
+    COLORREF accentBase;   // base accent color  (used in swatch UI)
 };
 
-inline const ThemeColors& GetThemeColors(ThemePreset p)
+struct ThemeBase { COLORREF taskbar, accent; const wchar_t* name; };
+
+namespace ThemeDetail {
+
+inline int Clamp(int v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
+
+inline float Lum(COLORREF c) {
+    return (0.299f * GetRValue(c) + 0.587f * GetGValue(c) + 0.114f * GetBValue(c)) / 255.0f;
+}
+
+inline COLORREF Adj(COLORREF c, int d) {
+    return RGB(Clamp(GetRValue(c)+d), Clamp(GetGValue(c)+d), Clamp(GetBValue(c)+d));
+}
+
+inline COLORREF Blend(COLORREF a, COLORREF b, float t) {
+    float u = 1.0f - t;
+    return RGB(Clamp(int(GetRValue(a)*u + GetRValue(b)*t)),
+               Clamp(int(GetGValue(a)*u + GetGValue(b)*t)),
+               Clamp(int(GetBValue(a)*u + GetBValue(b)*t)));
+}
+
+inline ThemeColors Derive(COLORREF taskbar, COLORREF accent, const wchar_t* name) {
+    bool dark = Lum(taskbar) < 0.45f;
+    int  lgt  = dark ? 20 : -20;
+
+    COLORREF text     = dark ? RGB(232,232,232) : RGB(20,20,20);
+    COLORREF textDim  = Blend(taskbar, text, 0.50f);
+    COLORREF btnNorm  = Adj(taskbar, lgt);
+    COLORREF btnHov   = Blend(btnNorm, accent, 0.25f);
+    COLORREF btnBord  = Adj(taskbar, lgt / 2);
+    COLORREF menuBg   = Adj(taskbar, lgt / 3);
+    COLORREF menuHov  = Blend(menuBg, accent, 0.30f);
+    COLORREF sep      = Adj(taskbar, lgt);
+
+    return { taskbar, btnNorm, btnHov, accent, btnBord,
+             text, textDim, menuBg, menuHov, text, sep, name,
+             taskbar, accent };
+}
+
+} // namespace ThemeDetail
+
+inline const ThemeBase& GetThemeBase(ThemePreset p)
 {
-    static constexpr ThemeColors presets[] = {
-        // Dark
-        {
-            RGB(30, 30, 30),    RGB(50, 50, 50),    RGB(70, 70, 70),
-            RGB(0, 84, 153),    RGB(80, 80, 80),    RGB(240, 240, 240),
-            RGB(110, 110, 110), RGB(40, 40, 40),    RGB(0, 120, 212),
-            RGB(240, 240, 240), RGB(70, 70, 70),    L"Dark"
-        },
-        // Light
-        {
-            RGB(235, 235, 235), RGB(215, 215, 215), RGB(195, 195, 195),
-            RGB(0, 120, 212),   RGB(185, 185, 185), RGB(30, 30, 30),
-            RGB(150, 150, 150), RGB(245, 245, 245), RGB(0, 120, 212),
-            RGB(30, 30, 30),    RGB(180, 180, 180), L"Light"
-        },
-        // Accent (Windows blue)
-        {
-            RGB(0, 42, 84),     RGB(0, 60, 120),    RGB(0, 90, 160),
-            RGB(0, 120, 212),   RGB(0, 80, 140),    RGB(255, 255, 255),
-            RGB(130, 170, 210), RGB(0, 50, 100),    RGB(0, 100, 180),
-            RGB(255, 255, 255), RGB(0, 70, 130),    L"Accent"
-        },
-        // Forest (green)
-        {
-            RGB(20, 45, 20),    RGB(30, 65, 30),    RGB(45, 90, 45),
-            RGB(60, 140, 60),   RGB(40, 80, 40),    RGB(200, 240, 200),
-            RGB(100, 150, 100), RGB(25, 55, 25),    RGB(50, 120, 50),
-            RGB(200, 240, 200), RGB(40, 80, 40),    L"Forest"
-        },
-        // Sunset (orange)
-        {
-            RGB(50, 25, 0),     RGB(75, 40, 0),     RGB(110, 60, 0),
-            RGB(200, 100, 0),   RGB(100, 55, 0),    RGB(255, 230, 200),
-            RGB(180, 130, 80),  RGB(60, 30, 0),     RGB(180, 90, 0),
-            RGB(255, 230, 200), RGB(100, 55, 0),    L"Sunset"
-        },
+    static constexpr ThemeBase kBases[kThemePresetCount] = {
+        { RGB( 30, 30, 30),   RGB(  0,120,212), L"Default"  },
+        { RGB(235,235,235),   RGB(  0,120,212), L"Light"    },
+        { RGB(  0, 30, 60),   RGB(  0,160,210), L"Ocean"    },
+        { RGB( 20, 42, 20),   RGB( 60,160, 60), L"Forest"   },
+        { RGB( 45, 20,  5),   RGB(220,100, 20), L"Sunset"   },
+        { RGB( 12, 10, 22),   RGB(110, 70,220), L"Midnight" },
+        { RGB( 35, 12, 22),   RGB(220, 60,120), L"Rose"     },
+        { RGB( 46, 52, 64),   RGB(136,192,208), L"Nord"     },
+        { RGB( 22, 28, 36),   RGB( 38,166,154), L"Slate"    },
+        { RGB( 28, 20, 14),   RGB(180,130, 85), L"Mocha"    },
     };
-    return presets[static_cast<int>(p)];
+    return kBases[static_cast<int>(p)];
+}
+
+inline ThemeColors GetThemeColors(ThemePreset p)
+{
+    const auto& b = GetThemeBase(p);
+    return ThemeDetail::Derive(b.taskbar, b.accent, b.name);
+}
+
+// Applies optional user taskbar color override on top of the chosen preset.
+inline ThemeColors GetThemeColorsEx(ThemePreset p, bool useCustom, COLORREF customTaskbar)
+{
+    const auto& b = GetThemeBase(p);
+    COLORREF taskbar = useCustom ? customTaskbar : b.taskbar;
+    return ThemeDetail::Derive(taskbar, b.accent, b.name);
 }

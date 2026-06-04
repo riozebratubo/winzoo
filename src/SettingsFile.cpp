@@ -384,6 +384,8 @@ bool ExportSettingsToFile(const Settings& s)
     wBool("progressBarUseThemeColor", s.progressBarUseThemeColor);
     wUInt("progressBarColor",         static_cast<unsigned int>(s.progressBarColor));
     wInt("progressBarHeight",         s.progressBarHeight);
+    wBool("useCustomTaskbarColor",    s.useCustomTaskbarColor);
+    wUInt("customTaskbarColor",       static_cast<unsigned int>(s.customTaskbarColor));
 
     // pinnedExePaths
     j += "  \"pinnedExePaths\": [";
@@ -508,7 +510,7 @@ bool ImportAndDeleteSettingsFile(Settings& s)
       ns.position = static_cast<TaskbarPosition>(v); }
 
     { int v = static_cast<int>(ns.theme);
-      rEnum("theme", 0, 4, v);
+      rEnum("theme", 0, kThemePresetCount - 1, v);
       ns.theme = static_cast<ThemePreset>(v); }
 
     { int v = static_cast<int>(ns.taskbarMonitorMode);
@@ -607,6 +609,11 @@ bool ImportAndDeleteSettingsFile(Settings& s)
       unsigned int v = 0;
       if (p != std::string::npos && ParseUInt(content, p, v))
           ns.progressBarColor = static_cast<COLORREF>(v); }
+    rb("useCustomTaskbarColor", ns.useCustomTaskbarColor);
+    { size_t p = FindValue(content, "customTaskbarColor");
+      unsigned int v = 0;
+      if (p != std::string::npos && ParseUInt(content, p, v))
+          ns.customTaskbarColor = static_cast<COLORREF>(v); }
 
     { size_t p = FindValue(content, "pinnedExePaths");
       if (p != std::string::npos) ParseStringArray(content, p, ns.pinnedExePaths); }

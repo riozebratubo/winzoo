@@ -196,7 +196,8 @@ Settings LoadSettings()
 
     DWORD val = 0;
     if (key.ReadDword(L"Position", val))  s.position  = static_cast<TaskbarPosition>(val);
-    if (key.ReadDword(L"Theme", val))     s.theme     = static_cast<ThemePreset>(val);
+    if (key.ReadDword(L"Theme", val) && val < static_cast<DWORD>(kThemePresetCount))
+        s.theme = static_cast<ThemePreset>(val);
     if (key.ReadDword(L"Thickness", val)) s.thickness = static_cast<int>(val);
     if (key.ReadDword(L"FloatX", val))     s.floatX     = static_cast<int>(val);
     if (key.ReadDword(L"FloatY", val))     s.floatY     = static_cast<int>(val);
@@ -324,8 +325,10 @@ Settings LoadSettings()
     if (key.ReadDword(L"ShowPinnedAppsAsButtons", val)) s.showPinnedAppsAsButtons = val != 0;
     if (key.ReadDword(L"ShowSeparators",          val)) s.showSeparators          = val != 0;
     if (key.ReadDword(L"SeparatorColor",          val)) s.separatorColor          = static_cast<COLORREF>(val);
-    if (key.ReadDword(L"ShowTitlesOnVertical",    val)) s.showTitlesOnVertical    = val != 0;
-    if (key.ReadDword(L"LeftRightHeight",         val)) {
+    if (key.ReadDword(L"UseCustomTaskbarColor", val)) s.useCustomTaskbarColor = val != 0;
+    if (key.ReadDword(L"CustomTaskbarColor",    val)) s.customTaskbarColor    = static_cast<COLORREF>(val);
+    if (key.ReadDword(L"ShowTitlesOnVertical",  val)) s.showTitlesOnVertical  = val != 0;
+    if (key.ReadDword(L"LeftRightHeight",       val)) {
         s.leftRightHeight = static_cast<int>(val);
         if (s.leftRightHeight < 20)  s.leftRightHeight = 20;
         if (s.leftRightHeight > 600) s.leftRightHeight = 600;
@@ -434,6 +437,8 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"ShowPinnedAppsAsButtons",  s.showPinnedAppsAsButtons ? 1u : 0u);
     key.WriteDword(L"ShowSeparators",           s.showSeparators ? 1u : 0u);
     key.WriteDword(L"SeparatorColor",           static_cast<DWORD>(s.separatorColor));
-    key.WriteDword(L"ShowTitlesOnVertical",     s.showTitlesOnVertical ? 1u : 0u);
-    key.WriteDword(L"LeftRightHeight",          static_cast<DWORD>(s.leftRightHeight));
+    key.WriteDword(L"UseCustomTaskbarColor", s.useCustomTaskbarColor ? 1u : 0u);
+    key.WriteDword(L"CustomTaskbarColor",    static_cast<DWORD>(s.customTaskbarColor));
+    key.WriteDword(L"ShowTitlesOnVertical",  s.showTitlesOnVertical ? 1u : 0u);
+    key.WriteDword(L"LeftRightHeight",       static_cast<DWORD>(s.leftRightHeight));
 }

@@ -11,10 +11,6 @@ static constexpr const wchar_t* kPositions[] = {
     L"Top", L"Bottom", L"Left", L"Right", L"Floating"
 };
 
-static constexpr const wchar_t* kThemes[] = {
-    L"Dark", L"Light", L"Accent (Blue)", L"Forest (Green)", L"Sunset (Orange)"
-};
-
 static constexpr const wchar_t* kAppMenuLayouts[] = {
     L"List", L"Grid"
 };
@@ -29,7 +25,8 @@ static constexpr const wchar_t* kTaskbarMonitorModes[] = {
 
 struct DlgData {
     Settings* settings;
-    HWND      hScrollHosts[5] = {};
+    HWND      hScrollHosts[6] = {};
+    int       selectedTheme   = 0;
     // Layout metrics (dialog client coordinates, set in WM_INITDIALOG, used by WM_SIZE)
     bool layoutReady    = false;
     int  tabL           = 0;  // tab control left
@@ -209,7 +206,6 @@ static HWND TabHost(DlgData* data, int tab, HWND hwnd)
 // Null-terminated control ID lists per tab
 static const int kGeneralControls[] = {
     IDC_LBL_POSITION,  IDC_COMBO_POSITION,
-    IDC_LBL_THEME,     IDC_COMBO_THEME,
     IDC_LBL_THICKNESS, IDC_EDIT_THICKNESS, IDC_SPIN_THICKNESS,
     IDC_LBL_TASKBAR_MONITOR, IDC_COMBO_TASKBAR_MONITOR,
     IDC_CHECK_APPMENU_ALL_MONITORS,
@@ -289,11 +285,17 @@ static const int kSysTrayControls[] = {
     0
 };
 
-static const int* kTabGroups[] = { kGeneralControls, kAppBtnControls, kClockControls, kAppMenuControls, kSysTrayControls };
+// Visual tab controls are all created dynamically — nothing to reparent from the dialog.
+static const int kVisualControls[] = { 0 };
+
+static const int* kTabGroups[] = {
+    kGeneralControls, kVisualControls, kAppBtnControls,
+    kClockControls, kAppMenuControls, kSysTrayControls
+};
 
 static void ShowTab(HWND hwnd, int tab, DlgData* data)
 {
-    for (int g = 0; g < 5; ++g) {
+    for (int g = 0; g < 6; ++g) {
         bool visible = (g == tab);
         HWND hHost = (data && data->hScrollHosts[g]) ? data->hScrollHosts[g] : nullptr;
         if (hHost) {
@@ -394,6 +396,102 @@ static void SetAllMonitorsControlsEnabled(HWND hwnd, bool enabled)
     EnableWindow(GetDlgItem(hwnd, IDC_CHECK_PINNED_PER_MONITOR),    enabled ? TRUE : FALSE);
 }
 
+// Creates all controls for the Visual tab inside its scroll host (hScrollHosts[1]).
+// Called once from WM_INITDIALOG after the scroll host is created.
+static void SetupVisualTab(HWND hwndDlg, DlgData* data, int panelW, int panelH)
+{
+    HWND hPanel = data->hScrollHosts[1];
+    if (!hPanel) return;
+
+    int dpi  = GetDpiForWindow(hwndDlg);
+    auto px  = [dpi](int b) { return MulDiv(b, dpi, 96); };
+    HINSTANCE hInst = GetModuleHandleW(nullptr);
+    HFONT hFont = reinterpret_cast<HFONT>(SendMessageW(hwndDlg, WM_GETFONT, 0, 0));
+
+    int mgn    = px(8);
+    int swW    = px(58);
+    int swH    = px(72);
+    int swGap  = px(6);
+    int perRow = 3;
+    int y      = mgn;
+
+    // "Theme" label
+    int lblH = px(13);
+    HWND hLbl = CreateWindowExW(0, L"STATIC", L"Theme",
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        mgn, y, panelW - 2*mgn, lblH,
+        hPanel, nullptr, hInst, nullptr);
+    if (hFont && hLbl) SendMessageW(hLbl, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), FALSE);
+    y += lblH + px(5);
+
+    // Swatch buttons — one per theme preset
+    for (int i = 0; i < kThemePresetCount; ++i) {
+        int col = i % perRow;
+        int row = i / perRow;
+        int x   = mgn + col * (swW + swGap);
+        int sy  = y   + row * (swH + swGap);
+        HWND hSw = CreateWindowExW(0, L"BUTTON", L"",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+            x, sy, swW, swH,
+            hPanel,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_THEME_SWATCH_BASE + i)),
+            hInst, nullptr);
+        if (hFont && hSw) SendMessageW(hSw, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), FALSE);
+    }
+
+    int nRows = (kThemePresetCount + perRow - 1) / perRow;
+    y += nRows * swH + (nRows - 1) * swGap;
+    y += px(14);
+
+    // Checkbox: "Override taskbar color"
+    int chkH = px(13);
+    HWND hChk = CreateWindowExW(0, L"BUTTON", L"Override taskbar color",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+        mgn, y, panelW - 2*mgn, chkH,
+        hPanel,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_CHECK_CUSTOM_TASKBAR_COLOR)),
+        hInst, nullptr);
+    if (hFont && hChk) SendMessageW(hChk, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), FALSE);
+    SetWindowTheme(hChk, L"", L"");
+    y += chkH + px(5);
+
+    // "Taskbar color:" label + color picker button
+    int rowH     = px(16);
+    int lbl2W    = px(88);
+    int colorBtnW = px(32);
+    HWND hLbl2 = CreateWindowExW(0, L"STATIC", L"Taskbar color:",
+        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+        mgn, y, lbl2W, rowH,
+        hPanel, nullptr, hInst, nullptr);
+    if (hFont && hLbl2) SendMessageW(hLbl2, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), FALSE);
+
+    HWND hColorBtn = CreateWindowExW(0, L"BUTTON", L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+        mgn + lbl2W + px(4), y, colorBtnW, rowH,
+        hPanel,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_CUSTOM_TASKBAR_COLOR)),
+        hInst, nullptr);
+    (void)hColorBtn;
+    y += rowH + mgn;
+
+    // Set initial control states
+    data->selectedTheme = static_cast<int>(data->settings->theme);
+    CheckDlgButton(hPanel, IDC_CHECK_CUSTOM_TASKBAR_COLOR,
+                   data->settings->useCustomTaskbarColor ? BST_CHECKED : BST_UNCHECKED);
+    EnableWindow(GetDlgItem(hPanel, IDC_BTN_CUSTOM_TASKBAR_COLOR),
+                 data->settings->useCustomTaskbarColor ? TRUE : FALSE);
+
+    // Set up scroll info based on content height
+    SCROLLINFO si = {};
+    si.cbSize = sizeof(si);
+    si.fMask  = SIF_ALL;
+    si.nMin   = 0;
+    si.nMax   = y;
+    si.nPage  = static_cast<UINT>(panelH);
+    si.nPos   = 0;
+    SetScrollInfo(hPanel, SB_VERT, &si, TRUE);
+}
+
 // Pushes all current settings values into dialog controls.
 // Safe to call multiple times (structure like combo items / spin ranges
 // must already be set up by WM_INITDIALOG before this is called).
@@ -402,14 +500,14 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
     const Settings& s = *data->settings;
 
     HWND hGen  = TabHost(data, 0, hwnd);
-    HWND hBtn  = TabHost(data, 1, hwnd);
-    HWND hClk  = TabHost(data, 2, hwnd);
-    HWND hAm   = TabHost(data, 3, hwnd);
-    HWND hTray = TabHost(data, 4, hwnd);
+    HWND hVis  = TabHost(data, 1, hwnd);
+    HWND hBtn  = TabHost(data, 2, hwnd);
+    HWND hClk  = TabHost(data, 3, hwnd);
+    HWND hAm   = TabHost(data, 4, hwnd);
+    HWND hTray = TabHost(data, 5, hwnd);
 
     // General tab
     SendMessageW(GetDlgItem(hGen, IDC_COMBO_POSITION), CB_SETCURSEL, static_cast<WPARAM>(s.position), 0);
-    SendMessageW(GetDlgItem(hGen, IDC_COMBO_THEME),    CB_SETCURSEL, static_cast<WPARAM>(s.theme),    0);
     SendMessageW(GetDlgItem(hGen, IDC_SPIN_THICKNESS), UDM_SETPOS32, 0, s.thickness);
     SendMessageW(GetDlgItem(hGen, IDC_COMBO_TASKBAR_MONITOR), CB_SETCURSEL,
                  static_cast<WPARAM>(s.taskbarMonitorMode), 0);
@@ -426,6 +524,17 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
     SendMessageW(GetDlgItem(hGen, IDC_SPIN_VERTICAL_BTN_H), UDM_SETPOS32, 0, s.leftRightHeight);
     SetVerticalTitleControlsEnabled(hGen, s.showTitlesOnVertical);
     SetAllMonitorsControlsEnabled(hGen, s.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
+
+    // Visual tab
+    if (hVis) {
+        data->selectedTheme = static_cast<int>(s.theme);
+        InvalidateRect(hVis, nullptr, TRUE);
+        CheckDlgButton(hVis, IDC_CHECK_CUSTOM_TASKBAR_COLOR,
+                       s.useCustomTaskbarColor ? BST_CHECKED : BST_UNCHECKED);
+        InvalidateRect(GetDlgItem(hVis, IDC_BTN_CUSTOM_TASKBAR_COLOR), nullptr, FALSE);
+        EnableWindow(GetDlgItem(hVis, IDC_BTN_CUSTOM_TASKBAR_COLOR),
+                     s.useCustomTaskbarColor ? TRUE : FALSE);
+    }
 
     // System Tray tab
     CheckDlgButton(hTray, IDC_CHECK_TRAY_ICONS,
@@ -490,7 +599,7 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
     InvalidateRect(GetDlgItem(hClk, IDC_BTN_DATECOLOR), nullptr, FALSE);
     SetClockControlsEnabled(hClk, s.showClock);
 
-    // App Menu tab — controls live in hScrollHosts[3] after WM_INITDIALOG reparents them
+    // App Menu tab — controls live in hScrollHosts[4] after WM_INITDIALOG reparents them
     SendMessageW(GetDlgItem(hAm, IDC_COMBO_APPMENU_LAYOUT), CB_SETCURSEL,
                  static_cast<WPARAM>(s.appMenuLayout), 0);
     auto setPos = [&](int spinId, int val) {
@@ -536,12 +645,9 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         SetWindowLongPtrW(hwnd, DWLP_USER, lParam);
 
         // General
-        HWND hPos   = GetDlgItem(hwnd, IDC_COMBO_POSITION);
-        HWND hTheme = GetDlgItem(hwnd, IDC_COMBO_THEME);
-        for (auto* s : kPositions) SendMessageW(hPos,   CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(s));
-        for (auto* s : kThemes)    SendMessageW(hTheme, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(s));
-        SendMessageW(hPos,   CB_SETCURSEL, static_cast<WPARAM>(data->settings->position), 0);
-        SendMessageW(hTheme, CB_SETCURSEL, static_cast<WPARAM>(data->settings->theme),    0);
+        HWND hPos = GetDlgItem(hwnd, IDC_COMBO_POSITION);
+        for (auto* s : kPositions) SendMessageW(hPos, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(s));
+        SendMessageW(hPos, CB_SETCURSEL, static_cast<WPARAM>(data->settings->position), 0);
 
         HWND hThickSpin = GetDlgItem(hwnd, IDC_SPIN_THICKNESS);
         HWND hThickEdit = GetDlgItem(hwnd, IDC_EDIT_THICKNESS);
@@ -726,13 +832,15 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         HWND hTab = GetDlgItem(hwnd, IDC_TAB_SETTINGS);
         TCITEMW tci = {};
         tci.mask = TCIF_TEXT;
-        wchar_t t0[] = L"General", t1[] = L"App Buttons", t2[] = L"System Clock",
-                t3[] = L"App Menu",  t4[] = L"System Tray";
+        wchar_t t0[] = L"General",    t1[] = L"Visual",
+                t2[] = L"App Buttons", t3[] = L"System Clock",
+                t4[] = L"App Menu",   t5[] = L"System Tray";
         tci.pszText = t0; TabCtrl_InsertItem(hTab, 0, &tci);
         tci.pszText = t1; TabCtrl_InsertItem(hTab, 1, &tci);
         tci.pszText = t2; TabCtrl_InsertItem(hTab, 2, &tci);
         tci.pszText = t3; TabCtrl_InsertItem(hTab, 3, &tci);
         tci.pszText = t4; TabCtrl_InsertItem(hTab, 4, &tci);
+        tci.pszText = t5; TabCtrl_InsertItem(hTab, 5, &tci);
 
         // Disable visual styles on checkboxes so they respect the transparent
         // background brush from WM_CTLCOLORBTN instead of painting their own.
@@ -824,9 +932,19 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             int panelW = content.right  - content.left;
             int panelH = content.bottom - content.top;
 
-            for (int g = 0; g < 5; ++g)
+            for (int g = 0; g < 6; ++g) {
+                if (g == 1) continue; // Visual built separately below
                 data->hScrollHosts[g] = CreateTabScrollHost(hwnd, kTabGroups[g],
                     content.left, content.top, panelW, panelH);
+            }
+
+            // Visual tab (index 1): scroll host created directly; controls added dynamically.
+            data->hScrollHosts[1] = CreateWindowExW(
+                WS_EX_CONTROLPARENT, kScrollHostClass, nullptr,
+                WS_CHILD | WS_VSCROLL,
+                content.left, content.top, panelW, panelH,
+                hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+            SetupVisualTab(hwnd, data, panelW, panelH);
         }
 
         // Capture layout metrics for WM_SIZE
@@ -918,7 +1036,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         int panelW = content.right  - content.left;
         int panelH = content.bottom - content.top;
 
-        HDWP hdwp = BeginDeferWindowPos(1 + 5 + 3);  // 1 tab + 5 hosts + 3 buttons
+        HDWP hdwp = BeginDeferWindowPos(1 + 6 + 3);  // 1 tab + 6 hosts + 3 buttons
 
         // Resize tab control
         hdwp = DeferWindowPos(hdwp, hTabCtrl2, nullptr,
@@ -926,7 +1044,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                               SWP_NOZORDER | SWP_NOACTIVATE);
 
         // Resize each scroll host
-        for (int g = 0; g < 5; ++g) {
+        for (int g = 0; g < 6; ++g) {
             if (data->hScrollHosts[g])
                 hdwp = DeferWindowPos(hdwp, data->hScrollHosts[g], nullptr,
                                       content.left, content.top, panelW, panelH,
@@ -949,7 +1067,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         EndDeferWindowPos(hdwp);
 
         // Update scrollbar page size and clamp scroll position for each host
-        for (int g = 0; g < 5; ++g) {
+        for (int g = 0; g < 6; ++g) {
             HWND hH = data->hScrollHosts[g];
             if (!hH) continue;
             SCROLLINFO si = {};
@@ -1005,8 +1123,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         if (data && nm->idFrom == IDC_TAB_SETTINGS && nm->code == TCN_SELCHANGE) {
             int tab = TabCtrl_GetCurSel(GetDlgItem(hwnd, IDC_TAB_SETTINGS));
             ShowTab(hwnd, tab, data);
-            if (tab == 2) {
-                HWND hClk = TabHost(data, 2, hwnd);
+            if (tab == 3) {  // System Clock is now tab 3
+                HWND hClk = TabHost(data, 3, hwnd);
                 bool on = IsDlgButtonChecked(hClk, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;
                 SetClockControlsEnabled(hClk, on);
             }
@@ -1017,7 +1135,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 
     case WM_MOUSEWHEEL:
         if (data) {
-            for (int g = 0; g < 4; ++g) {
+            for (int g = 0; g < 6; ++g) {
                 HWND hH = data->hScrollHosts[g];
                 if (hH && IsWindowVisible(hH)) {
                     SendMessageW(hH, WM_MOUSEWHEEL, wParam, lParam);
@@ -1037,6 +1155,81 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
     case WM_DRAWITEM: {
         auto* di = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
         if (!data) break;
+
+        // Theme swatch buttons
+        if (di->CtlID >= IDC_THEME_SWATCH_BASE &&
+            di->CtlID <  IDC_THEME_SWATCH_BASE + kThemePresetCount)
+        {
+            int idx      = di->CtlID - IDC_THEME_SWATCH_BASE;
+            bool selected = (data->selectedTheme == idx);
+            bool hot      = (di->itemState & ODS_HOTLIGHT) != 0;
+
+            const ThemeBase& tb = GetThemeBase(static_cast<ThemePreset>(idx));
+            RECT rc = di->rcItem;
+            int  w  = rc.right  - rc.left;
+            int  h  = rc.bottom - rc.top;
+
+            // Name text height (bottom strip)
+            int nameH  = h / 4;
+            int colorH = h - nameH;
+
+            // Top 2/3 of color block = taskbar color
+            RECT topR = { rc.left, rc.top, rc.right, rc.top + colorH * 2 / 3 };
+            HBRUSH brTop = CreateSolidBrush(tb.taskbar);
+            FillRect(di->hDC, &topR, brTop);
+            DeleteObject(brTop);
+
+            // Bottom 1/3 of color block = accent color
+            RECT accR = { rc.left, topR.bottom, rc.right, rc.top + colorH };
+            HBRUSH brAcc = CreateSolidBrush(tb.accent);
+            FillRect(di->hDC, &accR, brAcc);
+            DeleteObject(brAcc);
+
+            // Name strip (system background)
+            RECT nameR = { rc.left, rc.top + colorH, rc.right, rc.bottom };
+            FillRect(di->hDC, &nameR, GetSysColorBrush(COLOR_BTNFACE));
+
+            // Draw name text
+            HFONT hf = reinterpret_cast<HFONT>(SendMessageW(di->hwndItem, WM_GETFONT, 0, 0));
+            HFONT hfOld = hf ? static_cast<HFONT>(SelectObject(di->hDC, hf)) : nullptr;
+            SetBkMode(di->hDC, TRANSPARENT);
+            SetTextColor(di->hDC, GetSysColor(COLOR_BTNTEXT));
+            DrawTextW(di->hDC, tb.name, -1, &nameR,
+                      DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            if (hfOld) SelectObject(di->hDC, hfOld);
+
+            // Selection or hover border
+            COLORREF hlClr = GetSysColor(COLOR_HIGHLIGHT);
+            int penW = selected ? 2 : 1;
+            if (selected || hot) {
+                HPEN hPen    = CreatePen(PS_SOLID, penW, hlClr);
+                HPEN hPenOld = static_cast<HPEN>(SelectObject(di->hDC, hPen));
+                HBRUSH hBrOld= static_cast<HBRUSH>(SelectObject(di->hDC, GetStockObject(NULL_BRUSH)));
+                Rectangle(di->hDC, rc.left, rc.top, rc.right, rc.bottom);
+                SelectObject(di->hDC, hPenOld);
+                SelectObject(di->hDC, hBrOld);
+                DeleteObject(hPen);
+            }
+            return TRUE;
+        }
+
+        // Custom taskbar color picker button
+        if (di->CtlID == IDC_BTN_CUSTOM_TASKBAR_COLOR) {
+            COLORREF color = data->settings->customTaskbarColor;
+            HBRUSH br = CreateSolidBrush(color);
+            FillRect(di->hDC, &di->rcItem, br);
+            DeleteObject(br);
+            HPEN pen    = CreatePen(PS_SOLID, 1, GetSysColor(COLOR_WINDOWFRAME));
+            HPEN oldPen = static_cast<HPEN>(SelectObject(di->hDC, pen));
+            SelectObject(di->hDC, GetStockObject(NULL_BRUSH));
+            Rectangle(di->hDC, di->rcItem.left, di->rcItem.top,
+                      di->rcItem.right, di->rcItem.bottom);
+            SelectObject(di->hDC, oldPen);
+            DeleteObject(pen);
+            return TRUE;
+        }
+
+        // Other color picker buttons (clock, progress bar, separator)
         if (di->CtlID == IDC_BTN_TIMECOLOR || di->CtlID == IDC_BTN_DATECOLOR
             || di->CtlID == IDC_BTN_PROGRESSBAR_COLOR || di->CtlID == IDC_BTN_SEPARATOR_COLOR)
         {
@@ -1065,6 +1258,37 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
     }
 
     case WM_COMMAND:
+        // Theme swatch clicked — update selection and redraw
+        if (LOWORD(wParam) >= IDC_THEME_SWATCH_BASE &&
+            LOWORD(wParam) <  IDC_THEME_SWATCH_BASE + kThemePresetCount && data)
+        {
+            data->selectedTheme = LOWORD(wParam) - IDC_THEME_SWATCH_BASE;
+            InvalidateRect(TabHost(data, 1, hwnd), nullptr, TRUE);
+            return TRUE;
+        }
+        // Custom taskbar color: checkbox toggle
+        if (LOWORD(wParam) == IDC_CHECK_CUSTOM_TASKBAR_COLOR && data) {
+            HWND hVis = TabHost(data, 1, hwnd);
+            bool on = IsDlgButtonChecked(hVis, IDC_CHECK_CUSTOM_TASKBAR_COLOR) == BST_CHECKED;
+            EnableWindow(GetDlgItem(hVis, IDC_BTN_CUSTOM_TASKBAR_COLOR), on ? TRUE : FALSE);
+            return TRUE;
+        }
+        // Custom taskbar color: color picker
+        if (LOWORD(wParam) == IDC_BTN_CUSTOM_TASKBAR_COLOR && data) {
+            static COLORREF customTaskbarCustomColors[16] = {};
+            CHOOSECOLORW cc    = {};
+            cc.lStructSize     = sizeof(cc);
+            cc.hwndOwner       = hwnd;
+            cc.rgbResult       = data->settings->customTaskbarColor;
+            cc.lpCustColors    = customTaskbarCustomColors;
+            cc.Flags           = CC_RGBINIT | CC_FULLOPEN;
+            if (ChooseColorW(&cc)) {
+                data->settings->customTaskbarColor = cc.rgbResult;
+                InvalidateRect(GetDlgItem(TabHost(data, 1, hwnd), IDC_BTN_CUSTOM_TASKBAR_COLOR),
+                               nullptr, FALSE);
+            }
+            return TRUE;
+        }
         if ((LOWORD(wParam) == IDC_BTN_TIMECOLOR || LOWORD(wParam) == IDC_BTN_DATECOLOR
              || LOWORD(wParam) == IDC_BTN_PROGRESSBAR_COLOR || LOWORD(wParam) == IDC_BTN_SEPARATOR_COLOR)
             && data)
@@ -1073,16 +1297,16 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             HWND hTab;
             if (LOWORD(wParam) == IDC_BTN_TIMECOLOR) {
                 colorField = &data->settings->clockTimeColor;
-                hTab = TabHost(data, 2, hwnd);
+                hTab = TabHost(data, 3, hwnd);
             } else if (LOWORD(wParam) == IDC_BTN_DATECOLOR) {
                 colorField = &data->settings->clockDateColor;
-                hTab = TabHost(data, 2, hwnd);
+                hTab = TabHost(data, 3, hwnd);
             } else if (LOWORD(wParam) == IDC_BTN_PROGRESSBAR_COLOR) {
                 colorField = &data->settings->progressBarColor;
-                hTab = TabHost(data, 1, hwnd);
+                hTab = TabHost(data, 2, hwnd);
             } else {
                 colorField = &data->settings->separatorColor;
-                hTab = TabHost(data, 1, hwnd);
+                hTab = TabHost(data, 2, hwnd);
             }
             static COLORREF customColors[16] = {};
             CHOOSECOLORW cc    = {};
@@ -1098,27 +1322,27 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_PROGRESSBAR && data) {
-            HWND hBtn  = TabHost(data, 1, hwnd);
+            HWND hBtn  = TabHost(data, 2, hwnd);
             bool pb    = IsDlgButtonChecked(hBtn, IDC_CHECK_PROGRESSBAR) == BST_CHECKED;
             bool theme = IsDlgButtonChecked(hBtn, IDC_CHECK_PROGRESSBAR_THEMECLR) == BST_CHECKED;
             SetProgressBarControlsEnabled(hBtn, pb, theme);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_PROGRESSBAR_THEMECLR && data) {
-            HWND hBtn  = TabHost(data, 1, hwnd);
+            HWND hBtn  = TabHost(data, 2, hwnd);
             bool pb    = IsDlgButtonChecked(hBtn, IDC_CHECK_PROGRESSBAR) == BST_CHECKED;
             bool theme = IsDlgButtonChecked(hBtn, IDC_CHECK_PROGRESSBAR_THEMECLR) == BST_CHECKED;
             SetProgressBarControlsEnabled(hBtn, pb, theme);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_SHOW_SEPARATORS && data) {
-            HWND hBtn = TabHost(data, 1, hwnd);
+            HWND hBtn = TabHost(data, 2, hwnd);
             bool on = IsDlgButtonChecked(hBtn, IDC_CHECK_SHOW_SEPARATORS) == BST_CHECKED;
             SetSeparatorControlsEnabled(hBtn, on);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_SHOWCLOCK) {
-            HWND hClk = TabHost(data, 2, hwnd);
+            HWND hClk = TabHost(data, 3, hwnd);
             bool checked = IsDlgButtonChecked(hClk, IDC_CHECK_SHOWCLOCK) == BST_CHECKED;
             SetClockControlsEnabled(hClk, checked);
             return TRUE;
@@ -1140,7 +1364,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_MINIMIZED_INDICATOR) {
-            HWND hBtn = TabHost(data, 1, hwnd);
+            HWND hBtn = TabHost(data, 2, hwnd);
             bool checked = IsDlgButtonChecked(hBtn, IDC_CHECK_MINIMIZED_INDICATOR) == BST_CHECKED;
             SetMinimizedIndicatorControlsEnabled(hBtn, checked);
             return TRUE;
@@ -1148,31 +1372,31 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         if (LOWORD(wParam) == IDC_COMBO_MINIMIZED_INDICATOR_TYPE
             && HIWORD(wParam) == CBN_SELCHANGE)
         {
-            HWND hBtn = TabHost(data, 1, hwnd);
+            HWND hBtn = TabHost(data, 2, hwnd);
             bool checked = IsDlgButtonChecked(hBtn, IDC_CHECK_MINIMIZED_INDICATOR) == BST_CHECKED;
             SetMinimizedIndicatorControlsEnabled(hBtn, checked);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_APPMENU_SIDEBAR) {
-            HWND hAm = TabHost(data, 3, hwnd);
+            HWND hAm = TabHost(data, 4, hwnd);
             bool checked = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SIDEBAR) == BST_CHECKED;
             SetSidebarControlsEnabled(hAm, checked);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_APPMENU_SEARCH) {
-            HWND hAm = TabHost(data, 3, hwnd);
+            HWND hAm = TabHost(data, 4, hwnd);
             bool checked = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SEARCH) == BST_CHECKED;
             SetSearchControlsEnabled(hAm, checked);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_APPMENU_FLATTEN_SUBMENUS && data) {
-            HWND hAm = TabHost(data, 3, hwnd);
+            HWND hAm = TabHost(data, 4, hwnd);
             if (IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_FLATTEN_SUBMENUS) == BST_CHECKED)
                 CheckDlgButton(hAm, IDC_CHECK_APPMENU_FLATTEN_ALL, BST_UNCHECKED);
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_CHECK_APPMENU_FLATTEN_ALL && data) {
-            HWND hAm = TabHost(data, 3, hwnd);
+            HWND hAm = TabHost(data, 4, hwnd);
             if (IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_FLATTEN_ALL) == BST_CHECKED)
                 CheckDlgButton(hAm, IDC_CHECK_APPMENU_FLATTEN_SUBMENUS, BST_UNCHECKED);
             return TRUE;
@@ -1195,23 +1419,29 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             return TRUE;
         }
         if (LOWORD(wParam) == IDOK && data) {
-            HWND hGen = TabHost(data, 0, hwnd);
-            HWND hBtn  = TabHost(data, 1, hwnd);
-            HWND hClk  = TabHost(data, 2, hwnd);
-            HWND hAm   = TabHost(data, 3, hwnd);
-            HWND hTray = TabHost(data, 4, hwnd);
+            HWND hGen  = TabHost(data, 0, hwnd);
+            HWND hVis  = TabHost(data, 1, hwnd);
+            HWND hBtn  = TabHost(data, 2, hwnd);
+            HWND hClk  = TabHost(data, 3, hwnd);
+            HWND hAm   = TabHost(data, 4, hwnd);
+            HWND hTray = TabHost(data, 5, hwnd);
 
-            HWND hPos   = GetDlgItem(hGen, IDC_COMBO_POSITION);
-            HWND hTheme = GetDlgItem(hGen, IDC_COMBO_THEME);
-
-            int posIdx   = static_cast<int>(SendMessageW(hPos,   CB_GETCURSEL, 0, 0));
-            int themeIdx = static_cast<int>(SendMessageW(hTheme, CB_GETCURSEL, 0, 0));
-            int thick    = static_cast<int>(
+            HWND hPos  = GetDlgItem(hGen, IDC_COMBO_POSITION);
+            int posIdx = static_cast<int>(SendMessageW(hPos, CB_GETCURSEL, 0, 0));
+            int thick  = static_cast<int>(
                 SendMessageW(GetDlgItem(hGen, IDC_SPIN_THICKNESS), UDM_GETPOS32, 0, 0));
 
-            if (posIdx >= 0)                          data->settings->position  = static_cast<TaskbarPosition>(posIdx);
-            if (themeIdx >= 0)                        data->settings->theme     = static_cast<ThemePreset>(themeIdx);
-            if (thick >= 28 && thick <= 120)          data->settings->thickness = thick;
+            if (posIdx >= 0)             data->settings->position  = static_cast<TaskbarPosition>(posIdx);
+            if (thick >= 28 && thick <= 120) data->settings->thickness = thick;
+
+            // Visual tab
+            if (data->selectedTheme >= 0 && data->selectedTheme < kThemePresetCount)
+                data->settings->theme = static_cast<ThemePreset>(data->selectedTheme);
+            if (hVis) {
+                data->settings->useCustomTaskbarColor =
+                    IsDlgButtonChecked(hVis, IDC_CHECK_CUSTOM_TASKBAR_COLOR) == BST_CHECKED;
+                // customTaskbarColor is updated immediately on color pick
+            }
 
             {
                 HWND hMon = GetDlgItem(hGen, IDC_COMBO_TASKBAR_MONITOR);
@@ -1342,7 +1572,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             if (dateSz >= 6 && dateSz <= 36) data->settings->clockDateFontSize = dateSz;
             // clockTimeColor and clockDateColor are updated immediately on pick
 
-            // App Menu tab — controls are reparented into hScrollHosts[3]
+            // App Menu tab — controls are reparented into hScrollHosts[4]
             {
                 HWND hLayout = GetDlgItem(hAm, IDC_COMBO_APPMENU_LAYOUT);
                 int layoutIdx = static_cast<int>(SendMessageW(hLayout, CB_GETCURSEL, 0, 0));

@@ -12,7 +12,7 @@ enum class MinimizedIndicatorType  { SmallRectangle = 0, DimButton = 1 };
 
 struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can throw (wstring inits); no noexcept contract exists
     TaskbarPosition position  = TaskbarPosition::Bottom;
-    ThemePreset     theme     = ThemePreset::Dark;
+    ThemePreset     theme     = ThemePreset::Default;
     int             thickness = 48;
     int             leftRightHeight  = 300;   // taskbar width in vertical (left/right) mode when titles are shown
     int             floatX           = 100;
@@ -97,6 +97,10 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
 
     bool showTitlesOnVertical = false;   // show app titles in left/right position
     bool openAppsOnSameMonitor = false;  // open launched apps/dialogs on the taskbar's monitor
+
+    // Visual — custom taskbar color override
+    bool     useCustomTaskbarColor = false;
+    COLORREF customTaskbarColor    = RGB(30, 30, 30);
 
     // Settings dialog geometry (0 = not yet saved, use default centering)
     int settingsDlgX = 0;

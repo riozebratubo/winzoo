@@ -14,7 +14,7 @@ comparison.
 ## Setup
 
 ```powershell
-cd D:\dev\winzoo
+cd winzoo # your winzoo dir
 pip install -r tests\requirements.txt
 ```
 

@@ -16,6 +16,9 @@
 #pragma comment(lib, "windowscodecs.lib")
 
 static constexpr wchar_t kAppMenuClass[] = L"WinzooAppMenu";
+// Deferred message to show the Classic power submenu outside of a WM_LBUTTONUP handler,
+// avoiding TrackPopupMenu dismissal bugs when called from within button-up processing.
+static constexpr UINT WM_CLASSIC_POWER = WM_APP + 1;
 
 // Helper to launch an app with optional same-monitor hint
 static void LaunchMenuApp(HWND hwndHint, bool useHint, const wchar_t* exe, const wchar_t* args = nullptr, int nShow = SW_SHOWNORMAL)
@@ -1435,7 +1438,15 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             }
             int rightIdx = HitTestClassicRight(pt);
             if (rightIdx >= 0) {
-                ActivateClassicRight(rightIdx);
+                if (settings_ && rightIdx == static_cast<int>(BuildClassicLinks(*settings_).size())
+                    && settings_->appMenuClassicShowShutDown)
+                {
+                    // Defer the power popup via PostMessage so TrackPopupMenu
+                    // runs in a fresh dispatch, not nested inside WM_LBUTTONUP.
+                    PostMessageW(hwnd, WM_CLASSIC_POWER, 0, 0);
+                } else {
+                    ActivateClassicRight(rightIdx);
+                }
                 return 0;
             }
         }
@@ -1657,6 +1668,13 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (suppressKillFocus_) return 0;
         done_ = true;
         DestroyWindow(hwnd);
+        return 0;
+
+    case WM_CLASSIC_POWER:
+        if (settings_ && classicPanelW_ > 0) {
+            auto links = BuildClassicLinks(*settings_);
+            ActivateClassicRight(static_cast<int>(links.size()));
+        }
         return 0;
 
     case WM_DESTROY:

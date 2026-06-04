@@ -8,17 +8,17 @@ When running, winzoo hides the native Windows taskbar and takes its place, reser
 
 - No nonsense
 - *Very* lightweight
+- Single executable, no installer needed
 - Lots of configurations
 - Custom-drawn task buttons with app icon and title
 - Custom-drawn apps menu with keyboard navigation and search
 - Custom position: top, bottom, left, right
 - Drag to reorder buttons
-- Pin/unpin monitor-spaced
+- Pin/unpin separately for each monitor
 - Works with Jump Lists for apps that support it
 - Show progress bars for apps that support it
 - Per monitor DPI aware (PerMonitorV2)
 - Settings persisted in the registry (easily exportable/importable)
-- Small excutable + dll, no installer
 - And lots more...
 
 ## Requirements to use
@@ -46,7 +46,7 @@ Run `build.bat` from the project root. It configures and builds a Release binary
 build.bat
 ```
 
-The executable is written to `build\Release\winzoo.exe`.
+The executable will be generated as `build\Release\winzoo.exe`.
 
 To build manually:
 
@@ -68,3 +68,11 @@ Launch `winzoo.exe`. The native Windows taskbar is hidden automatically and rest
 - **Right-click** the empty area at the end of the bar to open the main menu
 
 To exit cleanly, right-click the taskbar → **Close Taskbar**. This restores the native Windows taskbar before quitting.
+
+## Donations are welcome
+
+If you liked this software and would like to support its development, you can buy me a coffee. Understand that any value is fine and appreciated, and that your support means a lot to me. Thank you!
+
+[Paypal donation](https://www.paypal.com/donate/?business=NUHKNZCBCPCLQ&no_recurring=0&currency_code=USD)
+
+![Paypal qrcode](donations/paypal_qrcode.png)

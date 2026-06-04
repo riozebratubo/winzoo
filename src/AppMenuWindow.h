@@ -1,5 +1,6 @@
 #pragma once
 #include <windows.h>
+#include <unordered_map>
 #include <vector>
 #include "AppEntry.h"
 #include "AppTreeNode.h"
@@ -105,4 +106,8 @@ private:
     // Cached folder icons (loaded lazily in Paint, destroyed in WM_DESTROY).
     HICON folderIconList_ = nullptr;
     HICON folderIconGrid_ = nullptr;
+
+    // Icons for synthesised search results — freed in WM_DESTROY.
+    HICON settingsIcon_ = nullptr;
+    std::unordered_map<std::wstring, HICON> exeIconCache_;
 };

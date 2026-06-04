@@ -176,6 +176,7 @@
 // App Menu Search
 #define IDC_CHECK_APPMENU_SEARCH            1161
 #define IDC_CHECK_APPMENU_SEARCH_FUZZY      1162
+#define IDC_CHECK_APPMENU_SEARCH_SYSTEM     1202
 
 // App Buttons — icon size
 #define IDC_LBL_APP_BTN_ICON_SZ             1165

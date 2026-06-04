@@ -362,6 +362,7 @@ bool ExportSettingsToFile(const Settings& s)
     wInt("appMenuFlattenMode",  static_cast<int>(s.appMenuFlattenMode));
     wBool("appMenuSearchEnabled",          s.appMenuSearchEnabled);
     wBool("appMenuSearchFuzzy",            s.appMenuSearchFuzzy);
+    wBool("appMenuSearchSystem",           s.appMenuSearchSystem);
     wBool("appMenuSidebarEnabled",         s.appMenuSidebarEnabled);
     wInt("appMenuSidebarWidth",            s.appMenuSidebarWidth);
     wBool("appMenuSidebarShowExplorer",    s.appMenuSidebarShowExplorer);
@@ -581,6 +582,7 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     ri("appMenuPadding",      ns.appMenuPadding);
     rb("appMenuSearchEnabled",          ns.appMenuSearchEnabled);
     rb("appMenuSearchFuzzy",            ns.appMenuSearchFuzzy);
+    rb("appMenuSearchSystem",           ns.appMenuSearchSystem);
     rb("appMenuSidebarEnabled",         ns.appMenuSidebarEnabled);
     ri("appMenuSidebarWidth",           ns.appMenuSidebarWidth);
     rb("appMenuSidebarShowExplorer",    ns.appMenuSidebarShowExplorer);

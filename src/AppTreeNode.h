@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+enum class AppNodeType { Shortcut, Executable, SettingsPage };
+
 // A node in the app-menu tree: either a folder (isFolder=true, has children)
 // or a leaf app (isFolder=false, has exePath/iconPath/icon).
 struct AppTreeNode {
@@ -12,4 +14,6 @@ struct AppTreeNode {
     std::wstring             exePath;
     std::wstring             iconPath;
     std::vector<AppTreeNode> children; // non-empty only for folders
+    AppNodeType              type     = AppNodeType::Shortcut;
+    std::wstring             subtitle; // "Run command" / "Windows Settings"; empty for shortcuts
 };

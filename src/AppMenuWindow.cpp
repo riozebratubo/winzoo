@@ -1,10 +1,12 @@
 #include "AppMenuWindow.h"
 #include "LaunchHelper.h"
+#include "SettingsSearch.h"
 #include "Dpi.h"
 #include "resource.h"
 #include <windowsx.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <shlwapi.h>
 #include <powrprof.h>
 #include <algorithm>
 #include <utility>
@@ -172,11 +174,13 @@ void AppMenuWindow::BuildEntryRects(int menuW)
     bool isList = (settings_->appMenuLayout == AppMenuLayout::List);
 
     if (isList) {
-        int entryH = Scale(settings_->appMenuEntryHeight, dpi_);
+        int entryH    = Scale(settings_->appMenuEntryHeight, dpi_);
+        int subtitleH = entryH + Scale(14, dpi_);
         int y = padPx;
         for (size_t i = 0; i < nodes_->size(); ++i) {
-            entryRects_.push_back({ padPx, y, menuW - padPx, y + entryH });
-            y += entryH;
+            int h = (*nodes_)[i].subtitle.empty() ? entryH : subtitleH;
+            entryRects_.push_back({ padPx, y, menuW - padPx, y + h });
+            y += h;
         }
     } else {
         int cols      = std::max(1, settings_->appMenuGridCols);
@@ -273,6 +277,59 @@ void AppMenuWindow::ApplyFilter()
                   [](const AppTreeNode& a, const AppTreeNode& b) {
                       return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
                   });
+
+        if (lowerQuery.size() >= 2 && settings_ && settings_->appMenuSearchSystem) {
+            // Settings pages — prepend so they appear above shortcut matches.
+            if (!settingsIcon_) {
+                wchar_t settingsExe[MAX_PATH];
+                ExpandEnvironmentStringsW(
+                    L"%windir%\\ImmersiveControlPanel\\SystemSettings.exe",
+                    settingsExe, MAX_PATH);
+                ExtractIconExW(settingsExe, 0, nullptr, &settingsIcon_, 1);
+                if (!settingsIcon_)
+                    settingsIcon_ = LoadIcon(nullptr, IDI_APPLICATION);
+            }
+            auto pages = SearchSettingsPages(lowerQuery);
+            for (int pi = static_cast<int>(pages.size()) - 1; pi >= 0; --pi) {
+                const SettingsPageDef* p = pages[pi];
+                AppTreeNode n;
+                n.name     = p->displayName;
+                n.type     = AppNodeType::SettingsPage;
+                n.subtitle = L"Windows Settings";
+                n.exePath  = p->uri;
+                n.icon     = settingsIcon_;
+                filteredNodes_.insert(filteredNodes_.begin(), std::move(n));
+            }
+
+            // Executable from PATH — append below shortcut matches.
+            wchar_t exeBuf[MAX_PATH];
+            wcscpy_s(exeBuf, searchText_.c_str());
+            bool hasExt = lowerQuery.ends_with(L".exe") ||
+                          lowerQuery.ends_with(L".com") ||
+                          lowerQuery.ends_with(L".bat");
+            if (!hasExt) wcscat_s(exeBuf, L".exe");
+            if (PathFindOnPathW(exeBuf, nullptr)) {
+                std::wstring exePath(exeBuf);
+                AppTreeNode n;
+                // Use the filename portion as display name (gets correct casing).
+                auto slash = exePath.rfind(L'\\');
+                n.name     = (slash != std::wstring::npos) ? exePath.substr(slash + 1) : exePath;
+                n.type     = AppNodeType::Executable;
+                n.subtitle = L"Run command";
+                n.exePath  = exePath;
+                auto it = exeIconCache_.find(exePath);
+                if (it == exeIconCache_.end()) {
+                    HICON hi = nullptr;
+                    ExtractIconExW(exePath.c_str(), 0, nullptr, &hi, 1);
+                    exeIconCache_[exePath] = hi;
+                    n.icon = hi;
+                } else {
+                    n.icon = it->second;
+                }
+                filteredNodes_.push_back(std::move(n));
+            }
+        }
+
         nodes_ = &filteredNodes_;
     }
     BuildEntryRects(menuW_);
@@ -400,19 +457,39 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
                 DrawIconEx(hdc, r.left + pad, iconY,
                            drawIcon, iconPx, iconPx, 0, nullptr, DI_NORMAL);
 
-            // Reserve space for the folder chevron on the right.
-            int chevW  = node.isFolder ? Scale(16, dpi_) : 0;
-            RECT textR = { r.left + pad + iconPx + pad, r.top,
-                           r.right - pad - chevW,        r.bottom };
-            SetTextColor(hdc, colors_.menuText);
-            DrawTextW(hdc, node.name.c_str(), -1, &textR,
-                      DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            int chevW    = node.isFolder ? Scale(16, dpi_) : 0;
+            int textLeft = r.left + pad + iconPx + pad;
+            int textRight = r.right - pad - chevW;
 
-            if (node.isFolder) {
-                RECT chevR = { r.right - pad - chevW, r.top, r.right - pad, r.bottom };
+            if (!node.subtitle.empty()) {
+                int split = r.top + rowH * 60 / 100;
+                RECT nameR = { textLeft, r.top + Scale(2, dpi_), textRight, split };
+                SetTextColor(hdc, colors_.menuText);
+                DrawTextW(hdc, node.name.c_str(), -1, &nameR,
+                          DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+                LOGFONTW lfSub = lf;
+                lfSub.lfHeight = lfSub.lfHeight * 8 / 10;
+                HFONT subFont  = CreateFontIndirectW(&lfSub);
+                HFONT prevFont = static_cast<HFONT>(SelectObject(hdc, subFont));
+                RECT subR = { textLeft, split, textRight, r.bottom - Scale(2, dpi_) };
                 SetTextColor(hdc, colors_.textDimmed);
-                DrawTextW(hdc, L"\u25B6", 1, &chevR,
-                          DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+                DrawTextW(hdc, node.subtitle.c_str(), -1, &subR,
+                          DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                SelectObject(hdc, prevFont);
+                DeleteObject(subFont);
+            } else {
+                RECT textR = { textLeft, r.top, textRight, r.bottom };
+                SetTextColor(hdc, colors_.menuText);
+                DrawTextW(hdc, node.name.c_str(), -1, &textR,
+                          DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+                if (node.isFolder) {
+                    RECT chevR = { r.right - pad - chevW, r.top, r.right - pad, r.bottom };
+                    SetTextColor(hdc, colors_.textDimmed);
+                    DrawTextW(hdc, L"\u25B6", 1, &chevR,
+                              DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+                }
             }
         } else {
             // Grid: icon centred, name below.
@@ -1070,6 +1147,10 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (editBgBrush_) { DeleteObject(editBgBrush_); editBgBrush_ = nullptr; }
         if (folderIconList_) { DestroyIcon(folderIconList_); folderIconList_ = nullptr; }
         if (folderIconGrid_) { DestroyIcon(folderIconGrid_); folderIconGrid_ = nullptr; }
+        if (settingsIcon_)   { DestroyIcon(settingsIcon_);   settingsIcon_   = nullptr; }
+        for (auto& [path, icon] : exeIconCache_)
+            if (icon) DestroyIcon(icon);
+        exeIconCache_.clear();
         return 0;
     default: break;
     }

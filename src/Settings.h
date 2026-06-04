@@ -13,7 +13,7 @@ enum class MinimizedIndicatorType  { SmallRectangle = 0, DimButton = 1 };
 struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can throw (wstring inits); no noexcept contract exists
     TaskbarPosition position  = TaskbarPosition::Bottom;
     ThemePreset     theme     = ThemePreset::Default;
-    int             thickness = 48;
+    int             thickness = 40;
     int             leftRightHeight  = 300;   // taskbar width in vertical (left/right) mode when titles are shown
     int             floatX           = 100;
     int             floatY           = 100;

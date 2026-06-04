@@ -1166,7 +1166,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 
             const ThemeBase& tb = GetThemeBase(static_cast<ThemePreset>(idx));
             RECT rc = di->rcItem;
-            int  w  = rc.right  - rc.left;
+            // int  w  = rc.right  - rc.left;
             int  h  = rc.bottom - rc.top;
 
             // Name text height (bottom strip)

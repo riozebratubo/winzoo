@@ -9,6 +9,7 @@
 #include <shlwapi.h>
 #include <powrprof.h>
 #include <wincodec.h>
+#include <dwmapi.h>
 #include <algorithm>
 #include <utility>
 
@@ -312,7 +313,8 @@ void AppMenuWindow::BuildEntryRects(int menuW)
 
     int padPx = Scale(settings_->appMenuPadding, dpi_);
     bool isList = (settings_->appMenuLayout == AppMenuLayout::List ||
-                   settings_->appMenuLayout == AppMenuLayout::Classic);
+                   settings_->appMenuLayout == AppMenuLayout::Classic ||
+                   settings_->appMenuLayout == AppMenuLayout::ClassicRounded);
 
     if (isList) {
         int entryH    = Scale(settings_->appMenuEntryHeight, dpi_);
@@ -543,7 +545,9 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
 {
     if (!nodes_ || !settings_) return;
 
-    bool isClassic = (settings_->appMenuLayout == AppMenuLayout::Classic);
+    bool isClassic = (settings_->appMenuLayout == AppMenuLayout::Classic ||
+                      settings_->appMenuLayout == AppMenuLayout::ClassicRounded);
+    bool isRounded = (settings_->appMenuLayout == AppMenuLayout::ClassicRounded);
     bool isList    = (settings_->appMenuLayout == AppMenuLayout::List || isClassic);
 
     // Load folder icons lazily (once per window instance).
@@ -675,7 +679,8 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
     // Classic footer: "> All Programs" / "< Back" above the search box
     if (isClassic && classicFooterH_ > 0) {
         int footerY = h - searchBoxH_ - classicFooterH_;
-        RECT sepR = { 0, footerY, menuW_, footerY + 1 };
+        int sepInset = isRounded ? Scale(8, dpi_) : 0;
+        RECT sepR = { sepInset, footerY, menuW_ - sepInset, footerY + 1 };
         HBRUSH sepBr = CreateSolidBrush(colors_.separator);
         FillRect(hdc, &sepR, sepBr);
         DeleteObject(sepBr);
@@ -696,35 +701,78 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
 
     // Search box at the bottom of the content area
     if (searchBoxH_ > 0) {
-        int sbY   = h - searchBoxH_;
-        int sbPad = Scale(4, dpi_);
-        // In Classic mode the search box spans the full window width
-        int sbWidth = isClassic ? w : menuW_;
+        int sbY     = h - searchBoxH_;
+        // ClassicRounded keeps search in the left panel only; plain Classic spans full width
+        int sbWidth = (isClassic && !isRounded) ? w : menuW_;
 
-        // Separator line above search box
-        RECT sepLine = { 0, sbY, sbWidth, sbY + 1 };
-        HBRUSH sepBr = CreateSolidBrush(colors_.separator);
-        FillRect(hdc, &sepLine, sepBr);
-        DeleteObject(sepBr);
+        if (isRounded) {
+            // Fill the search strip with menu background first
+            RECT bgR = { 0, sbY, sbWidth, h };
+            HBRUSH bgBr = CreateSolidBrush(colors_.menuBg);
+            FillRect(hdc, &bgR, bgBr);
+            DeleteObject(bgBr);
 
-        // Magnifying glass icon (left of the EDIT control)
-        int iconAreaW = Scale(20, dpi_);
-        RECT iconBg = { 0, sbY + 1, sbPad + iconAreaW, h };
-        HBRUSH iconBgBr = CreateSolidBrush(colors_.menuBg);
-        FillRect(hdc, &iconBg, iconBgBr);
-        DeleteObject(iconBgBr);
+            // Rounded input box
+            int bInset = Scale(8, dpi_);   // horizontal margin from window edge
+            int bVInset = Scale(3, dpi_);  // vertical margin
+            COLORREF inputBg = RGB(
+                std::min(255, GetRValue(colors_.menuBg) + 18),
+                std::min(255, GetGValue(colors_.menuBg) + 18),
+                std::min(255, GetBValue(colors_.menuBg) + 18));
+            HBRUSH inputBrush = CreateSolidBrush(inputBg);
+            HPEN   inputPen   = CreatePen(PS_SOLID, 1, colors_.separator);
+            HBRUSH oldBr  = static_cast<HBRUSH>(SelectObject(hdc, inputBrush));
+            HPEN   oldPen = static_cast<HPEN>(SelectObject(hdc, inputPen));
+            int rx = Scale(8, dpi_); // ellipse diameter (\u2248 4 px radius)
+            RoundRect(hdc, bInset, sbY + bVInset, sbWidth - bInset, h - bVInset, rx, rx);
+            SelectObject(hdc, oldBr);
+            SelectObject(hdc, oldPen);
+            DeleteObject(inputBrush);
+            DeleteObject(inputPen);
 
-        LOGFONTW lfIcon = {};
-        lfIcon.lfHeight  = -Scale(12, dpi_);
-        lfIcon.lfQuality = CLEARTYPE_QUALITY;
-        wcscpy_s(lfIcon.lfFaceName, L"Segoe MDL2 Assets");
-        HFONT iconFont  = CreateFontIndirectW(&lfIcon);
-        HFONT prevFont2 = static_cast<HFONT>(SelectObject(hdc, iconFont));
-        SetTextColor(hdc, colors_.textDimmed);
-        RECT iconR = { sbPad, sbY + 1, sbPad + iconAreaW, h };
-        DrawTextW(hdc, L"\uE721", 1, &iconR, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
-        SelectObject(hdc, prevFont2);
-        DeleteObject(iconFont);
+            // Magnifying glass icon inside the box
+            int iconPad   = Scale(6, dpi_);
+            int iconAreaW = Scale(16, dpi_);
+            LOGFONTW lfIcon = {};
+            lfIcon.lfHeight  = -Scale(12, dpi_);
+            lfIcon.lfQuality = CLEARTYPE_QUALITY;
+            wcscpy_s(lfIcon.lfFaceName, L"Segoe MDL2 Assets");
+            HFONT iconFont  = CreateFontIndirectW(&lfIcon);
+            HFONT prevFont2 = static_cast<HFONT>(SelectObject(hdc, iconFont));
+            SetTextColor(hdc, colors_.textDimmed);
+            RECT iconR = { bInset + iconPad, sbY + bVInset,
+                           bInset + iconPad + iconAreaW, h - bVInset };
+            DrawTextW(hdc, L"\uE721", 1, &iconR, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+            SelectObject(hdc, prevFont2);
+            DeleteObject(iconFont);
+        } else {
+            int sbPad = Scale(4, dpi_);
+
+            // Separator line above search box
+            RECT sepLine = { 0, sbY, sbWidth, sbY + 1 };
+            HBRUSH sepBr = CreateSolidBrush(colors_.separator);
+            FillRect(hdc, &sepLine, sepBr);
+            DeleteObject(sepBr);
+
+            // Magnifying glass icon (left of the EDIT control)
+            int iconAreaW = Scale(20, dpi_);
+            RECT iconBg = { 0, sbY + 1, sbPad + iconAreaW, h };
+            HBRUSH iconBgBr = CreateSolidBrush(colors_.menuBg);
+            FillRect(hdc, &iconBg, iconBgBr);
+            DeleteObject(iconBgBr);
+
+            LOGFONTW lfIcon = {};
+            lfIcon.lfHeight  = -Scale(12, dpi_);
+            lfIcon.lfQuality = CLEARTYPE_QUALITY;
+            wcscpy_s(lfIcon.lfFaceName, L"Segoe MDL2 Assets");
+            HFONT iconFont  = CreateFontIndirectW(&lfIcon);
+            HFONT prevFont2 = static_cast<HFONT>(SelectObject(hdc, iconFont));
+            SetTextColor(hdc, colors_.textDimmed);
+            RECT iconR = { sbPad, sbY + 1, sbPad + iconAreaW, h };
+            DrawTextW(hdc, L"\uE721", 1, &iconR, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+            SelectObject(hdc, prevFont2);
+            DeleteObject(iconFont);
+        }
     }
 
     // Sidebar strip
@@ -800,7 +848,8 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
         int linkH   = Scale(settings_->appMenuEntryHeight, dpi_);
         int picSize = Scale(48, dpi_);
         int innerPad = Scale(6, dpi_);
-        int panelBottom = h - searchBoxH_;
+        // ClassicRounded: search box stays in the left panel, so the right panel fills to the bottom
+        int panelBottom = (isRounded) ? h : h - searchBoxH_;
 
         // Right panel background (slightly different shade)
         COLORREF rightBg = RGB(
@@ -998,7 +1047,10 @@ int AppMenuWindow::HitTestClassicRight(POINT ptClient) const
 {
     if (classicPanelW_ <= 0 || !settings_) return -1;
     if (ptClient.x < menuW_) return -1;
-    if (searchBoxH_ > 0 && ptClient.y >= menuH_ - searchBoxH_) return -1;
+    // For ClassicRounded the search box is left-panel only; right panel reaches the full height.
+    bool rightHasSearch = (settings_->appMenuLayout != AppMenuLayout::ClassicRounded);
+    int  panelBottom    = (rightHasSearch && searchBoxH_ > 0) ? menuH_ - searchBoxH_ : menuH_;
+    if (ptClient.y >= panelBottom) return -1;
 
     int linkH    = Scale(settings_->appMenuEntryHeight, dpi_);
     int picSize  = Scale(48, dpi_);
@@ -1008,9 +1060,9 @@ int AppMenuWindow::HitTestClassicRight(POINT ptClient) const
     auto links = BuildClassicLinks(*settings_);
     bool hasShutdown = settings_->appMenuClassicShowShutDown;
 
-    // Shutdown row is at the very bottom (above search box)
-    int shutdownY = menuH_ - searchBoxH_ - linkH;
-    if (hasShutdown && ptClient.y >= shutdownY && ptClient.y < menuH_ - searchBoxH_)
+    // Shutdown row sits at the very bottom of the right panel
+    int shutdownY = panelBottom - linkH;
+    if (hasShutdown && ptClient.y >= shutdownY && ptClient.y < panelBottom)
         return static_cast<int>(links.size());  // shutdown index
 
     // Links area below profile header
@@ -1018,7 +1070,7 @@ int AppMenuWindow::HitTestClassicRight(POINT ptClient) const
     int relY  = ptClient.y - profileH;
     int idx   = relY / linkH;
     int maxLinks = static_cast<int>(links.size());
-    int linksAreaBottom = hasShutdown ? shutdownY - Scale(1, dpi_) : menuH_ - searchBoxH_;
+    int linksAreaBottom = hasShutdown ? shutdownY - Scale(1, dpi_) : panelBottom;
     if (ptClient.y >= linksAreaBottom) return -1;
     if (idx >= 0 && idx < maxLinks) return idx;
     (void)pad;
@@ -1048,9 +1100,12 @@ void AppMenuWindow::ActivateClassicRight(int linkIdx)
         HMENU hMenu = CreatePopupMenu();
         for (int i = 0; std::cmp_less(i, s_powerOptions.size()); ++i)
             AppendMenuW(hMenu, MF_STRING, i + 1, s_powerOptions[i].label.c_str());
-        // Anchor the popup at the top-right of the right panel (grows left+up from there)
+        // Anchor the popup at the top-right of the shutdown row (grows left+up from there).
+        // For ClassicRounded the right panel has no search box, so the row sits at full bottom.
+        bool rightHasSearch2 = (settings_->appMenuLayout != AppMenuLayout::ClassicRounded);
+        int  sdPanelBottom   = (rightHasSearch2 && searchBoxH_ > 0) ? menuH_ - searchBoxH_ : menuH_;
         POINT btnPt = { menuW_ + classicPanelW_,
-                        menuH_ - searchBoxH_ - Scale(settings_->appMenuEntryHeight, dpi_) };
+                        sdPanelBottom - Scale(settings_->appMenuEntryHeight, dpi_) };
         ClientToScreen(hwnd_, &btnPt);
         suppressKillFocus_ = true;
         int cmd = static_cast<int>(TrackPopupMenu(hMenu,
@@ -1371,13 +1426,27 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_CREATE:
         if (searchEnabled_) {
-            int sbPad    = Scale(4, dpi_);
-            int iconAreaW = Scale(20, dpi_);
-            int editX = sbPad + iconAreaW;
-            int editY = menuH_ - searchBoxH_ + Scale(3, dpi_);
-            bool isClassicMode = settings_ && settings_->appMenuLayout == AppMenuLayout::Classic;
-            int editW = (isClassicMode ? menuW_ + classicPanelW_ : menuW_) - editX - sbPad;
-            int editH = searchBoxH_ - Scale(6, dpi_);
+            bool isRoundedMode = settings_ && settings_->appMenuLayout == AppMenuLayout::ClassicRounded;
+            bool isClassicMode = settings_ && (settings_->appMenuLayout == AppMenuLayout::Classic ||
+                                               settings_->appMenuLayout == AppMenuLayout::ClassicRounded);
+            int editX, editY, editW, editH;
+            if (isRoundedMode) {
+                int bInset    = Scale(8, dpi_);
+                int bVInset   = Scale(3, dpi_);
+                int iconPad   = Scale(6, dpi_);
+                int iconAreaW = Scale(16, dpi_);
+                editX = bInset + iconPad + iconAreaW + Scale(2, dpi_);
+                editY = menuH_ - searchBoxH_ + bVInset + Scale(2, dpi_);
+                editW = menuW_ - editX - bInset - Scale(4, dpi_);
+                editH = searchBoxH_ - 2 * bVInset - Scale(4, dpi_);
+            } else {
+                int sbPad     = Scale(4, dpi_);
+                int iconAreaW = Scale(20, dpi_);
+                editX = sbPad + iconAreaW;
+                editY = menuH_ - searchBoxH_ + Scale(3, dpi_);
+                editW = (isClassicMode ? menuW_ + classicPanelW_ : menuW_) - editX - sbPad;
+                editH = searchBoxH_ - Scale(6, dpi_);
+            }
 
             searchEdit_ = CreateWindowExW(
                 0, L"EDIT", nullptr,
@@ -1395,8 +1464,9 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 SendMessageW(searchEdit_, WM_SETFONT, reinterpret_cast<WPARAM>(editFont), TRUE);
 
                 // Set placeholder text (cue banner)
+                const wchar_t* cue = isClassicMode ? L"Search programs and files" : L"Search...";
                 SendMessageW(searchEdit_, EM_SETCUEBANNER, TRUE,
-                             reinterpret_cast<LPARAM>(L"Search..."));
+                             reinterpret_cast<LPARAM>(cue));
 
                 // Subclass to forward navigation keys to the menu
                 WNDPROC origProc = reinterpret_cast<WNDPROC>(
@@ -1481,7 +1551,8 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_KEYDOWN: {
         bool isList = !settings_ || settings_->appMenuLayout == AppMenuLayout::List
-                                 || settings_->appMenuLayout == AppMenuLayout::Classic;
+                                 || settings_->appMenuLayout == AppMenuLayout::Classic
+                                 || settings_->appMenuLayout == AppMenuLayout::ClassicRounded;
         int cols  = (isList || !settings_) ? 1 : std::max(1, settings_->appMenuGridCols);
         int count = nodes_ ? static_cast<int>(nodes_->size()) : 0;
 
@@ -1733,7 +1804,9 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
     int menuW = Scale(settings.appMenuWidth, dpi);
     menu.menuW_ = menuW;
 
-    bool isClassic = (!isSubmenu && settings.appMenuLayout == AppMenuLayout::Classic);
+    bool isClassic = (!isSubmenu && (settings.appMenuLayout == AppMenuLayout::Classic ||
+                                     settings.appMenuLayout == AppMenuLayout::ClassicRounded));
+    bool isRounded = (!isSubmenu && settings.appMenuLayout == AppMenuLayout::ClassicRounded);
 
     // Sidebar: only on root menu (not submenus), and only when enabled and not Classic
     int sidebarW = (!isSubmenu && !isClassic && settings.appMenuSidebarEnabled)
@@ -1746,8 +1819,8 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
 
     int totalW = menuW + sidebarW + classicPanelW;
 
-    // Classic footer row (All Programs / Back)
-    int classicFooterH = isClassic ? Scale(settings.appMenuEntryHeight, dpi) : 0;
+    // Classic footer row (All Programs / Back) — ClassicRounded uses a shorter row
+    int classicFooterH = isClassic ? (isRounded ? Scale(26, dpi) : Scale(settings.appMenuEntryHeight, dpi)) : 0;
     menu.classicFooterH_ = classicFooterH;
 
     menu.BuildEntryRects(menuW);
@@ -1816,14 +1889,27 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
     if (x < workArea.left) x = workArea.left;
     if (y < workArea.top)  y = workArea.top;
 
+    DWORD wndStyle = isRounded ? WS_POPUP : (WS_POPUP | WS_BORDER);
     HWND hwnd = CreateWindowExW(
         WS_EX_TOPMOST,
         kAppMenuClass, nullptr,
-        WS_POPUP | WS_BORDER,
+        wndStyle,
         x, y, totalW, menuH,
         hwndOwner, nullptr, hInst, &menu);
 
     if (!hwnd) return AppMenuCloseReason::ClickedOutside;
+
+    if (isRounded) {
+        // Clip the window to a rounded rectangle. CreateRoundRectRgn's last two
+        // parameters are the ellipse width/height; radius = diameter / 2.
+        int ellipse = Scale(12, dpi) * 2; // 12 px corner radius at 96 DPI
+        HRGN rgn = CreateRoundRectRgn(0, 0, totalW + 1, menuH + 1, ellipse, ellipse);
+        SetWindowRgn(hwnd, rgn, FALSE);
+        // Also request DWM smooth rounding on Windows 11 (attribute 33 = DWMWA_WINDOW_CORNER_PREFERENCE).
+        // Falls back silently on Windows 10 where the attribute is unsupported.
+        constexpr DWORD DWMWCP_ROUND_VAL = 2;
+        DwmSetWindowAttribute(hwnd, 33, &DWMWCP_ROUND_VAL, sizeof(DWORD));
+    }
 
     // Expose our HWND to the parent *before* SetForegroundWindow so the parent
     // can suppress WM_KILLFOCUS caused by the focus transfer.

@@ -12,7 +12,7 @@ static constexpr const wchar_t* kPositions[] = {
 };
 
 static constexpr const wchar_t* kAppMenuLayouts[] = {
-    L"List", L"Grid", L"Classic (Vista/7)"
+    L"Simple List", L"Simple Grid", L"Classic", L"Classic Rounded"
 };
 
 static constexpr const wchar_t* kMinimizedIndicatorTypes[] = {

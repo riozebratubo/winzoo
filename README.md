@@ -10,15 +10,16 @@ When running, winzoo hides the native Windows taskbar and takes its place, reser
 - *Very* lightweight
 - Single executable, no installer needed
 - Lots of configurations
+- Per monitor DPI aware
 - Custom-drawn task buttons with app icon and title
 - Custom-drawn apps menu with keyboard navigation and search
-- Custom position: top, bottom, left, right
-- Drag to reorder buttons
+- Custom position: top, bottom, left, right, *floating*
+- Drag to reorder taskbar buttons
 - Pin/unpin separately for each monitor
 - Works with Jump Lists for apps that support it
 - Show progress bars for apps that support it
-- Per monitor DPI aware (PerMonitorV2)
-- Settings persisted in the registry (easily exportable/importable)
+- Settings persisted in the registry
+- Easy import/export of settings to share with others or across machines
 - And lots more...
 
 ## Requirements to use

@@ -54,8 +54,12 @@ private:
     void Paint(HDC hdc, int w, int h);
     int  HitTestEntry(POINT ptClient) const;
     int  HitTestSidebarBtn(POINT ptClient) const;
+    int  HitTestClassicRight(POINT ptClient) const;
+    bool HitTestClassicFooter(POINT ptClient) const;
     void ActivateNode(int idx);
     void ActivateSidebarBtn(int idx);
+    void ActivateClassicRight(int linkIdx);
+    void ToggleAllPrograms();
     void Scroll(int delta);
     void EnsureVisible(int idx);
     void SetHoveredIdx(int idx);
@@ -105,6 +109,15 @@ private:
     int                      searchBoxH_ = 0;  // pixel height reserved for the search area
     HWND                     searchEdit_  = nullptr;  // child EDIT control
     HBRUSH                   editBgBrush_ = nullptr;  // background brush for the EDIT
+
+    // Classic (Vista/7) two-panel layout state
+    int  classicPanelW_        = 0;     // right panel width (0 when not classic)
+    int  classicFooterH_       = 0;     // height of All Programs/Back footer row
+    int  classicHoveredRight_  = -1;    // hovered link index in right panel
+    bool classicFooterHovered_ = false;
+    bool inAllPrograms_        = false;
+    std::vector<AppTreeNode> allProgramsNodes_;  // pre-built flat list for All Programs
+    HBITMAP profilePicBmp_     = nullptr;        // user account picture (may be null)
 
     // Cached folder icons (loaded lazily in Paint, destroyed in WM_DESTROY).
     HICON folderIconList_ = nullptr;

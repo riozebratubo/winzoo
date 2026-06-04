@@ -5,7 +5,7 @@
 #include "Theme.h"
 
 enum class TaskbarPosition         { Top, Bottom, Left, Right, Floating };
-enum class AppMenuLayout           { List = 0, Grid = 1 };
+enum class AppMenuLayout           { List = 0, Grid = 1, Classic = 2 };
 enum class AppMenuFlattenMode      { None = 0, Submenus = 1, All = 2 };
 enum class TaskbarMonitorMode      { AllMonitors = 0, Primary = 1 };
 enum class MinimizedIndicatorType  { SmallRectangle = 0, DimButton = 1 };
@@ -84,6 +84,19 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     bool appMenuSidebarShowExplorer    = true;
     bool appMenuSidebarShowSettings    = true;
     bool appMenuSidebarShowPower       = true;
+
+    // Classic (Vista/7) layout
+    int  appMenuClassicPanelWidth        = 180;
+    bool appMenuClassicShowDocuments     = true;
+    bool appMenuClassicShowPictures      = true;
+    bool appMenuClassicShowMusic         = true;
+    bool appMenuClassicShowDownloads     = true;
+    bool appMenuClassicShowRecentItems   = true;
+    bool appMenuClassicShowThisPC        = true;
+    bool appMenuClassicShowControlPanel  = true;
+    bool appMenuClassicShowWinSettings   = true;
+    bool appMenuClassicShowRun           = true;
+    bool appMenuClassicShowShutDown      = true;
 
     int      buttonOutlineRadius      = 0;    // corner radius of task button outline in logical px
     bool     showPinnedAppsAsButtons  = false; // draw outline + background for pinned-but-not-running buttons

@@ -300,6 +300,21 @@ Settings LoadSettings()
     if (key.ReadDword(L"AppMenuFlattenMode", amVal) && amVal <= 2)
         s.appMenuFlattenMode = static_cast<AppMenuFlattenMode>(amVal);
 
+    // Classic (Vista/7) layout
+    if (key.ReadDword(L"AppMenuClassicPanelWidth",      amVal)) s.appMenuClassicPanelWidth      = static_cast<int>(amVal);
+    if (key.ReadDword(L"AppMenuClassicShowDocuments",   amVal)) s.appMenuClassicShowDocuments   = amVal != 0;
+    if (key.ReadDword(L"AppMenuClassicShowPictures",    amVal)) s.appMenuClassicShowPictures    = amVal != 0;
+    if (key.ReadDword(L"AppMenuClassicShowMusic",       amVal)) s.appMenuClassicShowMusic       = amVal != 0;
+    if (key.ReadDword(L"AppMenuClassicShowDownloads",   amVal)) s.appMenuClassicShowDownloads   = amVal != 0;
+    if (key.ReadDword(L"AppMenuClassicShowRecentItems", amVal)) s.appMenuClassicShowRecentItems = amVal != 0;
+    if (key.ReadDword(L"AppMenuClassicShowThisPC",      amVal)) s.appMenuClassicShowThisPC      = amVal != 0;
+    if (key.ReadDword(L"AppMenuClassicShowControlPanel",amVal)) s.appMenuClassicShowControlPanel= amVal != 0;
+    if (key.ReadDword(L"AppMenuClassicShowWinSettings", amVal)) s.appMenuClassicShowWinSettings = amVal != 0;
+    if (key.ReadDword(L"AppMenuClassicShowRun",         amVal)) s.appMenuClassicShowRun         = amVal != 0;
+    if (key.ReadDword(L"AppMenuClassicShowShutDown",    amVal)) s.appMenuClassicShowShutDown    = amVal != 0;
+    if (s.appMenuClassicPanelWidth < 80)  s.appMenuClassicPanelWidth = 80;
+    if (s.appMenuClassicPanelWidth > 400) s.appMenuClassicPanelWidth = 400;
+
     // Settings dialog geometry
     if (key.ReadDword(L"SettingsDlgX", val)) s.settingsDlgX = static_cast<int>(val);
     if (key.ReadDword(L"SettingsDlgY", val)) s.settingsDlgY = static_cast<int>(val);
@@ -422,6 +437,17 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"AppMenuSidebarShowSettings",    s.appMenuSidebarShowSettings    ? 1u : 0u);
     key.WriteDword(L"AppMenuSidebarShowPower",       s.appMenuSidebarShowPower       ? 1u : 0u);
     key.WriteDword(L"AppMenuFlattenMode",            static_cast<DWORD>(s.appMenuFlattenMode));
+    key.WriteDword(L"AppMenuClassicPanelWidth",      static_cast<DWORD>(s.appMenuClassicPanelWidth));
+    key.WriteDword(L"AppMenuClassicShowDocuments",   s.appMenuClassicShowDocuments   ? 1u : 0u);
+    key.WriteDword(L"AppMenuClassicShowPictures",    s.appMenuClassicShowPictures    ? 1u : 0u);
+    key.WriteDword(L"AppMenuClassicShowMusic",       s.appMenuClassicShowMusic       ? 1u : 0u);
+    key.WriteDword(L"AppMenuClassicShowDownloads",   s.appMenuClassicShowDownloads   ? 1u : 0u);
+    key.WriteDword(L"AppMenuClassicShowRecentItems", s.appMenuClassicShowRecentItems ? 1u : 0u);
+    key.WriteDword(L"AppMenuClassicShowThisPC",      s.appMenuClassicShowThisPC      ? 1u : 0u);
+    key.WriteDword(L"AppMenuClassicShowControlPanel",s.appMenuClassicShowControlPanel? 1u : 0u);
+    key.WriteDword(L"AppMenuClassicShowWinSettings", s.appMenuClassicShowWinSettings ? 1u : 0u);
+    key.WriteDword(L"AppMenuClassicShowRun",         s.appMenuClassicShowRun         ? 1u : 0u);
+    key.WriteDword(L"AppMenuClassicShowShutDown",    s.appMenuClassicShowShutDown    ? 1u : 0u);
 
     // Settings dialog geometry
     key.WriteDword(L"SettingsDlgX", static_cast<DWORD>(s.settingsDlgX));

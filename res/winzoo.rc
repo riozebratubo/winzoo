@@ -348,6 +348,25 @@ BEGIN
     CONTROL         "Show executables && settings links", IDC_CHECK_APPMENU_SEARCH_SYSTEM,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 266, 160, 10
 
+    /* Classic (Vista/7) layout settings */
+    LTEXT           "Classic right panel width (px):", IDC_LBL_APPMENU_CLASSIC_PW, 12, 284, 120, 10
+    EDITTEXT        IDC_EDIT_APPMENU_CLASSIC_PW,                          134, 282, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_APPMENU_CLASSIC_PW, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    162, 282, 12, 12
+
+    CONTROL         "Show Documents",        IDC_CHECK_APPMENU_CLASSIC_DOCS,     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 300, 120, 10
+    CONTROL         "Show Pictures",         IDC_CHECK_APPMENU_CLASSIC_PICS,     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 314, 120, 10
+    CONTROL         "Show Music",            IDC_CHECK_APPMENU_CLASSIC_MUSIC,    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 328, 120, 10
+    CONTROL         "Show Downloads",        IDC_CHECK_APPMENU_CLASSIC_DLOADS,   "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 342, 120, 10
+    CONTROL         "Show Recent Items",     IDC_CHECK_APPMENU_CLASSIC_RECENT,   "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 356, 120, 10
+    CONTROL         "Show This PC",          IDC_CHECK_APPMENU_CLASSIC_THISPC,   "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 370, 120, 10
+    CONTROL         "Show Control Panel",    IDC_CHECK_APPMENU_CLASSIC_CTRL,     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 384, 120, 10
+    CONTROL         "Show Windows Settings", IDC_CHECK_APPMENU_CLASSIC_WINSETT,  "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 398, 120, 10
+    CONTROL         "Show Run",              IDC_CHECK_APPMENU_CLASSIC_RUN,      "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 412, 120, 10
+    CONTROL         "Show Shut down",        IDC_CHECK_APPMENU_CLASSIC_SHUTDOWN, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 426, 120, 10
+
     PUSHBUTTON      "Defaults", IDC_BTN_RESET_DEFAULTS, 4, 228, 52, 14
     DEFPUSHBUTTON   "OK",     IDOK,     110, 228, 46, 14
     PUSHBUTTON      "Cancel", IDCANCEL, 162, 228, 46, 14

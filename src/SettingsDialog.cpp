@@ -12,7 +12,7 @@ static constexpr const wchar_t* kPositions[] = {
 };
 
 static constexpr const wchar_t* kAppMenuLayouts[] = {
-    L"List", L"Grid"
+    L"List", L"Grid", L"Classic (Vista/7)"
 };
 
 static constexpr const wchar_t* kMinimizedIndicatorTypes[] = {
@@ -271,6 +271,17 @@ static const int kAppMenuControls[] = {
     IDC_CHECK_APPMENU_SEARCH,
     IDC_CHECK_APPMENU_SEARCH_FUZZY,
     IDC_CHECK_APPMENU_SEARCH_SYSTEM,
+    IDC_LBL_APPMENU_CLASSIC_PW,  IDC_EDIT_APPMENU_CLASSIC_PW, IDC_SPIN_APPMENU_CLASSIC_PW,
+    IDC_CHECK_APPMENU_CLASSIC_DOCS,
+    IDC_CHECK_APPMENU_CLASSIC_PICS,
+    IDC_CHECK_APPMENU_CLASSIC_MUSIC,
+    IDC_CHECK_APPMENU_CLASSIC_DLOADS,
+    IDC_CHECK_APPMENU_CLASSIC_RECENT,
+    IDC_CHECK_APPMENU_CLASSIC_THISPC,
+    IDC_CHECK_APPMENU_CLASSIC_CTRL,
+    IDC_CHECK_APPMENU_CLASSIC_WINSETT,
+    IDC_CHECK_APPMENU_CLASSIC_RUN,
+    IDC_CHECK_APPMENU_CLASSIC_SHUTDOWN,
     0
 };
 
@@ -868,6 +879,16 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             IDC_CHECK_APPMENU_SEARCH,
             IDC_CHECK_APPMENU_SEARCH_FUZZY,
             IDC_CHECK_APPMENU_SEARCH_SYSTEM,
+            IDC_CHECK_APPMENU_CLASSIC_DOCS,
+            IDC_CHECK_APPMENU_CLASSIC_PICS,
+            IDC_CHECK_APPMENU_CLASSIC_MUSIC,
+            IDC_CHECK_APPMENU_CLASSIC_DLOADS,
+            IDC_CHECK_APPMENU_CLASSIC_RECENT,
+            IDC_CHECK_APPMENU_CLASSIC_THISPC,
+            IDC_CHECK_APPMENU_CLASSIC_CTRL,
+            IDC_CHECK_APPMENU_CLASSIC_WINSETT,
+            IDC_CHECK_APPMENU_CLASSIC_RUN,
+            IDC_CHECK_APPMENU_CLASSIC_SHUTDOWN,
             IDC_CHECK_SHOW_PINNED_AS_BUTTONS,
             0
         };
@@ -923,6 +944,29 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             CheckDlgButton(hwnd, IDC_CHECK_APPMENU_SEARCH_SYSTEM,
                            data->settings->appMenuSearchSystem ? BST_CHECKED : BST_UNCHECKED);
             SetSearchControlsEnabled(hwnd, data->settings->appMenuSearchEnabled);
+
+            initSpin(IDC_SPIN_APPMENU_CLASSIC_PW, IDC_EDIT_APPMENU_CLASSIC_PW, 80, 400,
+                     data->settings->appMenuClassicPanelWidth);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_CLASSIC_DOCS,
+                           data->settings->appMenuClassicShowDocuments   ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_CLASSIC_PICS,
+                           data->settings->appMenuClassicShowPictures    ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_CLASSIC_MUSIC,
+                           data->settings->appMenuClassicShowMusic       ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_CLASSIC_DLOADS,
+                           data->settings->appMenuClassicShowDownloads   ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_CLASSIC_RECENT,
+                           data->settings->appMenuClassicShowRecentItems ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_CLASSIC_THISPC,
+                           data->settings->appMenuClassicShowThisPC      ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_CLASSIC_CTRL,
+                           data->settings->appMenuClassicShowControlPanel? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_CLASSIC_WINSETT,
+                           data->settings->appMenuClassicShowWinSettings ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_CLASSIC_RUN,
+                           data->settings->appMenuClassicShowRun         ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_CLASSIC_SHUTDOWN,
+                           data->settings->appMenuClassicShowShutDown    ? BST_CHECKED : BST_UNCHECKED);
         }
 
         // Build scrollable hosts for all tabs
@@ -1635,6 +1679,19 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                     IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SEARCH_FUZZY) == BST_CHECKED;
                 data->settings->appMenuSearchSystem =
                     IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_SEARCH_SYSTEM) == BST_CHECKED;
+
+                int amCPW = readSpin(IDC_SPIN_APPMENU_CLASSIC_PW, 80, 400);
+                if (amCPW >= 80 && amCPW <= 400) data->settings->appMenuClassicPanelWidth = amCPW;
+                data->settings->appMenuClassicShowDocuments   = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_DOCS)     == BST_CHECKED;
+                data->settings->appMenuClassicShowPictures    = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_PICS)     == BST_CHECKED;
+                data->settings->appMenuClassicShowMusic       = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_MUSIC)    == BST_CHECKED;
+                data->settings->appMenuClassicShowDownloads   = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_DLOADS)   == BST_CHECKED;
+                data->settings->appMenuClassicShowRecentItems = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_RECENT)   == BST_CHECKED;
+                data->settings->appMenuClassicShowThisPC      = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_THISPC)   == BST_CHECKED;
+                data->settings->appMenuClassicShowControlPanel= IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_CTRL)     == BST_CHECKED;
+                data->settings->appMenuClassicShowWinSettings = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_WINSETT)  == BST_CHECKED;
+                data->settings->appMenuClassicShowRun         = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_RUN)      == BST_CHECKED;
+                data->settings->appMenuClassicShowShutDown    = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_SHUTDOWN) == BST_CHECKED;
             }
 
             EndDialog(hwnd, IDOK);

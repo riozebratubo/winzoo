@@ -8,10 +8,12 @@
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <powrprof.h>
+#include <wincodec.h>
 #include <algorithm>
 #include <utility>
 
 #pragma comment(lib, "PowrProf.lib")
+#pragma comment(lib, "windowscodecs.lib")
 
 static constexpr wchar_t kAppMenuClass[] = L"WinzooAppMenu";
 
@@ -135,6 +137,123 @@ static HICON LoadFolderIcon(bool large)
     return nullptr;
 }
 
+// ---------- Classic (Vista/7) layout helpers ----------
+
+struct ClassicLink {
+    int            id;
+    const wchar_t* label;
+    const wchar_t* glyph;   // Segoe MDL2 Assets codepoint
+    bool           chevron; // draw ">" on the right
+};
+
+// Returns the enabled right-panel links (excluding Shut Down, which is pinned to the bottom).
+static std::vector<ClassicLink> BuildClassicLinks(const Settings& s)
+{
+    std::vector<ClassicLink> links;
+    if (s.appMenuClassicShowDocuments)    links.push_back({ 0, L"Documents",    L"", false });
+    if (s.appMenuClassicShowPictures)     links.push_back({ 1, L"Pictures",     L"", false });
+    if (s.appMenuClassicShowMusic)        links.push_back({ 2, L"Music",        L"", false });
+    if (s.appMenuClassicShowDownloads)    links.push_back({ 3, L"Downloads",    L"", false });
+    if (s.appMenuClassicShowRecentItems)  links.push_back({ 4, L"Recent Items", L"", true  });
+    if (s.appMenuClassicShowThisPC)       links.push_back({ 5, L"This PC",      L"", false });
+    if (s.appMenuClassicShowControlPanel) links.push_back({ 6, L"Control Panel",L"", false });
+    if (s.appMenuClassicShowWinSettings)  links.push_back({ 7, L"Settings",     L"", false });
+    if (s.appMenuClassicShowRun)          links.push_back({ 8, L"Run...",       L"", false });
+    return links;
+}
+
+// Load the Windows account profile picture at targetSize x targetSize.
+// Returns an HBITMAP on success; nullptr on failure (caller must DeleteObject when done).
+static HBITMAP LoadUserProfilePicture(int targetSize)
+{
+    wchar_t path[MAX_PATH * 2] = {};
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER,
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\AccountPicture",
+        0, KEY_READ, &hKey) != ERROR_SUCCESS)
+        return nullptr;
+
+    for (auto* val : { L"Image448", L"Image240", L"Image96", L"Image64" }) {
+        DWORD sz = sizeof(path);
+        if (RegQueryValueExW(hKey, val, nullptr, nullptr,
+            reinterpret_cast<BYTE*>(path), &sz) == ERROR_SUCCESS && path[0])
+            break;
+        path[0] = 0;
+    }
+    RegCloseKey(hKey);
+    if (!path[0]) return nullptr;
+
+    IWICImagingFactory* factory = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&factory))))
+        return nullptr;
+
+    IWICBitmapDecoder* decoder = nullptr;
+    if (FAILED(factory->CreateDecoderFromFilename(path, nullptr, GENERIC_READ,
+        WICDecodeMetadataCacheOnLoad, &decoder))) {
+        factory->Release(); return nullptr;
+    }
+
+    IWICBitmapFrameDecode* frame = nullptr;
+    if (FAILED(decoder->GetFrame(0, &frame))) {
+        decoder->Release(); factory->Release(); return nullptr;
+    }
+    decoder->Release();
+
+    IWICBitmapScaler* scaler = nullptr;
+    if (FAILED(factory->CreateBitmapScaler(&scaler)) ||
+        FAILED(scaler->Initialize(frame, static_cast<UINT>(targetSize),
+            static_cast<UINT>(targetSize), WICBitmapInterpolationModeFant))) {
+        if (scaler) scaler->Release();
+        frame->Release(); factory->Release(); return nullptr;
+    }
+    frame->Release();
+
+    IWICFormatConverter* conv = nullptr;
+    if (FAILED(factory->CreateFormatConverter(&conv)) ||
+        FAILED(conv->Initialize(scaler, GUID_WICPixelFormat32bppBGRA,
+            WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeMedianCut))) {
+        if (conv) conv->Release();
+        scaler->Release(); factory->Release(); return nullptr;
+    }
+    scaler->Release();
+
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize        = sizeof(bmi.bmiHeader);
+    bmi.bmiHeader.biWidth       = targetSize;
+    bmi.bmiHeader.biHeight      = -targetSize;
+    bmi.bmiHeader.biPlanes      = 1;
+    bmi.bmiHeader.biBitCount    = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    HBITMAP hBmp = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (hBmp && bits) {
+        UINT stride = static_cast<UINT>(targetSize * 4);
+        if (FAILED(conv->CopyPixels(nullptr, stride, stride * targetSize,
+            static_cast<BYTE*>(bits)))) {
+            DeleteObject(hBmp); hBmp = nullptr;
+        }
+    }
+    conv->Release();
+    factory->Release();
+    return hBmp;
+}
+
+// Draw hBmp (already targetSize x targetSize) clipped to a circle at (x, y).
+static void DrawCircularBitmap(HDC hdc, HBITMAP hBmp, int x, int y, int size)
+{
+    HDC memDC = CreateCompatibleDC(hdc);
+    HBITMAP oldBmp = static_cast<HBITMAP>(SelectObject(memDC, hBmp));
+    HRGN clipRgn = CreateEllipticRgn(x, y, x + size, y + size);
+    SelectClipRgn(hdc, clipRgn);
+    BitBlt(hdc, x, y, size, size, memDC, 0, 0, SRCCOPY);
+    SelectClipRgn(hdc, nullptr);
+    DeleteObject(clipRgn);
+    SelectObject(memDC, oldBmp);
+    DeleteDC(memDC);
+}
+
 // ---------- window class ----------
 
 bool AppMenuWindow::RegisterWndClass(HINSTANCE hInst)
@@ -189,7 +308,8 @@ void AppMenuWindow::BuildEntryRects(int menuW)
     entryRects_.reserve(nodes_->size());
 
     int padPx = Scale(settings_->appMenuPadding, dpi_);
-    bool isList = (settings_->appMenuLayout == AppMenuLayout::List);
+    bool isList = (settings_->appMenuLayout == AppMenuLayout::List ||
+                   settings_->appMenuLayout == AppMenuLayout::Classic);
 
     if (isList) {
         int entryH    = Scale(settings_->appMenuEntryHeight, dpi_);
@@ -353,7 +473,7 @@ void AppMenuWindow::ApplyFilter()
     BuildEntryRects(menuW_);
     int padPx    = Scale(settings_ ? settings_->appMenuPadding : 6, dpi_);
     int contentH = ContentHeight(entryRects_) + padPx;
-    int clientH  = menuH_ - searchBoxH_;
+    int clientH  = menuH_ - searchBoxH_ - classicFooterH_;
     UpdateMaxScroll(contentH, clientH);
     // Auto-select first result when searching so Enter opens it directly
     hoveredIdx_ = (!searchText_.empty() && nodes_ && !nodes_->empty()) ? 0 : -1;
@@ -420,7 +540,8 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
 {
     if (!nodes_ || !settings_) return;
 
-    bool isList = (settings_->appMenuLayout == AppMenuLayout::List);
+    bool isClassic = (settings_->appMenuLayout == AppMenuLayout::Classic);
+    bool isList    = (settings_->appMenuLayout == AppMenuLayout::List || isClassic);
 
     // Load folder icons lazily (once per window instance).
     if (isList  && !folderIconList_) folderIconList_ = LoadFolderIcon(false);
@@ -445,7 +566,7 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
 
     int pad    = Scale(6, dpi_);
     int iconPx = isList ? Scale(20, dpi_) : Scale(48, dpi_);
-    int contentAreaH = h - searchBoxH_;  // area available for entries (above search box)
+    int contentAreaH = h - searchBoxH_ - classicFooterH_;  // area available for entries (above search box and classic footer)
 
     // Clip drawing to the content area (above the search box)
     HRGN clipRgn = nullptr;
@@ -548,13 +669,37 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
         DeleteObject(clipRgn);
     }
 
+    // Classic footer: "> All Programs" / "< Back" above the search box
+    if (isClassic && classicFooterH_ > 0) {
+        int footerY = h - searchBoxH_ - classicFooterH_;
+        RECT sepR = { 0, footerY, menuW_, footerY + 1 };
+        HBRUSH sepBr = CreateSolidBrush(colors_.separator);
+        FillRect(hdc, &sepR, sepBr);
+        DeleteObject(sepBr);
+
+        RECT footerR = { 0, footerY + 1, menuW_, footerY + classicFooterH_ };
+        if (classicFooterHovered_) {
+            HBRUSH hb = CreateSolidBrush(colors_.menuHover);
+            FillRect(hdc, &footerR, hb);
+            DeleteObject(hb);
+        }
+        RECT textR = footerR;
+        textR.left  += Scale(8, dpi_);
+        textR.right -= Scale(4, dpi_);
+        SetTextColor(hdc, colors_.menuText);
+        const wchar_t* footerText = inAllPrograms_ ? L"◄ Back" : L"► All Programs";
+        DrawTextW(hdc, footerText, -1, &textR, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    }
+
     // Search box at the bottom of the content area
     if (searchBoxH_ > 0) {
-        int sbY = h - searchBoxH_;
+        int sbY   = h - searchBoxH_;
         int sbPad = Scale(4, dpi_);
+        // In Classic mode the search box spans the full window width
+        int sbWidth = isClassic ? w : menuW_;
 
         // Separator line above search box
-        RECT sepLine = { 0, sbY, menuW_, sbY + 1 };
+        RECT sepLine = { 0, sbY, sbWidth, sbY + 1 };
         HBRUSH sepBr = CreateSolidBrush(colors_.separator);
         FillRect(hdc, &sepLine, sepBr);
         DeleteObject(sepBr);
@@ -645,6 +790,157 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
         DeleteObject(iconFont);
     }
 
+    // Classic right panel
+    if (isClassic && classicPanelW_ > 0 && settings_) {
+        int rxL = menuW_;
+        int rxR = w;
+        int linkH   = Scale(settings_->appMenuEntryHeight, dpi_);
+        int picSize = Scale(48, dpi_);
+        int innerPad = Scale(6, dpi_);
+        int panelBottom = h - searchBoxH_;
+
+        // Right panel background (slightly different shade)
+        COLORREF rightBg = RGB(
+            std::max(0, GetRValue(colors_.menuBg) - 10),
+            std::max(0, GetGValue(colors_.menuBg) - 10),
+            std::max(0, GetBValue(colors_.menuBg) - 10));
+        RECT rightR = { rxL, 0, rxR, h };
+        HBRUSH rightBr = CreateSolidBrush(rightBg);
+        FillRect(hdc, &rightR, rightBr);
+        DeleteObject(rightBr);
+
+        // Left separator line
+        RECT sepR2 = { rxL, 0, rxL + Scale(1, dpi_), h };
+        HBRUSH sep2Br = CreateSolidBrush(colors_.separator);
+        FillRect(hdc, &sepR2, sep2Br);
+        DeleteObject(sep2Br);
+
+        // --- Profile area ---
+        int picY = Scale(8, dpi_);
+        int picX = rxL + (classicPanelW_ - picSize) / 2;
+        int profileH = picY + picSize + Scale(20, dpi_);  // top + pic + name area
+
+        if (profilePicBmp_) {
+            DrawCircularBitmap(hdc, profilePicBmp_, picX, picY, picSize);
+        } else {
+            // Fallback: draw person glyph inside a circle
+            HRGN circleRgn = CreateEllipticRgn(picX, picY, picX + picSize, picY + picSize);
+            HBRUSH circleBr = CreateSolidBrush(colors_.buttonNormal);
+            FillRgn(hdc, circleRgn, circleBr);
+            DeleteObject(circleBr);
+            DeleteObject(circleRgn);
+
+            LOGFONTW lfPerson = {};
+            lfPerson.lfHeight  = -(picSize * 2 / 3);
+            lfPerson.lfQuality = CLEARTYPE_QUALITY;
+            wcscpy_s(lfPerson.lfFaceName, L"Segoe MDL2 Assets");
+            HFONT personFont = CreateFontIndirectW(&lfPerson);
+            HFONT prevPF     = static_cast<HFONT>(SelectObject(hdc, personFont));
+            RECT personR = { picX, picY, picX + picSize, picY + picSize };
+            SetTextColor(hdc, colors_.textDimmed);
+            DrawTextW(hdc, L"", 1, &personR, DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX);
+            SelectObject(hdc, prevPF);
+            DeleteObject(personFont);
+        }
+
+        // Username
+        wchar_t userName[256] = L"User";
+        DWORD unLen = static_cast<DWORD>(std::size(userName));
+        GetUserNameW(userName, &unLen);
+        RECT nameR = { rxL + innerPad, picY + picSize + Scale(2, dpi_),
+                       rxR - innerPad, profileH };
+        SetTextColor(hdc, colors_.menuText);
+        SelectObject(hdc, font);
+        DrawTextW(hdc, userName, -1, &nameR,
+                  DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+        // --- Links ---
+        auto links = BuildClassicLinks(*settings_);
+        bool hasShutdown = settings_->appMenuClassicShowShutDown;
+
+        int shutdownY    = panelBottom - linkH;
+        int linksBottom  = hasShutdown ? shutdownY - Scale(1, dpi_) : panelBottom;
+
+        // MDL2 font for link icons
+        LOGFONTW lfMdl = {};
+        lfMdl.lfHeight  = -Scale(14, dpi_);
+        lfMdl.lfQuality = CLEARTYPE_QUALITY;
+        wcscpy_s(lfMdl.lfFaceName, L"Segoe MDL2 Assets");
+        HFONT mdlFont  = CreateFontIndirectW(&lfMdl);
+
+        int iconAreaW2 = Scale(22, dpi_);
+
+        for (int li = 0; li < static_cast<int>(links.size()); ++li) {
+            int ly = profileH + li * linkH;
+            if (ly + linkH > linksBottom) break;
+
+            RECT linkR = { rxL + Scale(1, dpi_), ly, rxR, ly + linkH };
+            if (li == classicHoveredRight_) {
+                HBRUSH hb = CreateSolidBrush(colors_.menuHover);
+                FillRect(hdc, &linkR, hb);
+                DeleteObject(hb);
+            }
+            // Icon
+            HFONT prevMdl = static_cast<HFONT>(SelectObject(hdc, mdlFont));
+            RECT iconR2 = { rxL + innerPad, ly, rxL + innerPad + iconAreaW2, ly + linkH };
+            SetTextColor(hdc, colors_.menuText);
+            DrawTextW(hdc, links[li].glyph, 1, &iconR2,
+                      DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX);
+            SelectObject(hdc, prevMdl);
+
+            // Label
+            SelectObject(hdc, font);
+            int chevW2 = links[li].chevron ? Scale(14, dpi_) : 0;
+            RECT lblR = { rxL + innerPad + iconAreaW2 + Scale(4, dpi_), ly,
+                          rxR - innerPad - chevW2, ly + linkH };
+            SetTextColor(hdc, colors_.menuText);
+            DrawTextW(hdc, links[li].label, -1, &lblR,
+                      DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            if (links[li].chevron) {
+                RECT chevR2 = { rxR - innerPad - chevW2, ly, rxR - innerPad, ly + linkH };
+                SetTextColor(hdc, colors_.textDimmed);
+                DrawTextW(hdc, L"▶", 1, &chevR2, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+            }
+        }
+
+        // Separator before shutdown
+        if (hasShutdown) {
+            RECT sdSep = { rxL + Scale(1, dpi_), shutdownY - Scale(1, dpi_), rxR, shutdownY };
+            HBRUSH sdSepBr = CreateSolidBrush(colors_.separator);
+            FillRect(hdc, &sdSep, sdSepBr);
+            DeleteObject(sdSepBr);
+
+            int sdIdx = static_cast<int>(links.size());
+            RECT sdR = { rxL + Scale(1, dpi_), shutdownY, rxR, shutdownY + linkH };
+            if (classicHoveredRight_ == sdIdx) {
+                HBRUSH hb = CreateSolidBrush(colors_.menuHover);
+                FillRect(hdc, &sdR, hb);
+                DeleteObject(hb);
+            }
+            // Icon
+            HFONT prevMdl2 = static_cast<HFONT>(SelectObject(hdc, mdlFont));
+            RECT sdIconR = { rxL + innerPad, shutdownY, rxL + innerPad + iconAreaW2, shutdownY + linkH };
+            SetTextColor(hdc, colors_.menuText);
+            DrawTextW(hdc, L"", 1, &sdIconR,
+                      DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX);
+            SelectObject(hdc, prevMdl2);
+
+            // Label + chevron
+            SelectObject(hdc, font);
+            int chevW3 = Scale(14, dpi_);
+            RECT sdLblR = { rxL + innerPad + iconAreaW2 + Scale(4, dpi_), shutdownY,
+                            rxR - innerPad - chevW3, shutdownY + linkH };
+            SetTextColor(hdc, colors_.menuText);
+            DrawTextW(hdc, L"Shut down", -1, &sdLblR,
+                      DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            RECT sdChevR = { rxR - innerPad - chevW3, shutdownY, rxR - innerPad, shutdownY + linkH };
+            SetTextColor(hdc, colors_.textDimmed);
+            DrawTextW(hdc, L"▶", 1, &sdChevR, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        }
+
+        DeleteObject(mdlFont);
+    }
+
     SelectObject(hdc, oldFont);
     DeleteObject(font);
 }
@@ -653,8 +949,10 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
 
 int AppMenuWindow::HitTestEntry(POINT ptClient) const
 {
-    if (ptClient.x >= menuW_) return -1;  // in sidebar
+    if (ptClient.x >= menuW_) return -1;  // in sidebar / right panel
     if (searchBoxH_ > 0 && ptClient.y >= menuH_ - searchBoxH_) return -1;  // in search box
+    // In Classic mode, the footer row (All Programs/Back) is not an entry
+    if (classicFooterH_ > 0 && ptClient.y >= menuH_ - searchBoxH_ - classicFooterH_) return -1;
     int contentY = ptClient.y + scrollOffset_;
     for (int i = 0; std::cmp_less(i, entryRects_.size()); ++i) {
         POINT cp = { ptClient.x, contentY };
@@ -689,6 +987,140 @@ int AppMenuWindow::HitTestSidebarBtn(POINT ptClient) const
             return enabled[bi];
     }
     return -1;
+}
+
+// ---------- Classic right-panel hit testing ----------
+
+int AppMenuWindow::HitTestClassicRight(POINT ptClient) const
+{
+    if (classicPanelW_ <= 0 || !settings_) return -1;
+    if (ptClient.x < menuW_) return -1;
+    if (searchBoxH_ > 0 && ptClient.y >= menuH_ - searchBoxH_) return -1;
+
+    int linkH    = Scale(settings_->appMenuEntryHeight, dpi_);
+    int picSize  = Scale(48, dpi_);
+    int pad      = Scale(6, dpi_);
+    int profileH = picSize + Scale(24, dpi_);  // picture + name line + padding
+
+    auto links = BuildClassicLinks(*settings_);
+    bool hasShutdown = settings_->appMenuClassicShowShutDown;
+
+    // Shutdown row is at the very bottom (above search box)
+    int shutdownY = menuH_ - searchBoxH_ - linkH;
+    if (hasShutdown && ptClient.y >= shutdownY && ptClient.y < menuH_ - searchBoxH_)
+        return static_cast<int>(links.size());  // shutdown index
+
+    // Links area below profile header
+    if (ptClient.y < profileH) return -1;  // in profile area, not clickable
+    int relY  = ptClient.y - profileH;
+    int idx   = relY / linkH;
+    int maxLinks = static_cast<int>(links.size());
+    int linksAreaBottom = hasShutdown ? shutdownY - Scale(1, dpi_) : menuH_ - searchBoxH_;
+    if (ptClient.y >= linksAreaBottom) return -1;
+    if (idx >= 0 && idx < maxLinks) return idx;
+    (void)pad;
+    return -1;
+}
+
+bool AppMenuWindow::HitTestClassicFooter(POINT ptClient) const
+{
+    if (classicFooterH_ <= 0) return false;
+    if (ptClient.x >= menuW_) return false;
+    int footerY = menuH_ - searchBoxH_ - classicFooterH_;
+    return ptClient.y >= footerY && ptClient.y < footerY + classicFooterH_;
+}
+
+// ---------- Classic right-panel activation ----------
+
+void AppMenuWindow::ActivateClassicRight(int linkIdx)
+{
+    if (!settings_) return;
+    auto links = BuildClassicLinks(*settings_);
+    bool hasShutdown = settings_->appMenuClassicShowShutDown;
+    int  shutdownIdx = static_cast<int>(links.size());
+
+    if (linkIdx == shutdownIdx && hasShutdown) {
+        // Power submenu
+        if (s_powerOptions.empty()) return;
+        HMENU hMenu = CreatePopupMenu();
+        for (int i = 0; std::cmp_less(i, s_powerOptions.size()); ++i)
+            AppendMenuW(hMenu, MF_STRING, i + 1, s_powerOptions[i].label.c_str());
+        // Anchor the popup at the top-right of the right panel (grows left+up from there)
+        POINT btnPt = { menuW_ + classicPanelW_,
+                        menuH_ - searchBoxH_ - Scale(settings_->appMenuEntryHeight, dpi_) };
+        ClientToScreen(hwnd_, &btnPt);
+        suppressKillFocus_ = true;
+        int cmd = static_cast<int>(TrackPopupMenu(hMenu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_RIGHTALIGN | TPM_BOTTOMALIGN,
+            btnPt.x, btnPt.y, 0, hwnd_, nullptr));
+        suppressKillFocus_ = false;
+        DestroyMenu(hMenu);
+        if (cmd > 0) {
+            ExecutePowerAction(s_powerOptions[cmd - 1].action);
+            closeReason_ = AppMenuCloseReason::Selection;
+            done_ = true;
+            if (IsWindow(hwnd_)) DestroyWindow(hwnd_);
+        } else {
+            if (IsWindow(hwnd_)) SetForegroundWindow(hwnd_);
+        }
+        return;
+    }
+    if (linkIdx < 0 || linkIdx >= static_cast<int>(links.size())) return;
+
+    bool sameMonitor = settings_->openAppsOnSameMonitor;
+    auto launch = [&](const wchar_t* path, const wchar_t* args = nullptr) {
+        LaunchMenuApp(hwnd_, sameMonitor, path, args);
+        closeReason_ = AppMenuCloseReason::Selection;
+        done_ = true;
+        DestroyWindow(hwnd_);
+    };
+
+    switch (links[linkIdx].id) {
+    case 0: launch(L"explorer.exe", L"shell:Personal");      break;  // Documents
+    case 1: launch(L"explorer.exe", L"shell:My Pictures");   break;  // Pictures
+    case 2: launch(L"explorer.exe", L"shell:My Music");      break;  // Music
+    case 3: launch(L"explorer.exe", L"shell:Downloads");     break;
+    case 4: launch(L"explorer.exe", L"shell:Recent");        break;  // Recent Items
+    case 5: launch(L"explorer.exe", L"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"); break;  // This PC
+    case 6: launch(L"explorer.exe", L"shell:::{26EE0668-A00A-44D7-9371-BEB064C98683}"); break;  // Control Panel
+    case 7: launch(L"ms-settings:");       break;
+    case 8:
+        ShellExecuteW(nullptr, L"open", L"rundll32.exe", L"shell32.dll,#61", nullptr, SW_SHOWNORMAL);
+        closeReason_ = AppMenuCloseReason::Selection;
+        done_ = true;
+        DestroyWindow(hwnd_);
+        break;
+    default: break;
+    }
+}
+
+// ---------- Classic All Programs toggle ----------
+
+void AppMenuWindow::ToggleAllPrograms()
+{
+    if (!settings_) return;
+    if (!inAllPrograms_) {
+        // Build flat sorted all-programs list if not done yet
+        if (allProgramsNodes_.empty()) {
+            FlattenTreeInto(ownedNodes_, allProgramsNodes_);
+            std::sort(allProgramsNodes_.begin(), allProgramsNodes_.end(),
+                [](const AppTreeNode& a, const AppTreeNode& b) {
+                    return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
+                });
+        }
+        nodes_         = &allProgramsNodes_;
+        inAllPrograms_ = true;
+    } else {
+        nodes_         = &ownedNodes_;
+        inAllPrograms_ = false;
+    }
+    scrollOffset_ = 0;
+    hoveredIdx_   = -1;
+    BuildEntryRects(menuW_);
+    int padPx    = Scale(settings_->appMenuPadding, dpi_);
+    int contentH = ContentHeight(entryRects_) + padPx;
+    UpdateMaxScroll(contentH, menuH_ - searchBoxH_ - classicFooterH_);
+    InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 // ---------- activate (launch app or open folder submenu) ----------
@@ -754,7 +1186,7 @@ void AppMenuWindow::Scroll(int pixelDelta)
 void AppMenuWindow::EnsureVisible(int idx)
 {
     if (idx < 0 || std::cmp_greater_equal(idx, entryRects_.size())) return;
-    int clientH = menuH_ - searchBoxH_;
+    int clientH = menuH_ - searchBoxH_ - classicFooterH_;
     int top = entryRects_[idx].top;
     int bot = entryRects_[idx].bottom;
     if (top < scrollOffset_)
@@ -940,7 +1372,8 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             int iconAreaW = Scale(20, dpi_);
             int editX = sbPad + iconAreaW;
             int editY = menuH_ - searchBoxH_ + Scale(3, dpi_);
-            int editW = menuW_ - editX - sbPad;
+            bool isClassicMode = settings_ && settings_->appMenuLayout == AppMenuLayout::Classic;
+            int editW = (isClassicMode ? menuW_ + classicPanelW_ : menuW_) - editX - sbPad;
             int editH = searchBoxH_ - Scale(6, dpi_);
 
             searchEdit_ = CreateWindowExW(
@@ -977,11 +1410,16 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_MOUSEMOVE: {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-        int newIdx = HitTestEntry(pt);
+        int newIdx       = HitTestEntry(pt);
         int newSidebarBtn = HitTestSidebarBtn(pt);
-        if (newIdx != hoveredIdx_ || newSidebarBtn != sidebarHoveredBtn_) {
-            hoveredIdx_      = newIdx;
-            sidebarHoveredBtn_ = newSidebarBtn;
+        int newClassicRight = HitTestClassicRight(pt);
+        bool newFooter   = HitTestClassicFooter(pt);
+        if (newIdx != hoveredIdx_ || newSidebarBtn != sidebarHoveredBtn_ ||
+            newClassicRight != classicHoveredRight_ || newFooter != classicFooterHovered_) {
+            hoveredIdx_           = newIdx;
+            sidebarHoveredBtn_    = newSidebarBtn;
+            classicHoveredRight_  = newClassicRight;
+            classicFooterHovered_ = newFooter;
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
@@ -989,6 +1427,18 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_LBUTTONUP: {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if (classicPanelW_ > 0) {
+            // Classic layout: check right panel and footer first
+            if (HitTestClassicFooter(pt)) {
+                ToggleAllPrograms();
+                return 0;
+            }
+            int rightIdx = HitTestClassicRight(pt);
+            if (rightIdx >= 0) {
+                ActivateClassicRight(rightIdx);
+                return 0;
+            }
+        }
         int sidebarBtn = HitTestSidebarBtn(pt);
         if (sidebarBtn >= 0) {
             ActivateSidebarBtn(sidebarBtn);
@@ -1004,7 +1454,8 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
         int step = 0;
         if (settings_ && settings_->appMenuLayout == AppMenuLayout::Grid &&
-            settings_->appMenuGridCols > 0 && !entryRects_.empty())
+            settings_->appMenuGridCols > 0 && !entryRects_.empty() &&
+            GET_X_LPARAM(lParam) < menuW_)  // only scroll left panel for Classic
         {
             int cols = std::max(1, settings_->appMenuGridCols);
             step = std::cmp_greater_equal(entryRects_.size(), cols)
@@ -1018,7 +1469,8 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     }
 
     case WM_KEYDOWN: {
-        bool isList = !settings_ || settings_->appMenuLayout == AppMenuLayout::List;
+        bool isList = !settings_ || settings_->appMenuLayout == AppMenuLayout::List
+                                 || settings_->appMenuLayout == AppMenuLayout::Classic;
         int cols  = (isList || !settings_) ? 1 : std::max(1, settings_->appMenuGridCols);
         int count = nodes_ ? static_cast<int>(nodes_->size()) : 0;
 
@@ -1220,6 +1672,7 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (folderIconList_) { DestroyIcon(folderIconList_); folderIconList_ = nullptr; }
         if (folderIconGrid_) { DestroyIcon(folderIconGrid_); folderIconGrid_ = nullptr; }
         if (settingsIcon_)   { DestroyIcon(settingsIcon_);   settingsIcon_   = nullptr; }
+        if (profilePicBmp_)  { DeleteObject(profilePicBmp_); profilePicBmp_  = nullptr; }
         for (auto& [path, icon] : exeIconCache_)
             if (icon) DestroyIcon(icon);
         exeIconCache_.clear();
@@ -1262,11 +1715,22 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
     int menuW = Scale(settings.appMenuWidth, dpi);
     menu.menuW_ = menuW;
 
-    // Sidebar: only on root menu (not submenus), and only when enabled
-    int sidebarW = (!isSubmenu && settings.appMenuSidebarEnabled)
+    bool isClassic = (!isSubmenu && settings.appMenuLayout == AppMenuLayout::Classic);
+
+    // Sidebar: only on root menu (not submenus), and only when enabled and not Classic
+    int sidebarW = (!isSubmenu && !isClassic && settings.appMenuSidebarEnabled)
                        ? Scale(settings.appMenuSidebarWidth, dpi) : 0;
     menu.sidebarW_ = sidebarW;
-    int totalW = menuW + sidebarW;
+
+    // Classic right panel
+    int classicPanelW = isClassic ? Scale(settings.appMenuClassicPanelWidth, dpi) : 0;
+    menu.classicPanelW_ = classicPanelW;
+
+    int totalW = menuW + sidebarW + classicPanelW;
+
+    // Classic footer row (All Programs / Back)
+    int classicFooterH = isClassic ? Scale(settings.appMenuEntryHeight, dpi) : 0;
+    menu.classicFooterH_ = classicFooterH;
 
     menu.BuildEntryRects(menuW);
     int padPx    = Scale(settings.appMenuPadding, dpi);
@@ -1286,10 +1750,17 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
         maxH = Scale(settings.appMenuMaxHeight, dpi);
     }
 
-    // Add search box height to total menu height
-    int menuH = std::min(contentH + menu.searchBoxH_, maxH + menu.searchBoxH_);
+    // Add search box and classic footer height to total menu height
+    int menuH = std::min(contentH + menu.searchBoxH_ + classicFooterH,
+                         maxH    + menu.searchBoxH_ + classicFooterH);
     menu.menuH_ = menuH;
-    menu.UpdateMaxScroll(contentH, menuH - menu.searchBoxH_);
+    menu.UpdateMaxScroll(contentH, menuH - menu.searchBoxH_ - classicFooterH);
+
+    // Classic: load profile picture and pre-build all-programs list
+    if (isClassic) {
+        int picSize = Scale(48, dpi);
+        menu.profilePicBmp_ = LoadUserProfilePicture(picSize);
+    }
 
     HMONITOR hMon = MonitorFromRect(&anchorRect, MONITOR_DEFAULTTONEAREST);
     MONITORINFO mi = {};

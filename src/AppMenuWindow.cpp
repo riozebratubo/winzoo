@@ -393,6 +393,8 @@ static LRESULT CALLBACK SearchEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wPar
         case VK_ESCAPE:
         case VK_UP:
         case VK_DOWN:
+        case VK_PRIOR:
+        case VK_NEXT:
         case VK_RETURN:
             // Forward to the parent menu for item navigation.
             // Keep OS focus on the edit so backspace/typing still work.
@@ -1106,6 +1108,42 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 }
             }
             break;
+
+        case VK_PRIOR: // Page Up
+        {
+            if (count == 0) break;
+            if (hoveredIdx_ == -1) {
+                SetHoveredIdx(0);
+                break;
+            }
+            int pageH = menuH_ - searchBoxH_;
+            int rowH = (!entryRects_.empty())
+                ? (std::cmp_greater_equal(entryRects_.size(), cols)
+                    ? entryRects_[cols - 1].bottom
+                    : entryRects_.back().bottom)
+                : Scale(settings_ ? settings_->appMenuEntryHeight : 36, dpi_);
+            int rows = std::max(1, pageH / std::max(1, rowH));
+            SetHoveredIdx(std::max(0, hoveredIdx_ - rows * cols));
+            break;
+        }
+
+        case VK_NEXT: // Page Down
+        {
+            if (count == 0) break;
+            if (hoveredIdx_ == -1) {
+                SetHoveredIdx(count - 1);
+                break;
+            }
+            int pageH = menuH_ - searchBoxH_;
+            int rowH = (!entryRects_.empty())
+                ? (std::cmp_greater_equal(entryRects_.size(), cols)
+                    ? entryRects_[cols - 1].bottom
+                    : entryRects_.back().bottom)
+                : Scale(settings_ ? settings_->appMenuEntryHeight : 36, dpi_);
+            int rows = std::max(1, pageH / std::max(1, rowH));
+            SetHoveredIdx(std::min(count - 1, hoveredIdx_ + rows * cols));
+            break;
+        }
 
         case VK_RETURN:
             if (hoveredIdx_ >= 0) {

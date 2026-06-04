@@ -1,0 +1,18 @@
+[
+  {
+    "label": "BuildAndRun",
+    "command": "cmd /c \"taskkill /IM winzoo.exe\" & cmd /c 'build.bat' && cmd /c 'build\\Release\\winzoo.exe'",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "no_focus",
+    "use_new_terminal": false,
+    "hide": "on_success",
+  },
+  {
+    "label": "Kill",
+    "command": "cmd /c \"taskkill /IM winzoo.exe\"",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "no_focus",
+    "use_new_terminal": false,
+    "hide": "always",
+  },
+]

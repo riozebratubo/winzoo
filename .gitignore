@@ -40,3 +40,8 @@ compile_commands.json
 *.log
 *.bak
 *.swp
+/__pycache__/*
+
+# notes on root
+/*.txt
+/*.md

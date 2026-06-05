@@ -56,6 +56,7 @@ set(SOURCES
     src/LaunchHelper.cpp
     src/JumpList.cpp
     src/TaskbarProxy.cpp
+    src/TaskbarRelocate.cpp
     res/winzoo.rc
     ${CMAKE_BINARY_DIR}/winzoo_embed.rc
 )

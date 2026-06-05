@@ -320,6 +320,7 @@ bool ExportSettingsToFile(const Settings& s)
     wInt("floatY",     s.floatY);
     wInt("floatWidth", s.floatWidth);
     wInt("taskbarMonitorMode",          static_cast<int>(s.taskbarMonitorMode));
+    wInt("taskbarHookMethod",           static_cast<int>(s.taskbarHookMethod));
     wBool("showAppMenuOnAllMonitors",   s.showAppMenuOnAllMonitors);
     wBool("showCurrentMonitorAppsOnly", s.showCurrentMonitorAppsOnly);
     wInt("maxButtonWidth",    s.maxButtonWidth);
@@ -517,6 +518,9 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     { int v = static_cast<int>(ns.taskbarMonitorMode);
       rEnum("taskbarMonitorMode", 0, 1, v);
       ns.taskbarMonitorMode = static_cast<TaskbarMonitorMode>(v); }
+    { int v = static_cast<int>(ns.taskbarHookMethod);
+      rEnum("taskbarHookMethod", 0, 1, v);   // 2 = reserved "After Explorer" (unimplemented)
+      ns.taskbarHookMethod = static_cast<TaskbarHookMethod>(v); }
 
     { int v = static_cast<int>(ns.appMenuLayout);
       rEnum("appMenuLayout", 0, 1, v);

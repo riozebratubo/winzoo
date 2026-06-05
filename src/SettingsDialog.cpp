@@ -23,6 +23,14 @@ static constexpr const wchar_t* kTaskbarMonitorModes[] = {
     L"On all monitors", L"On primary monitor"
 };
 
+// Order must match enum TaskbarHookMethod { None, BeforeExplorer }.
+// A third method ("After Explorer", value 2) is reserved but unimplemented and so is
+// intentionally omitted here — see the comment on TaskbarHookMethod in Settings.h.
+static constexpr const wchar_t* kTaskbarHookMethods[] = {
+    L"None (current behavior)",
+    L"Before Explorer (relocate + restart)"
+};
+
 struct DlgData {
     Settings* settings;
     HWND      hScrollHosts[6] = {};
@@ -214,6 +222,7 @@ static const int kGeneralControls[] = {
     IDC_CHECK_OPEN_SAME_MONITOR,
     IDC_CHECK_VERTICAL_TITLES,
     IDC_LBL_VERTICAL_BTN_H, IDC_EDIT_VERTICAL_BTN_H, IDC_SPIN_VERTICAL_BTN_H,
+    IDC_LBL_TASKBAR_HOOK, IDC_COMBO_TASKBAR_HOOK,
     0
 };
 static const int kAppBtnControls[] = {
@@ -524,6 +533,8 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
     SendMessageW(GetDlgItem(hGen, IDC_SPIN_THICKNESS), UDM_SETPOS32, 0, s.thickness);
     SendMessageW(GetDlgItem(hGen, IDC_COMBO_TASKBAR_MONITOR), CB_SETCURSEL,
                  static_cast<WPARAM>(s.taskbarMonitorMode), 0);
+    SendMessageW(GetDlgItem(hGen, IDC_COMBO_TASKBAR_HOOK), CB_SETCURSEL,
+                 static_cast<WPARAM>(s.taskbarHookMethod), 0);
     CheckDlgButton(hGen, IDC_CHECK_APPMENU_ALL_MONITORS,
                    s.showAppMenuOnAllMonitors ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hGen, IDC_CHECK_CURRENT_MONITOR_APPS,
@@ -676,6 +687,12 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 SendMessageW(hMon, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(s));
             SendMessageW(hMon, CB_SETCURSEL,
                          static_cast<WPARAM>(data->settings->taskbarMonitorMode), 0);
+
+            HWND hHook = GetDlgItem(hwnd, IDC_COMBO_TASKBAR_HOOK);
+            for (auto* s : kTaskbarHookMethods)
+                SendMessageW(hHook, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(s));
+            SendMessageW(hHook, CB_SETCURSEL,
+                         static_cast<WPARAM>(data->settings->taskbarHookMethod), 0);
 
             bool allMonitors = (data->settings->taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
             CheckDlgButton(hwnd, IDC_CHECK_APPMENU_ALL_MONITORS,
@@ -1499,6 +1516,10 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 int monIdx = static_cast<int>(SendMessageW(hMon, CB_GETCURSEL, 0, 0));
                 if (monIdx >= 0)
                     data->settings->taskbarMonitorMode = static_cast<TaskbarMonitorMode>(monIdx);
+                int hookIdx = static_cast<int>(
+                    SendMessageW(GetDlgItem(hGen, IDC_COMBO_TASKBAR_HOOK), CB_GETCURSEL, 0, 0));
+                if (hookIdx >= 0 && hookIdx <= 1)
+                    data->settings->taskbarHookMethod = static_cast<TaskbarHookMethod>(hookIdx);
                 data->settings->showAppMenuOnAllMonitors =
                     IsDlgButtonChecked(hGen, IDC_CHECK_APPMENU_ALL_MONITORS) == BST_CHECKED;
                 data->settings->showCurrentMonitorAppsOnly =

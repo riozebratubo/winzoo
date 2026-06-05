@@ -3,6 +3,7 @@
 #include "SettingsFile.h"
 #include "AppMenuWindow.h"
 #include "LaunchHelper.h"
+#include "TaskbarRelocate.h"
 #include <objbase.h>
 
 struct MonitorEnumData {
@@ -77,6 +78,12 @@ bool App::Init(HINSTANCE hInst)
     AppMenuWindow::CachePowerOptions();
     RegisterLaunchHelperClass(hInst);
 
+    // Method B: dock Explorer's taskbar on winzoo's edge so ApplicationFrameWindow
+    // apps (Task Manager etc.) minimize toward winzoo. Runs before we hide/probe the
+    // tray, and only restarts Explorer when the edge actually needs to change.
+    if (settings_.taskbarHookMethod == TaskbarHookMethod::BeforeExplorer)
+        RelocateExplorerTaskbarToMatch(settings_.position);
+
     // Hide the native Windows taskbar
     HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
     if (tray) ShowWindow(tray, SW_HIDE);
@@ -150,6 +157,10 @@ void App::Shutdown()
 void App::PropagateSettings(const Settings& newSettings, TaskbarWindow* origin)
 {
     bool monitorModeChanged = (newSettings.taskbarMonitorMode != settings_.taskbarMonitorMode);
+    // A hook-method change needs a winzoo restart so Init() re-runs the Explorer-
+    // taskbar relocation logic. (A later position change with Method B active simply
+    // self-heals on the next launch, when Init() re-aligns Explorer's edge.)
+    bool hookMethodChanged  = (newSettings.taskbarHookMethod != settings_.taskbarHookMethod);
     settings_ = newSettings;
 
     for (auto& tb : taskbars_) {
@@ -157,7 +168,7 @@ void App::PropagateSettings(const Settings& newSettings, TaskbarWindow* origin)
             tb->ApplySettings(settings_);
     }
 
-    if (monitorModeChanged)
+    if (monitorModeChanged || hookMethodChanged)
         RequestRestart();
 }
 

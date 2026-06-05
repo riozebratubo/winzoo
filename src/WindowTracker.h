@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <vector>
 #include <functional>
+#include <unordered_map>
 #include "TaskButton.h"
 #include "IconCache.h"
 
@@ -17,6 +18,12 @@ public:
     void RefreshTitle(HWND hwnd);
     void RefreshIcon(HWND hwnd);
 
+    // Periodic safety net: shell-hook messages are unreliable (windows can be
+    // created without a title yet, or destroy notifications can be missed/spurious).
+    // Reconcile re-scans top-level windows, adding trackable ones we missed and
+    // dropping buttons whose window no longer exists.
+    void Reconcile();
+
     const std::vector<TaskButton>& Buttons()        const { return buttons_; }
     std::vector<TaskButton>&       MutableButtons()       { return buttons_; }
 
@@ -26,6 +33,7 @@ public:
 
 private:
     void Seed();
+    bool AddWindowInternal(HWND hwnd);   // returns true if a new button was added
     void AddWindow(HWND hwnd);
     void RemoveWindow(HWND hwnd);
     int  FindByHwnd(HWND hwnd) const;
@@ -37,5 +45,11 @@ private:
     ChangeCallback          onChange_;
     UINT                    shellHookMsg_ = 0;
 
-    static constexpr int kIconSize = 16;
+    // Per-window count of consecutive Reconcile() ticks the window has been alive but
+    // not trackable (and not merely minimized). A button is only dropped once this
+    // crosses kStaleThreshold, so a momentary blip during an animation never removes it.
+    std::unordered_map<HWND, int> staleTicks_;
+
+    static constexpr int kIconSize       = 16;
+    static constexpr int kStaleThreshold = 3;   // ~0.75s at the 250ms reconcile cadence
 };

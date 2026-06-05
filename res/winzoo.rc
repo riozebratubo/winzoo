@@ -75,6 +75,10 @@ BEGIN
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
                     148, 156, 12, 12
 
+    LTEXT           "Taskbar hook method:", IDC_LBL_TASKBAR_HOOK, 12, 178, 86, 10
+    COMBOBOX        IDC_COMBO_TASKBAR_HOOK,                       100, 176, 124, 90,
+                    CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+
     /* System Tray tab */
     CONTROL         "Show tray icons (notification area)", IDC_CHECK_TRAY_ICONS,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 28, 192, 10

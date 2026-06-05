@@ -629,10 +629,33 @@ void TaskbarWindow::LayoutButtons()
     for (auto& btn : taskBtns) {
         bool show = true;
         if (filterByMonitor) {
-            if (btn.hwnd)
-                show = (MonitorFromWindow(btn.hwnd, MONITOR_DEFAULTTONULL) == hMonitor_);
-            else
+            if (btn.hwnd) {
+                // Resolve a STABLE monitor association that does not change across a
+                // minimize/restore animation — the source of the filter flicker.
+                //  - A minimized window's live rect is off-screen (-32000), so never read
+                //    (or cache) the live monitor while IsIconic; that reading is garbage.
+                //  - While on-screen, cache the reliable live monitor.
+                //  - If the window has never been seen on-screen (e.g. it was already
+                //    minimized when winzoo started, so the cache is empty), derive the
+                //    monitor from its restore rectangle, which stays valid while minimized.
+                //    That gives one stable answer instead of the flip-flopping
+                //    nearest-to-(-32000) reading.
+                HMONITOR live = IsIconic(btn.hwnd)
+                              ? nullptr
+                              : MonitorFromWindow(btn.hwnd, MONITOR_DEFAULTTONULL);
+                if (live) btn.lastKnownMonitor = live;
+
+                HMONITOR wmon = btn.lastKnownMonitor;
+                if (!wmon) {
+                    WINDOWPLACEMENT wp = { sizeof(wp) };
+                    wmon = GetWindowPlacement(btn.hwnd, &wp)
+                         ? MonitorFromRect(&wp.rcNormalPosition, MONITOR_DEFAULTTONEAREST)
+                         : MonitorFromWindow(btn.hwnd, MONITOR_DEFAULTTOPRIMARY);
+                }
+                show = (wmon == hMonitor_);
+            } else {
                 show = isPrimary_;
+            }
         }
         if (show)
             visibleTask.push_back(&btn);
@@ -1052,8 +1075,11 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
         }
 
         case IDM_CLOSE_WINDOW:
+            // WM_SYSCOMMAND/SC_CLOSE (not a bare WM_CLOSE) is what the window's own
+            // close coordination expects — apps like the WinUI Task Manager ignore a
+            // WM_CLOSE posted to their frame but honor this, just like middle-click.
             if (runningHwnd)
-                PostMessage(runningHwnd, WM_CLOSE, 0, 0);
+                PostMessage(runningHwnd, WM_SYSCOMMAND, SC_CLOSE, 0);
             break;
         default: break;
         }
@@ -1153,8 +1179,10 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
     }
 
     case IDM_CLOSE_WINDOW:
+        // Use SC_CLOSE (matches middle-click) rather than a bare WM_CLOSE, which the
+        // WinUI Task Manager and similar framed apps ignore when posted to the frame.
         if (btnHwnd && isRunning)
-            PostMessage(btnHwnd, WM_CLOSE, 0, 0);
+            PostMessage(btnHwnd, WM_SYSCOMMAND, SC_CLOSE, 0);
         break;
     default: break;
     }
@@ -2092,6 +2120,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_TIMER:
         if (wParam == kTimerActiveWindow) {
+            tracker_.Reconcile();
             tracker_.UpdateActiveWindow();
             if (settings_.showLangIndicator) {
                 auto [newText, newHkl] = GetCurrentInputLanguage();

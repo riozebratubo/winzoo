@@ -41,6 +41,7 @@ struct TaskButton {
     bool         isActive   = false;
     bool         iconOnly   = false;  // draw only icon, centered (no text)
     int          iconDrawSz = 16;     // logical icon draw size in px
+    HMONITOR     lastKnownMonitor = nullptr;  // monitor while non-minimized; reused when minimized
     ProgressInfo progress;
 
     bool IsRunning() const { return hwnd != nullptr; }

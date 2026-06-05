@@ -10,6 +10,30 @@ enum class AppMenuFlattenMode      { None = 0, Submenus = 1, All = 2 };
 enum class TaskbarMonitorMode      { AllMonitors = 0, Primary = 1 };
 enum class MinimizedIndicatorType  { SmallRectangle = 0, DimButton = 1 };
 
+// How winzoo makes ApplicationFrameWindow apps (Task Manager etc.) minimize toward
+// winzoo's edge instead of Explorer's old one. See TaskbarRelocate.h.
+//   None           — keep current behavior; don't touch Explorer's taskbar.
+//   BeforeExplorer — relocate Explorer's taskbar to winzoo's edge (StuckRects3 +
+//                    one explorer.exe restart). Robust; changes the real taskbar edge.
+//
+// ── Reserved: "After Explorer" method (would be enum value 2) ─────────────────
+// Deliberately NOT defined / NOT shown in the settings UI because it is unimplemented.
+// Intended behavior, for a future implementation:
+//   AfterExplorer  — leave Explorer's taskbar where it is and instead intercept the
+//                    taskbar-position query and return winzoo's rect, so AFW/UWP apps
+//                    (Task Manager, Settings) read winzoo's edge as "the taskbar".
+//                    The lighter alternative to Method B: no registry change and no
+//                    explorer.exe restart. Likely implemented by extending the
+//                    winzoo_com.dll hook already injected into Explorer's tray thread
+//                    (see TaskbarProxy::Install) to answer ABM_GETTASKBARPOS / the
+//                    internal Shell_TrayWnd position message with winzoo's rect.
+//                    Caveat to verify first: that AFW apps actually resolve the taskbar
+//                    via that query (rather than the registered appbar edge).
+// To re-enable: add `AfterExplorer = 2` below, add its label to kTaskbarHookMethods[]
+// in SettingsDialog.cpp, widen the load/readback/JSON clamps from 1 to 2, and handle
+// it in App::Init().
+enum class TaskbarHookMethod       { None = 0, BeforeExplorer = 1 };
+
 struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can throw (wstring inits); no noexcept contract exists
     TaskbarPosition position  = TaskbarPosition::Bottom;
     ThemePreset     theme     = ThemePreset::Default;
@@ -18,6 +42,7 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     int             floatX           = 100;
     int             floatY           = 100;
     int             floatWidth       = 400;
+    TaskbarHookMethod  taskbarHookMethod          = TaskbarHookMethod::BeforeExplorer;
     TaskbarMonitorMode taskbarMonitorMode        = TaskbarMonitorMode::AllMonitors;
     bool               showAppMenuOnAllMonitors  = true;
     bool               showCurrentMonitorAppsOnly = true;

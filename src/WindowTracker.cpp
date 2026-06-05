@@ -100,9 +100,9 @@ std::wstring WindowTracker::GetWindowTitle(HWND hwnd) const
     return title;
 }
 
-void WindowTracker::AddWindow(HWND hwnd)
+bool WindowTracker::AddWindowInternal(HWND hwnd)
 {
-    if (FindByHwnd(hwnd) >= 0) return;
+    if (FindByHwnd(hwnd) >= 0) return false;
 
     TaskButton btn;
     btn.hwnd  = hwnd;
@@ -123,7 +123,12 @@ void WindowTracker::AddWindow(HWND hwnd)
     }
 
     buttons_.push_back(btn);
-    if (onChange_) onChange_();
+    return true;
+}
+
+void WindowTracker::AddWindow(HWND hwnd)
+{
+    if (AddWindowInternal(hwnd) && onChange_) onChange_();
 }
 
 void WindowTracker::RemoveWindow(HWND hwnd)
@@ -133,6 +138,7 @@ void WindowTracker::RemoveWindow(HWND hwnd)
 
     if (iconCache_) iconCache_->Evict(hwnd);
     buttons_.erase(buttons_.begin() + idx);
+    staleTicks_.erase(hwnd);
     if (onChange_) onChange_();
 }
 
@@ -187,7 +193,15 @@ void WindowTracker::OnShellMessage(WPARAM wParam, LPARAM lParam)
         break;
 
     case HSHELL_WINDOWDESTROYED:
-        RemoveWindow(hwnd);
+        // Delivered both for genuine destruction and, spuriously, while a window
+        // animates (minimize/restore). Remove synchronously ONLY when the window is
+        // truly gone (a real close is already !IsWindow by the time we process this
+        // posted message) — that case can't flicker because the window won't return.
+        // A window that still exists but looks non-trackable (hidden to tray, briefly
+        // cloaked mid-animation, etc.) is left alone here and handled by Reconcile()
+        // with a grace period, so a transient blip never removes a live button.
+        if (!IsWindow(hwnd))
+            RemoveWindow(hwnd);
         break;
 
     case HSHELL_WINDOWACTIVATED:
@@ -220,4 +234,52 @@ void WindowTracker::OnShellMessage(WPARAM wParam, LPARAM lParam)
     default:
         break;
     }
+}
+
+void WindowTracker::Reconcile()
+{
+    bool changed = false;
+
+    // 1. Add any currently trackable top-level window we don't have a button for.
+    //    Catches windows whose HSHELL_WINDOWCREATED arrived before they had a title
+    //    (e.g. a new Firefox window) and any create notification we missed entirely.
+    struct Ctx { WindowTracker* self; bool* changed; };
+    Ctx ctx{ this, &changed };
+    EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
+        auto* c = reinterpret_cast<Ctx*>(lp);
+        if (c->self->ShouldTrack(hwnd) && c->self->FindByHwnd(hwnd) < 0) {
+            if (c->self->AddWindowInternal(hwnd))
+                *c->changed = true;
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&ctx));
+
+    // 2. Drop buttons whose window is gone, or has stayed non-trackable (hidden to
+    //    tray, moved to another virtual desktop, etc.) for kStaleThreshold consecutive
+    //    ticks. Minimized windows are explicitly preserved: a minimized window fails
+    //    ShouldTrack() (off-screen / degenerate rect, possible cloaking), but it must
+    //    keep its taskbar button — that exact case was removing buttons mid-minimize
+    //    and re-adding them on restore, which is what produced the disappear/flicker.
+    for (int i = static_cast<int>(buttons_.size()) - 1; i >= 0; --i) {
+        HWND h = buttons_[i].hwnd;
+        bool drop = false;
+        if (!IsWindow(h)) {
+            drop = true;                         // truly gone — remove immediately
+        } else if (IsIconic(h)) {
+            staleTicks_.erase(h);                // minimized — always keep its button
+        } else if (!ShouldTrack(h)) {
+            if (++staleTicks_[h] >= kStaleThreshold)
+                drop = true;                     // non-trackable long enough — remove
+        } else {
+            staleTicks_.erase(h);                // healthy again — reset its grace count
+        }
+        if (drop) {
+            if (iconCache_) iconCache_->Evict(h);
+            buttons_.erase(buttons_.begin() + i);
+            staleTicks_.erase(h);
+            changed = true;
+        }
+    }
+
+    if (changed && onChange_) onChange_();
 }

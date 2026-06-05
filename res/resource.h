@@ -144,6 +144,10 @@
 #define IDC_EDIT_TRAY_ICON_MARGIN           1157
 #define IDC_SPIN_TRAY_ICON_MARGIN           1158
 
+// General tab — taskbar hook method (Task Manager minimize-direction fix)
+#define IDC_LBL_TASKBAR_HOOK                1203
+#define IDC_COMBO_TASKBAR_HOOK              1204
+
 // General tab — multi-monitor launch
 #define IDC_CHECK_OPEN_SAME_MONITOR         1160
 #define IDC_CHECK_TRAY_FALLBACK_EXE         1175

@@ -262,6 +262,7 @@ void TaskbarWindow::ApplySettings(const Settings& s)
                      rc.left, rc.top,
                      rc.right - rc.left, rc.bottom - rc.top,
                      SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        if (isPrimary_) proxy_.UpdatePosition(rc);
         RECT client;
         GetClientRect(hwnd_, &client);
         HDC hdc = GetDC(hwnd_);
@@ -945,6 +946,24 @@ void TaskbarWindow::ActivateButton(int combinedIdx)
     bool isForeground = btn.isActive || (fg && fg == btn.hwnd);
 
     if (!IsIconic(btn.hwnd) && isForeground) {
+        // Direct the DWM minimize animation toward our button by updating
+        // ptMinPosition before the window processes SC_MINIMIZE. This overrides
+        // whatever Explorer's (hidden) taskbar last wrote there. PostMessage is
+        // async, so SetWindowPlacement (sync) runs first.
+        if (!IsRectEmpty(&btn.rect)) {
+            POINT origin = {};
+            ClientToScreen(hwnd_, &origin);
+            WINDOWPLACEMENT wp = {};
+            wp.length = sizeof(wp);
+            if (GetWindowPlacement(btn.hwnd, &wp)) {
+                wp.ptMinPosition = {
+                    origin.x + (btn.rect.left + btn.rect.right)  / 2,
+                    origin.y + (btn.rect.top  + btn.rect.bottom) / 2
+                };
+                wp.flags |= WPF_SETMINPOSITION;
+                SetWindowPlacement(btn.hwnd, &wp);
+            }
+        }
         // PostMessage WM_SYSCOMMAND SC_MINIMIZE routes through the app's window
         // procedure, which coordinates the full minimize for ApplicationFrameWindow-
         // hosted apps (minimizes both the frame and the hosted content).
@@ -1470,10 +1489,16 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                      rc.left, rc.top,
                      rc.right - rc.left, rc.bottom - rc.top,
                      SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        if (isPrimary_) proxy_.UpdatePosition(rc);
         return 0;
     }
     if (appBarCallbackMsg_ && uMsg == appBarCallbackMsg_) {
         appBar_.OnCallback(wParam, lParam);
+        if (isPrimary_) {
+            RECT rc;
+            GetWindowRect(hwnd_, &rc);
+            proxy_.UpdatePosition(rc);
+        }
         return 0;
     }
 
@@ -1495,6 +1520,16 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         tracker_.Initialize(hwnd_, &iconCache_,
                             [this]() {
                                 LayoutButtons();
+                                // Re-sync hover to the cursor after every layout change so
+                                // transient button additions/removals (e.g. DWM animation
+                                // windows during a minimize) don't leave hoveredIdx_ stale.
+                                POINT pt;
+                                GetCursorPos(&pt);
+                                ScreenToClient(hwnd_, &pt);
+                                RECT client;
+                                GetClientRect(hwnd_, &client);
+                                if (PtInRect(&client, pt))
+                                    hoveredIdx_ = HitTestButton(pt);
                                 InvalidateRect(hwnd_, nullptr, FALSE);
                             });
 
@@ -2148,6 +2183,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                      prc->left, prc->top,
                      prc->right - prc->left, prc->bottom - prc->top,
                      SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        if (isPrimary_) proxy_.UpdatePosition(*prc);
         HDC hdc = GetDC(hwnd_);
         renderer_.Resize(prc->right - prc->left, prc->bottom - prc->top, hdc);
         ReleaseDC(hwnd_, hdc);
@@ -2168,6 +2204,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                      rc.left, rc.top,
                      rc.right - rc.left, rc.bottom - rc.top,
                      SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        if (isPrimary_) proxy_.UpdatePosition(rc);
         RECT client;
         GetClientRect(hwnd_, &client);
         HDC hdc = GetDC(hwnd_);

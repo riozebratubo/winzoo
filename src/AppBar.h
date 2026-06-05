@@ -28,4 +28,6 @@ private:
 
     static UINT EdgeForPosition(TaskbarPosition p);
     RECT MonitorRectForWindow() const;
+
+    bool            adjustingWorkArea_ = false;
 };

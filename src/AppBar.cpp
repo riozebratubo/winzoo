@@ -70,6 +70,24 @@ bool AppBar::SetPosition(TaskbarPosition position, int thicknessPx)
     SHAppBarMessage(ABM_SETPOS,   &abd_);
     reservedRect_ = abd_.rc;
 
+    // The shell includes Explorer's hidden taskbar in its work area calculation even
+    // after SW_HIDE (SW_HIDE doesn't call ABM_REMOVE). Override the work area so only
+    // our strip is reserved. Re-entry guard prevents the SPIF_SENDCHANGE -> ABN_POSCHANGED
+    // -> SetPosition loop from running forever.
+    if (!adjustingWorkArea_) {
+        adjustingWorkArea_ = true;
+        RECT workArea = mon;
+        switch (abd_.uEdge) {
+        case ABE_BOTTOM: workArea.bottom -= thicknessPx; break;
+        case ABE_TOP:    workArea.top    += thicknessPx; break;
+        case ABE_LEFT:   workArea.left   += thicknessPx; break;
+        case ABE_RIGHT:  workArea.right  -= thicknessPx; break;
+        default: break;
+        }
+        SystemParametersInfo(SPI_SETWORKAREA, 0, &workArea, SPIF_SENDCHANGE);
+        adjustingWorkArea_ = false;
+    }
+
     SetWindowPos(hwnd_, HWND_TOPMOST,
                  reservedRect_.left, reservedRect_.top,
                  reservedRect_.right  - reservedRect_.left,

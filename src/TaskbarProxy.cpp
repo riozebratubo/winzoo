@@ -81,6 +81,13 @@ bool TaskbarProxy::Install(HWND winzooHwnd) {
         }
     }
 
+    // Sync both the proxy and Explorer's real Shell_TrayWnd to Winzoo's screen rect.
+    {
+        RECT rc = {};
+        GetWindowRect(winzooHwnd_, &rc);
+        UpdatePosition(rc);
+    }
+
     // Broadcast TaskbarCreated: apps reinitialize ITaskbarList3 and get winzoo_com.dll.
     UINT taskbarCreatedMsg = RegisterWindowMessageW(L"TaskbarCreated");
     if (taskbarCreatedMsg)
@@ -114,6 +121,38 @@ bool TaskbarProxy::Install(HWND winzooHwnd) {
     }
 
     return true;
+}
+
+void TaskbarProxy::UpdatePosition(RECT rc) {
+    if (updatingPosition_) return;
+    updatingPosition_ = true;
+
+    if (proxyHwnd_)
+        SetWindowPos(proxyHwnd_, nullptr,
+                     rc.left, rc.top,
+                     rc.right - rc.left, rc.bottom - rc.top,
+                     SWP_NOACTIVATE | SWP_NOZORDER);
+
+    // DWM holds a direct cached HWND reference to Explorer's real Shell_TrayWnd
+    // (obtained at system startup) and reads its screen rect to determine where to
+    // animate minimizing windows. Moving the hidden tray window to match Winzoo's
+    // position redirects those animations to the correct edge.
+    if (!explorerTray_) {
+        for (HWND h = FindWindowW(L"Shell_TrayWnd", nullptr); h;
+             h = FindWindowExW(nullptr, h, L"Shell_TrayWnd", nullptr)) {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(h, &pid);
+            if (pid != GetCurrentProcessId()) { explorerTray_ = h; break; }
+        }
+    }
+    if (explorerTray_) {
+        SetWindowPos(explorerTray_, nullptr,
+                     rc.left, rc.top,
+                     rc.right - rc.left, rc.bottom - rc.top,
+                     SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSENDCHANGING);
+    }
+
+    updatingPosition_ = false;
 }
 
 void TaskbarProxy::Uninstall() {

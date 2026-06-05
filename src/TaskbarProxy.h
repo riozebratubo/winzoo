@@ -13,6 +13,7 @@ class TaskbarProxy {
 public:
     bool Install(HWND winzooHwnd);
     void Uninstall();
+    void UpdatePosition(RECT screenRect);
 
     UINT RelayMsg() const { return relayMsg_; }
 
@@ -25,10 +26,12 @@ public:
 private:
     static LRESULT CALLBACK ProxyWndProc(HWND, UINT, WPARAM, LPARAM);
 
-    HWND         winzooHwnd_  = nullptr;
-    HWND         proxyHwnd_   = nullptr;
-    UINT         relayMsg_    = 0;
-    bool         registered_  = false;
-    HMODULE      hHookDll_    = nullptr;
+    HWND         winzooHwnd_      = nullptr;
+    HWND         proxyHwnd_      = nullptr;
+    HWND         explorerTray_   = nullptr;
+    UINT         relayMsg_       = 0;
+    bool         registered_     = false;
+    bool         updatingPosition_ = false;
+    HMODULE      hHookDll_       = nullptr;
     std::wstring dllPath_;
 };

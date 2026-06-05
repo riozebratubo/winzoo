@@ -27,8 +27,8 @@ static constexpr const wchar_t* kTaskbarMonitorModes[] = {
 // A third method ("After Explorer", value 2) is reserved but unimplemented and so is
 // intentionally omitted here — see the comment on TaskbarHookMethod in Settings.h.
 static constexpr const wchar_t* kTaskbarHookMethods[] = {
-    L"None (current behavior)",
-    L"Before Explorer (relocate + restart)"
+    L"None",
+    L"Before Explorer (restarts explorer)"
 };
 
 struct DlgData {

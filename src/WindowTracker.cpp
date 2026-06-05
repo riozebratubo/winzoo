@@ -139,6 +139,14 @@ void WindowTracker::RemoveWindow(HWND hwnd)
 void WindowTracker::UpdateActiveWindow()
 {
     HWND fg = GetForegroundWindow();
+    // Only update when fg is a tracked window.  If it's an untracked companion
+    // window (WinUI3 input-sink, ApplicationFrameWindow inner app, etc.) the
+    // shell-hook already set isActive correctly — don't clobber it.
+    bool fgTracked = false;
+    for (const auto& b : buttons_)
+        if (b.hwnd == fg) { fgTracked = true; break; }
+    if (!fgTracked) return;
+
     bool changed = false;
     for (auto& btn : buttons_) {
         bool wasActive = btn.isActive;
@@ -184,7 +192,18 @@ void WindowTracker::OnShellMessage(WPARAM wParam, LPARAM lParam)
 
     case HSHELL_WINDOWACTIVATED:
     case HSHELL_RUDEAPPACTIVATED:
-        UpdateActiveWindow();
+        // Set isActive directly from the shell-hook HWND.  This is more reliable
+        // than GetForegroundWindow(), which returns an untracked companion window
+        // for ApplicationFrameWindow-hosted and WinUI3 apps (e.g. new Task Manager).
+        if (hwnd) {
+            bool changed = false;
+            for (auto& b : buttons_) {
+                bool was = b.isActive;
+                b.isActive = (b.hwnd == hwnd);
+                if (b.isActive != was) changed = true;
+            }
+            if (changed && onChange_) onChange_();
+        }
         break;
 
     case HSHELL_REDRAW:

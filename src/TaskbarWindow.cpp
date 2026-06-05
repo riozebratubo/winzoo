@@ -934,26 +934,29 @@ void TaskbarWindow::ActivateButton(int combinedIdx)
         return;
     }
 
-    // Minimize only if the window is already visible and in the foreground.
-    if (!IsIconic(btn.hwnd) && GetForegroundWindow() == btn.hwnd) {
-        ShowWindow(btn.hwnd, SW_MINIMIZE);
+    // Two complementary active-window checks:
+    // - btn.isActive: set by shell hook lParam — reliable for ApplicationFrameWindow-
+    //   hosted apps (new Task Manager) where GetForegroundWindow returns an untracked
+    //   inner window, not the tracked outer frame.
+    // - fg == btn.hwnd: real-time check — reliable for all normal apps and guards
+    //   against stale isActive causing SwitchToThisWindow to be called on an
+    //   already-active window (which makes some apps destroy/recreate their HWND).
+    HWND fg = GetForegroundWindow();
+    bool isForeground = btn.isActive || (fg && fg == btn.hwnd);
+
+    if (!IsIconic(btn.hwnd) && isForeground) {
+        // PostMessage WM_SYSCOMMAND SC_MINIMIZE routes through the app's window
+        // procedure, which coordinates the full minimize for ApplicationFrameWindow-
+        // hosted apps (minimizes both the frame and the hosted content).
+        // SC_CLOSE via the same path already works for Task Manager, so SC_MINIMIZE
+        // should too.
+        PostMessage(btn.hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
         return;
     }
 
-    if (IsIconic(btn.hwnd))
-        ShowWindow(btn.hwnd, SW_RESTORE);
-
-    DWORD ourTid    = GetCurrentThreadId();
-    DWORD targetTid = GetWindowThreadProcessId(btn.hwnd, nullptr);
-
-    if (ourTid != targetTid)
-        AttachThreadInput(ourTid, targetTid, TRUE);
-
-    SetForegroundWindow(btn.hwnd);
-    BringWindowToTop(btn.hwnd);
-
-    if (ourTid != targetTid)
-        AttachThreadInput(ourTid, targetTid, FALSE);
+    // SwitchToThisWindow restores from minimized or brings to front, and works
+    // across UAC integrity levels (unlike SetForegroundWindow + AttachThreadInput).
+    SwitchToThisWindow(btn.hwnd, TRUE);
 }
 
 void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
@@ -1983,7 +1986,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 const auto& btns = tracker_.Buttons();
                 if (std::cmp_less(taskIdx, btns.size())) {
                     HWND target = btns[taskIdx].hwnd;
-                    if (target) PostMessage(target, WM_CLOSE, 0, 0);
+                    if (target) PostMessage(target, WM_SYSCOMMAND, SC_CLOSE, 0);
                 }
             }
         }

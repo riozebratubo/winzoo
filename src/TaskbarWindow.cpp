@@ -399,8 +399,11 @@ static void ForwardTrayNotification(HWND hWnd, UINT callbackMsg, UINT uID,
 {
     if (!hWnd || !callbackMsg) return;
 
-    // For right-click menus: target window must be foreground so TrackPopupMenu works.
-    SetForegroundWindow(hWnd);
+    // For right-click menus the target window must be foreground so its
+    // TrackPopupMenu appears and dismisses correctly. A plain left-click shouldn't
+    // steal focus from whatever the user is working in.
+    if (rightClick)
+        SetForegroundWindow(hWnd);
 
     const UINT down = rightClick ? WM_RBUTTONDOWN : WM_LBUTTONDOWN;
     const UINT up   = rightClick ? WM_RBUTTONUP   : WM_LBUTTONUP;
@@ -1405,7 +1408,12 @@ void TaskbarWindow::ShowAppMenu()
     RECT btnScreen = GetStartBtnScreenRect();
     AppMenuWindow::Show(hwnd_, btnScreen, settings_.position,
                         appEntries_,    // copied by value into menu
-                        settings_, colors_, dpi_);
+                        settings_, colors_, dpi_,
+                        monitorDeviceName_,
+                        [this](const Settings& s) {
+                            ApplySettings(s);
+                            App::Instance().PropagateSettings(s, this);
+                        });
     menuOpen_ = false;
     menuLastClosedTick_ = GetTickCount();
 }
@@ -2005,29 +2013,51 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 bool origPinned = IsPinnedIdx(origIdx);
                 bool dropPinned = IsPinnedIdx(dropIdx);
                 if (origPinned && dropPinned) {
-                    // Swap within pinned zone and persist the new order
+                    // Capture exe paths before the swap so the new order is persisted
+                    // by identity, not by combined index. In floating mode pinnedButtons_
+                    // is built from a *merged* per-monitor list, so combined indices do
+                    // not line up with any single persisted list — matching by path does.
+                    std::wstring pathA = pinnedButtons_[origIdx].exePath;
+                    std::wstring pathB = pinnedButtons_[dropIdx].exePath;
                     std::swap(pinnedButtons_[origIdx], pinnedButtons_[dropIdx]);
-                    if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
-                        auto it = settings_.pinnedExePathsPerMonitor.find(monitorDeviceName_);
-                        if (it != settings_.pinnedExePathsPerMonitor.end() &&
-                            std::cmp_less(origIdx, it->second.size()) &&
-                            std::cmp_less(dropIdx, it->second.size())) {
-                            std::swap(it->second[origIdx], it->second[dropIdx]);
+
+                    auto swapInList = [&](std::vector<std::wstring>& v) {
+                        auto ia = std::find_if(v.begin(), v.end(), [&](const std::wstring& p) {
+                            return _wcsicmp(p.c_str(), pathA.c_str()) == 0; });
+                        auto ib = std::find_if(v.begin(), v.end(), [&](const std::wstring& p) {
+                            return _wcsicmp(p.c_str(), pathB.c_str()) == 0; });
+                        if (ia != v.end() && ib != v.end()) std::iter_swap(ia, ib);
+                    };
+
+                    if (settings_.pinnedAppsPerMonitor) {
+                        if (settings_.position == TaskbarPosition::Floating) {
+                            // Merged view spans every monitor's list; reorder the pair
+                            // in whichever list(s) contain both paths.
+                            for (auto& [mon, vec] : settings_.pinnedExePathsPerMonitor)
+                                swapInList(vec);
+                        } else if (!monitorDeviceName_.empty()) {
+                            auto it = settings_.pinnedExePathsPerMonitor.find(monitorDeviceName_);
+                            if (it != settings_.pinnedExePathsPerMonitor.end())
+                                swapInList(it->second);
                         }
-                    } else if (std::cmp_less(origIdx, settings_.pinnedExePaths.size()) &&
-                               std::cmp_less(dropIdx, settings_.pinnedExePaths.size())) {
-                        std::swap(settings_.pinnedExePaths[origIdx],
-                                  settings_.pinnedExePaths[dropIdx]);
+                    } else {
+                        swapInList(settings_.pinnedExePaths);
                     }
                     SaveSettings(settings_);
                     LayoutButtons();
                 } else if (!origPinned && !dropPinned) {
-                    // Swap within task zone
+                    // Swap within task zone (guard against stale indices: the tracker
+                    // vector can change between button-down and button-up via the
+                    // reconcile/shell-hook timers firing during capture).
                     int pi = origIdx - (int)pinnedButtons_.size();
                     int pj = dropIdx - (int)pinnedButtons_.size();
                     auto& buttons = tracker_.MutableButtons();
-                    std::swap(buttons[pi], buttons[pj]);
-                    LayoutButtons();
+                    if (pi >= 0 && pj >= 0 &&
+                        std::cmp_less(pi, buttons.size()) &&
+                        std::cmp_less(pj, buttons.size())) {
+                        std::swap(buttons[pi], buttons[pj]);
+                        LayoutButtons();
+                    }
                 }
                 // Cross-zone drops are silently ignored
             }

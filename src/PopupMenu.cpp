@@ -71,15 +71,33 @@ LRESULT PopupMenu::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
     }
 
     case WM_LBUTTONUP: {
+        // With mouse capture, coordinates are relative to this window; a click outside the
+        // client area yields an out-of-range index (HitTestItem -> -1) and simply dismisses.
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         int idx = HitTestItem(pt);
         if (idx >= 0 && !items_[idx].isSeparator && !items_[idx].isHeader && !items_[idx].isDisabled) {
             result_ = items_[idx].id;
         }
+        ReleaseCapture();
         done_ = true;
         DestroyWindow(hwnd);
         return 0;
     }
+
+    case WM_RBUTTONUP:
+        // Right-click dismisses without selecting.
+        ReleaseCapture();
+        done_ = true;
+        DestroyWindow(hwnd);
+        return 0;
+
+    case WM_CAPTURECHANGED:
+        // Capture lost (e.g. another window activated) — dismiss.
+        if (!done_) {
+            done_ = true;
+            if (IsWindow(hwnd)) DestroyWindow(hwnd);
+        }
+        return 0;
 
     case WM_KEYDOWN:
         switch (wParam) {
@@ -107,11 +125,6 @@ LRESULT PopupMenu::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
             break;
         default: break;
         }
-        return 0;
-
-    case WM_KILLFOCUS:
-        done_ = true;
-        DestroyWindow(hwnd);
         return 0;
 
     case WM_DESTROY:
@@ -270,6 +283,10 @@ UINT PopupMenu::Show(HWND hwndOwner, POINT ptScreen,
 
     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
     SetForegroundWindow(hwnd);
+    // Capture the mouse so the menu works regardless of focus. This is essential when the
+    // menu is opened from inside another modal message loop (e.g. the app menu), where a
+    // focus-based dismissal would close the popup before a selection could register.
+    SetCapture(hwnd);
 
     MSG msg = {};
     BOOL got = TRUE;
@@ -277,6 +294,7 @@ UINT PopupMenu::Show(HWND hwndOwner, POINT ptScreen,
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    if (GetCapture() == hwnd) ReleaseCapture();
     // Only WM_QUIT (GetMessageW == 0) should re-post a quit so the app can shut
     // down. A -1 return is a GetMessage error, not a quit — don't tear down the app.
     if (!menu.done_ && got == 0)

@@ -76,6 +76,9 @@
 #define IDM_PIN_UNPIN           402
 #define IDM_CLOSE_WINDOW        403
 
+// Apps Menu entry right-click menu item ID
+#define IDM_APPMENU_PIN_TOGGLE  404
+
 // Jump List items (dynamic range: 600..699)
 #define IDM_JUMPLIST_BASE       600
 #define IDM_JUMPLIST_MAX        699
@@ -233,6 +236,7 @@
 #define IDC_CHECK_APPMENU_CLASSIC_WINSETT  1320
 #define IDC_CHECK_APPMENU_CLASSIC_RUN      1321
 #define IDC_CHECK_APPMENU_CLASSIC_SHUTDOWN 1322
+#define IDC_CHECK_APPMENU_PINNED_PER_MONITOR 1323
 
 // App Buttons — progress bars
 #define IDC_CHECK_PROGRESSBAR               1168

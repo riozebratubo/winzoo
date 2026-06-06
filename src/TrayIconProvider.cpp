@@ -622,13 +622,21 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIc
     // Supplement: add toolbar entries whose hWnd is known (TRAYDATA readable) but
     // whose hWnd+uID pair isn't already in the COM result.  Skip null-hWnd toolbar
     // ghosts — they have no reliable identity and would only add blank slots.
+    // Any toolbar entry we don't adopt owns an HICON the toolbar pass allocated, so
+    // it must be destroyed here or it leaks a GDI handle on every refresh tick.
     for (auto& te : tbResult) {
-        if (!te.hWnd) continue;
-        bool already = false;
-        for (const auto& ce : result) {
-            if (ce.hWnd == te.hWnd && ce.uID == te.uID) { already = true; break; }
+        bool keep = te.hWnd != nullptr;
+        if (keep) {
+            for (const auto& ce : result) {
+                if (ce.hWnd == te.hWnd && ce.uID == te.uID) { keep = false; break; }
+            }
         }
-        if (!already) result.push_back(std::move(te));
+        if (keep) {
+            result.push_back(std::move(te));
+        } else if (te.hIcon) {
+            DestroyIcon(te.hIcon);
+            te.hIcon = nullptr;
+        }
     }
 
     return result;

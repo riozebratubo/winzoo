@@ -83,6 +83,12 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     // Used when pinnedAppsPerMonitor is true.
     std::map<std::wstring, std::vector<std::wstring>> pinnedExePathsPerMonitor;
 
+    // Apps pinned by the user to the top of the Apps Menu (separate from taskbar pins).
+    // Order is significant (drag-reorderable). Paths are .lnk/exe paths matching AppEntry.
+    bool appMenuPinnedPerMonitor = true;  // default: per-monitor
+    std::vector<std::wstring> appMenuPinnedPaths;  // global list
+    std::map<std::wstring, std::vector<std::wstring>> appMenuPinnedPathsPerMonitor;
+
     // App Menu
     AppMenuLayout appMenuLayout       = AppMenuLayout::List;
     int           appMenuWidth        = 280;

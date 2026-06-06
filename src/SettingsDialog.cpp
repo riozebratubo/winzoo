@@ -291,6 +291,7 @@ static const int kAppMenuControls[] = {
     IDC_CHECK_APPMENU_CLASSIC_WINSETT,
     IDC_CHECK_APPMENU_CLASSIC_RUN,
     IDC_CHECK_APPMENU_CLASSIC_SHUTDOWN,
+    IDC_CHECK_APPMENU_PINNED_PER_MONITOR,
     0
 };
 
@@ -984,6 +985,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                            data->settings->appMenuClassicShowRun         ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(hwnd, IDC_CHECK_APPMENU_CLASSIC_SHUTDOWN,
                            data->settings->appMenuClassicShowShutDown    ? BST_CHECKED : BST_UNCHECKED);
+            CheckDlgButton(hwnd, IDC_CHECK_APPMENU_PINNED_PER_MONITOR,
+                           data->settings->appMenuPinnedPerMonitor       ? BST_CHECKED : BST_UNCHECKED);
         }
 
         // Build scrollable hosts for all tabs
@@ -1478,10 +1481,16 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 std::vector<std::wstring> pinned = data->settings->pinnedExePaths;
                 auto pinnedPerMonitor = data->settings->pinnedExePathsPerMonitor;
                 bool pinnedPerMonitorFlag = data->settings->pinnedAppsPerMonitor;
+                auto appMenuPinned = data->settings->appMenuPinnedPaths;
+                auto appMenuPinnedPerMon = data->settings->appMenuPinnedPathsPerMonitor;
+                bool appMenuPinnedPerMonFlag = data->settings->appMenuPinnedPerMonitor;
                 *data->settings = Settings{};
                 data->settings->pinnedExePaths = std::move(pinned);
                 data->settings->pinnedExePathsPerMonitor = std::move(pinnedPerMonitor);
                 data->settings->pinnedAppsPerMonitor = pinnedPerMonitorFlag;
+                data->settings->appMenuPinnedPaths = std::move(appMenuPinned);
+                data->settings->appMenuPinnedPathsPerMonitor = std::move(appMenuPinnedPerMon);
+                data->settings->appMenuPinnedPerMonitor = appMenuPinnedPerMonFlag;
                 ApplySettingsToControls(hwnd, data);
             }
             return TRUE;
@@ -1713,6 +1722,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 data->settings->appMenuClassicShowWinSettings = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_WINSETT)  == BST_CHECKED;
                 data->settings->appMenuClassicShowRun         = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_RUN)      == BST_CHECKED;
                 data->settings->appMenuClassicShowShutDown    = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_SHUTDOWN) == BST_CHECKED;
+                data->settings->appMenuPinnedPerMonitor       = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_PINNED_PER_MONITOR) == BST_CHECKED;
             }
 
             EndDialog(hwnd, IDOK);

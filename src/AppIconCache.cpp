@@ -71,14 +71,13 @@ HICON AppIconCache::LoadStatic(const std::wstring& iconPath, int sizePx)
                 SIZE sz = { sizePx, sizePx };
                 HBITMAP hBitmap = nullptr;
                 SIIGBF flags = (SIIGBF)(SIIGBF_ICONONLY | SIIGBF_SCALEUP);
+                HICON hIcon = nullptr;
                 if (SUCCEEDED(pSIIF->GetImage(sz, flags, &hBitmap)) && hBitmap) {
-                    HICON hIcon = BitmapToIcon(hBitmap, sizePx);
+                    hIcon = BitmapToIcon(hBitmap, sizePx);
                     DeleteObject(hBitmap);
-                    pSIIF->Release();
-                    pItem->Release();
-                    if (hIcon) return hIcon;
                 }
                 pSIIF->Release();
+                if (hIcon) { pItem->Release(); return hIcon; }
             }
             pItem->Release();
         }

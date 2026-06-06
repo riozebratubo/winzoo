@@ -16,4 +16,5 @@ struct AppTreeNode {
     std::vector<AppTreeNode> children; // non-empty only for folders
     AppNodeType              type     = AppNodeType::Shortcut;
     std::wstring             subtitle; // "Run command" / "Windows Settings"; empty for shortcuts
+    bool                     isPinned = false; // user-pinned to top of the Apps Menu
 };

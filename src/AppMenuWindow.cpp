@@ -1,6 +1,7 @@
 #include "AppMenuWindow.h"
 #include "LaunchHelper.h"
 #include "SettingsSearch.h"
+#include "PopupMenu.h"
 #include "Dpi.h"
 #include "resource.h"
 #include <windowsx.h>
@@ -20,6 +21,9 @@ static constexpr wchar_t kAppMenuClass[] = L"WinzooAppMenu";
 // Deferred message to show the Classic power submenu outside of a WM_LBUTTONUP handler,
 // avoiding TrackPopupMenu dismissal bugs when called from within button-up processing.
 static constexpr UINT WM_CLASSIC_POWER = WM_APP + 1;
+// Posted to the root menu when the pin list changes from a submenu, so the root's pinned
+// section refreshes live (the root's own message loop is paused while a submenu is open).
+static constexpr UINT WM_PINS_CHANGED  = WM_APP + 2;
 
 // Helper to launch an app with optional same-monitor hint
 static void LaunchMenuApp(HWND hwndHint, bool useHint, const wchar_t* exe, const wchar_t* args = nullptr, int nShow = SW_SHOWNORMAL)
@@ -127,6 +131,77 @@ static std::vector<AppTreeNode> BuildAppTree(const std::vector<AppEntry>& entrie
 
     SortTreeLevel(roots);
     return roots;
+}
+
+// ---------- user-pinned apps helpers ----------
+
+// Returns the active pinned-path list (global or per-monitor) for reading.
+static const std::vector<std::wstring>& ActivePins(const Settings& s, const std::wstring& monitorName)
+{
+    static const std::vector<std::wstring> kEmpty;
+    if (s.appMenuPinnedPerMonitor && !monitorName.empty()) {
+        auto it = s.appMenuPinnedPathsPerMonitor.find(monitorName);
+        return (it != s.appMenuPinnedPathsPerMonitor.end()) ? it->second : kEmpty;
+    }
+    return s.appMenuPinnedPaths;
+}
+
+// Returns the active pinned-path list for mutation (creates the per-monitor entry if needed).
+static std::vector<std::wstring>& MutableActivePins(Settings& s, const std::wstring& monitorName)
+{
+    if (s.appMenuPinnedPerMonitor && !monitorName.empty())
+        return s.appMenuPinnedPathsPerMonitor[monitorName];
+    return s.appMenuPinnedPaths;
+}
+
+// Builds the root node list: pinned leaves first (stored order, isPinned=true), then the
+// normal app tree (with flatten applied). outPinnedCount receives the number of pinned leaves.
+static std::vector<AppTreeNode> BuildRootNodes(const std::vector<AppEntry>& entries,
+                                               const Settings& settings,
+                                               const std::wstring& monitorName,
+                                               int& outPinnedCount)
+{
+    std::vector<AppTreeNode> tree = BuildAppTree(entries);
+
+    if (settings.appMenuFlattenMode == AppMenuFlattenMode::All) {
+        std::vector<AppTreeNode> flat;
+        FlattenTreeInto(tree, flat);
+        std::sort(flat.begin(), flat.end(), [](const AppTreeNode& a, const AppTreeNode& b) {
+            return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
+        });
+        tree = std::move(flat);
+    }
+
+    // Resolve pinned paths to leaf nodes via the entry snapshot (for name + icon).
+    const std::vector<std::wstring>& pins = ActivePins(settings, monitorName);
+    std::vector<AppTreeNode> pinnedNodes;
+    pinnedNodes.reserve(pins.size());
+    for (const auto& p : pins) {
+        const AppEntry* match = nullptr;
+        for (const auto& e : entries) {
+            if (_wcsicmp(e.exePath.c_str(),  p.c_str()) == 0 ||
+                _wcsicmp(e.iconPath.c_str(), p.c_str()) == 0) { match = &e; break; }
+        }
+        if (!match) continue;  // uninstalled / not found — skip silently
+        AppTreeNode leaf;
+        leaf.name     = match->name;
+        leaf.isFolder = false;
+        leaf.icon     = match->icon;
+        leaf.exePath  = match->exePath;
+        leaf.iconPath = match->iconPath;
+        leaf.isPinned = true;
+        pinnedNodes.push_back(std::move(leaf));
+    }
+
+    outPinnedCount = static_cast<int>(pinnedNodes.size());
+
+    if (!pinnedNodes.empty()) {
+        pinnedNodes.insert(pinnedNodes.end(),
+                           std::make_move_iterator(tree.begin()),
+                           std::make_move_iterator(tree.end()));
+        return pinnedNodes;
+    }
+    return tree;
 }
 
 // ---------- folder icon helper ----------
@@ -333,8 +408,15 @@ void AppMenuWindow::BuildEntryRects(int menuW)
         int namePad   = Scale(2, dpi_);
         int nameFontH = MulDiv(settings_->appMenuGridFontSize, dpi_, 72) + Scale(4, dpi_);
         int cellH     = iconPx + namePad + nameFontH + namePad;
+        // When a pinned section is shown, force the rest of the apps onto a fresh row so
+        // pinned and non-pinned items never share a row.
+        bool breakAfterPinned = (nodes_ == &ownedNodes_) && pinnedCount_ > 0 &&
+                                std::cmp_less(pinnedCount_, nodes_->size());
         int row = 0, col = 0;
         for (size_t i = 0; i < nodes_->size(); ++i) {
+            if (breakAfterPinned && std::cmp_equal(i, pinnedCount_) && col != 0) {
+                col = 0; ++row;  // start the non-pinned apps on a new row
+            }
             int x = padPx + col * cellW;
             int y = padPx + row * cellH;
             entryRects_.push_back({ x, y, x + cellW, y + cellH });
@@ -660,6 +742,47 @@ void AppMenuWindow::Paint(HDC hdc, int w, int h)
             DrawTextW(hdc, node.name.c_str(), -1, &textR,
                       DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS | DT_WORDBREAK);
         }
+    }
+
+    // Divider between the user-pinned section and the rest of the apps.
+    if (pinnedCount_ > 0 && nodes_ == &ownedNodes_ &&
+        std::cmp_less(pinnedCount_, nodes_->size()) &&
+        std::cmp_less_equal(pinnedCount_, entryRects_.size()))
+    {
+        int sepY = entryRects_[pinnedCount_ - 1].bottom - scrollOffset_;
+        if (sepY > 0 && sepY < contentAreaH) {
+            RECT sepR = { pad, sepY, menuW_ - pad, sepY + Scale(1, dpi_) };
+            HBRUSH sepBr = CreateSolidBrush(colors_.separator);
+            FillRect(hdc, &sepR, sepBr);
+            DeleteObject(sepBr);
+        }
+    }
+
+    // Drag-reorder insertion indicator.
+    if (drag_.State() == DragState::Dragging && dropIndex_ >= 0 && pinnedCount_ > 0) {
+        HBRUSH insBr = CreateSolidBrush(colors_.menuText);
+        int thick = Scale(2, dpi_);
+        if (isList) {
+            int y = (dropIndex_ <= 0)
+                        ? entryRects_[0].top
+                        : entryRects_[std::min(dropIndex_, pinnedCount_) - 1].bottom;
+            y -= scrollOffset_;
+            RECT insR = { pad, y - thick / 2, menuW_ - pad, y + thick - thick / 2 };
+            FillRect(hdc, &insR, insBr);
+        } else {
+            int x, top, bot;
+            if (dropIndex_ < pinnedCount_) {
+                const RECT& r = entryRects_[dropIndex_];
+                x = r.left; top = r.top; bot = r.bottom;
+            } else {
+                const RECT& r = entryRects_[pinnedCount_ - 1];
+                x = r.right; top = r.top; bot = r.bottom;
+            }
+            top -= scrollOffset_; bot -= scrollOffset_;
+            RECT insR = { x - thick / 2, top, x + thick - thick / 2, bot };
+            FillRect(hdc, &insR, insBr);
+        }
+        DeleteObject(insBr);
     }
 
     // Scroll indicator (only in content area)
@@ -1211,7 +1334,9 @@ void AppMenuWindow::ActivateNode(int idx)
             hwnd_, nodeScreenRect, /*isSubmenu=*/true, position_,
             std::move(childNodes),
             *settings_, colors_, dpi_,
-            &subMenuHwnd_);  // parent stores child HWND for WM_KILLFOCUS guard
+            &subMenuHwnd_,  // parent stores child HWND for WM_KILLFOCUS guard
+            /*pinnedCount=*/0, /*entries=*/{},
+            monitorDeviceName_, onSettingsChanged_, pinSettings_, rootHwnd_);  // inherit pin context
         subMenuHwnd_ = nullptr;
 
         if (reason == AppMenuCloseReason::Escape) {
@@ -1234,6 +1359,103 @@ void AppMenuWindow::ActivateNode(int idx)
         done_ = true;
         DestroyWindow(hwnd_);
     }
+}
+
+// ---------- user-pinned apps: rebuild, context menu, drag ----------
+
+void AppMenuWindow::RebuildRootNodes()
+{
+    const Settings& src = pinSettings_ ? *pinSettings_ : ownedSettings_;
+    ownedNodes_ = BuildRootNodes(ownedEntries_, src, monitorDeviceName_, pinnedCount_);
+    nodes_ = &ownedNodes_;
+    inAllPrograms_ = false;
+    allProgramsNodes_.clear();
+    // Clear any active search so the rebuilt list (with the pinned section) is shown.
+    if (searchEdit_) SetWindowTextW(searchEdit_, L"");
+    searchText_.clear();
+
+    scrollOffset_ = 0;
+    hoveredIdx_   = -1;
+    BuildEntryRects(menuW_);
+    int padPx    = Scale(settings_ ? settings_->appMenuPadding : 6, dpi_);
+    int contentH = ContentHeight(entryRects_) + padPx;
+    UpdateMaxScroll(contentH, menuH_ - searchBoxH_ - classicFooterH_);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void AppMenuWindow::OnPinsMutated()
+{
+    // Persist + propagate using the shared settings object.
+    if (onSettingsChanged_ && pinSettings_) onSettingsChanged_(*pinSettings_);
+    // The pinned section only exists at the root level.
+    if (!isSubmenu_) {
+        RebuildRootNodes();
+    } else if (rootHwnd_ && IsWindow(rootHwnd_)) {
+        // Pinned from a submenu: ask the (paused) root menu to refresh live.
+        PostMessageW(rootHwnd_, WM_PINS_CHANGED, 0, 0);
+    }
+}
+
+void AppMenuWindow::ShowEntryContextMenu(int idx, POINT ptScreen)
+{
+    if (!nodes_ || idx < 0 || std::cmp_greater_equal(idx, nodes_->size())) return;
+    const AppTreeNode& node = (*nodes_)[idx];
+    if (node.isFolder) return;
+    // Only real Start-Menu shortcuts can be pinned (skip folders, settings pages, PATH exes).
+    if (node.type != AppNodeType::Shortcut) return;
+    const std::wstring path = node.exePath.empty() ? node.iconPath : node.exePath;
+    if (path.empty()) return;
+
+    if (!pinSettings_) return;
+    const std::vector<std::wstring>& pins = ActivePins(*pinSettings_, monitorDeviceName_);
+    bool isPinned = std::any_of(pins.begin(), pins.end(),
+        [&](const std::wstring& p){ return _wcsicmp(p.c_str(), path.c_str()) == 0; });
+
+    std::vector<MenuItem> items;
+    items.push_back({ isPinned ? L"Unpin from Apps Menu" : L"Pin to Apps Menu",
+                      IDM_APPMENU_PIN_TOGGLE, false, false, false, false });
+
+    suppressKillFocus_ = true;
+    UINT cmd = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
+    suppressKillFocus_ = false;
+
+    if (cmd == IDM_APPMENU_PIN_TOGGLE) {
+        std::vector<std::wstring>& mut = MutableActivePins(*pinSettings_, monitorDeviceName_);
+        if (isPinned) {
+            mut.erase(std::remove_if(mut.begin(), mut.end(),
+                [&](const std::wstring& p){ return _wcsicmp(p.c_str(), path.c_str()) == 0; }),
+                mut.end());
+        } else {
+            mut.push_back(path);
+        }
+        OnPinsMutated();
+    } else if (IsWindow(hwnd_)) {
+        SetForegroundWindow(hwnd_);  // dismissed without selection — keep menu active
+    }
+}
+
+int AppMenuWindow::ComputeDropIndex(POINT ptClient) const
+{
+    if (pinnedCount_ <= 0) return 0;
+    bool isGrid = settings_ && settings_->appMenuLayout == AppMenuLayout::Grid;
+    int contentX = ptClient.x;
+    int contentY = ptClient.y + scrollOffset_;
+
+    int  nearest  = -1;
+    long bestDist = 0;
+    for (int i = 0; i < pinnedCount_ && std::cmp_less(i, entryRects_.size()); ++i) {
+        const RECT& r = entryRects_[i];
+        long midX = (r.left + r.right) / 2;
+        long midY = (r.top + r.bottom) / 2;
+        long dx = contentX - midX, dy = contentY - midY;
+        long dist = isGrid ? (dx * dx + dy * dy) : (dy < 0 ? -dy : dy);
+        if (nearest < 0 || dist < bestDist) { bestDist = dist; nearest = i; }
+    }
+    if (nearest < 0) return pinnedCount_;
+    const RECT& r = entryRects_[nearest];
+    bool after = isGrid ? (contentX > (r.left + r.right) / 2)
+                        : (contentY > (r.top  + r.bottom) / 2);
+    return nearest + (after ? 1 : 0);
 }
 
 // ---------- scrolling ----------
@@ -1484,8 +1706,32 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         }
         return 0;
 
+    case WM_LBUTTONDOWN: {
+        POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        // Begin a potential drag-reorder only on a pinned entry, and only in the normal
+        // root view (not while searching or in Classic All-Programs).
+        if (nodes_ == &ownedNodes_ && pinnedCount_ > 0) {
+            int idx = HitTestEntry(pt);
+            if (idx >= 0 && idx < pinnedCount_) {
+                POINT scr = pt; ClientToScreen(hwnd, &scr);
+                drag_.OnButtonDown(idx, scr);
+                SetCapture(hwnd);
+            }
+        }
+        return 0;
+    }
+
     case WM_MOUSEMOVE: {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if (drag_.State() != DragState::Idle) {
+            POINT scr = pt; ClientToScreen(hwnd, &scr);
+            drag_.OnMouseMove(scr);
+            if (drag_.State() == DragState::Dragging) {
+                dropIndex_ = ComputeDropIndex(pt);
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return 0;
+            }
+        }
         int newIdx       = HitTestEntry(pt);
         int newSidebarBtn = HitTestSidebarBtn(pt);
         int newClassicRight = HitTestClassicRight(pt);
@@ -1503,6 +1749,46 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_LBUTTONUP: {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if (drag_.State() != DragState::Idle) {
+            bool wasDragging = (drag_.State() == DragState::Dragging);
+            // Capture drag state BEFORE ReleaseCapture(): it synchronously sends
+            // WM_CAPTURECHANGED, whose handler resets drag_ (clearing dragIndex/dropIndex).
+            int dragIndex = drag_.DragIndex();
+            int dropAt    = (dropIndex_ >= 0) ? dropIndex_ : ComputeDropIndex(pt);
+            drag_.OnButtonUp();
+            ReleaseCapture();
+            dropIndex_ = -1;
+            if (wasDragging) {
+                // Reorder by path so uninstalled (skipped) pins keep their slots.
+                if (dragIndex >= 0 && dragIndex < pinnedCount_ && nodes_ == &ownedNodes_) {
+                    std::vector<std::wstring> displayed;
+                    displayed.reserve(pinnedCount_);
+                    for (int i = 0; i < pinnedCount_; ++i) {
+                        const AppTreeNode& n = ownedNodes_[i];
+                        displayed.push_back(n.exePath.empty() ? n.iconPath : n.exePath);
+                    }
+                    std::wstring moved = displayed[dragIndex];
+                    displayed.erase(displayed.begin() + dragIndex);
+                    int ins = dropAt;
+                    if (ins > dragIndex) --ins;  // account for the removal
+                    ins = std::max(0, std::min(ins, static_cast<int>(displayed.size())));
+                    displayed.insert(displayed.begin() + ins, moved);
+
+                    std::vector<std::wstring>& mut = MutableActivePins(*pinSettings_, monitorDeviceName_);
+                    std::vector<std::wstring> undisplayed;
+                    for (const auto& p : mut) {
+                        bool shown = std::any_of(displayed.begin(), displayed.end(),
+                            [&](const std::wstring& d){ return _wcsicmp(d.c_str(), p.c_str()) == 0; });
+                        if (!shown) undisplayed.push_back(p);
+                    }
+                    mut = std::move(displayed);
+                    mut.insert(mut.end(), undisplayed.begin(), undisplayed.end());
+                    OnPinsMutated();
+                }
+                return 0;
+            }
+            // Not a drag (just a click) — fall through to normal activation below.
+        }
         if (classicPanelW_ > 0) {
             // Classic layout: check right panel and footer first
             if (HitTestClassicFooter(pt)) {
@@ -1533,6 +1819,27 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         }
         return 0;
     }
+
+    case WM_RBUTTONUP: {
+        POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        int idx = HitTestEntry(pt);
+        if (idx >= 0) {
+            POINT scr = pt; ClientToScreen(hwnd, &scr);
+            ShowEntryContextMenu(idx, scr);
+        }
+        return 0;
+    }
+
+    case WM_CAPTURECHANGED:
+        drag_.OnCaptureChanged();
+        dropIndex_ = -1;
+        return 0;
+
+    case WM_PINS_CHANGED:
+        // A submenu changed the pin list — rebuild this (root) menu's pinned section.
+        if (!isSubmenu_ && !ownedEntries_.empty())
+            RebuildRootNodes();
+        return 0;
 
     case WM_MOUSEWHEEL: {
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
@@ -1783,7 +2090,13 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
     std::vector<AppTreeNode> nodes,
     const Settings& settings,
     const ThemeColors& colors, int dpi,
-    HWND* pChildHwnd)
+    HWND* pChildHwnd,
+    int pinnedCount,
+    std::vector<AppEntry> entries,
+    const std::wstring& monitorDeviceName,
+    std::function<void(const Settings&)> onSettingsChanged,
+    Settings* pinSettings,
+    HWND rootHwnd)
 {
     if (nodes.empty()) return AppMenuCloseReason::ClickedOutside;
 
@@ -1799,6 +2112,14 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
     menu.dpi_           = dpi;
     menu.position_      = position;
     menu.isSubmenu_     = isSubmenu;
+
+    // Context for user-pinned apps. Submenus share the root's settings object so pins
+    // mutated from any level go to the same list.
+    menu.pinnedCount_       = pinnedCount;
+    menu.ownedEntries_      = std::move(entries);
+    menu.monitorDeviceName_ = monitorDeviceName;
+    menu.onSettingsChanged_ = std::move(onSettingsChanged);
+    menu.pinSettings_       = pinSettings ? pinSettings : &menu.ownedSettings_;
 
     // Search: only on root menu when enabled in settings
     menu.searchEnabled_ = !isSubmenu && settings.appMenuSearchEnabled;
@@ -1835,9 +2156,10 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
         !menu.entryRects_.empty() && settings.appMenuGridCols > 0)
     {
         int cols  = std::max(1, settings.appMenuGridCols);
-        int cellH = std::cmp_greater_equal(menu.entryRects_.size(), cols)
-                        ? menu.entryRects_[cols - 1].bottom - padPx
-                        : menu.entryRects_.back().bottom    - padPx;
+        // All grid cells share one height; derive it from the first cell so a pinned-row
+        // break (which can push entryRects_[cols-1] onto a later row) doesn't inflate it.
+        int cellH = menu.entryRects_[0].bottom - menu.entryRects_[0].top;
+        (void)cols;
         int maxRows = std::max(1, settings.appMenuGridRows);
         maxH = std::min(Scale(settings.appMenuMaxHeight, dpi), 2 * padPx + cellH * maxRows);
     } else {
@@ -1902,6 +2224,9 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
 
     if (!hwnd) return AppMenuCloseReason::ClickedOutside;
 
+    // Root menu's own window is the refresh target; submenus inherit the root's hwnd.
+    menu.rootHwnd_ = rootHwnd ? rootHwnd : hwnd;
+
     if (isRounded) {
         // Clip the window to a rounded rectangle. CreateRoundRectRgn's last two
         // parameters are the ellipse width/height; radius = diameter / 2.
@@ -1961,22 +2286,18 @@ void AppMenuWindow::Show(HWND hwndOwner, RECT startBtnScreenRect,
                           TaskbarPosition position,
                           std::vector<AppEntry> entries,
                           const Settings& settings,
-                          const ThemeColors& colors, int dpi)
+                          const ThemeColors& colors, int dpi,
+                          const std::wstring& monitorDeviceName,
+                          std::function<void(const Settings&)> onSettingsChanged)
 {
     if (entries.empty()) return;
-    std::vector<AppTreeNode> tree = BuildAppTree(entries);
+    int pinnedCount = 0;
+    std::vector<AppTreeNode> tree = BuildRootNodes(entries, settings, monitorDeviceName, pinnedCount);
     if (tree.empty()) return;
 
-    if (settings.appMenuFlattenMode == AppMenuFlattenMode::All) {
-        std::vector<AppTreeNode> flat;
-        FlattenTreeInto(tree, flat);
-        std::sort(flat.begin(), flat.end(), [](const AppTreeNode& a, const AppTreeNode& b) {
-            return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
-        });
-        tree = std::move(flat);
-    }
-
     ShowNodes(hwndOwner, startBtnScreenRect, /*isSubmenu=*/false, position,
-              std::move(tree), settings, colors, dpi);
+              std::move(tree), settings, colors, dpi,
+              /*pChildHwnd=*/nullptr, pinnedCount, std::move(entries),
+              monitorDeviceName, std::move(onSettingsChanged));
 }
 

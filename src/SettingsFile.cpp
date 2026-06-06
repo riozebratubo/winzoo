@@ -382,6 +382,7 @@ bool ExportSettingsToFile(const Settings& s)
     wBool("appMenuClassicShowShutDown",    s.appMenuClassicShowShutDown);
     wBool("pinnedAppsAsButtonsWhenOpen",   s.pinnedAppsAsButtonsWhenOpen);
     wBool("pinnedAppsPerMonitor",          s.pinnedAppsPerMonitor);
+    wBool("appMenuPinnedPerMonitor",       s.appMenuPinnedPerMonitor);
     wInt("settingsDlgX", s.settingsDlgX);
     wInt("settingsDlgY", s.settingsDlgY);
     wInt("settingsDlgW", s.settingsDlgW);
@@ -414,6 +415,20 @@ bool ExportSettingsToFile(const Settings& s)
     }
     j += "],\n";
 
+    // appMenuPinnedPaths
+    j += "  \"appMenuPinnedPaths\": [";
+    if (!s.appMenuPinnedPaths.empty()) {
+        j += "\n";
+        for (size_t i = 0; i < s.appMenuPinnedPaths.size(); ++i) {
+            j += "    ";
+            AppendJsonEscaped(j, s.appMenuPinnedPaths[i]);
+            if (i + 1 < s.appMenuPinnedPaths.size()) j += ",";
+            j += "\n";
+        }
+        j += "  ";
+    }
+    j += "],\n";
+
     // trayIconOrder
     j += "  \"trayIconOrder\": [";
     if (!s.trayIconOrder.empty()) {
@@ -428,12 +443,39 @@ bool ExportSettingsToFile(const Settings& s)
     }
     j += "],\n";
 
-    // pinnedExePathsPerMonitor — last field, no trailing comma
+    // pinnedExePathsPerMonitor
     j += "  \"pinnedExePathsPerMonitor\": {";
     if (!s.pinnedExePathsPerMonitor.empty()) {
         j += "\n";
         bool firstMon = true;
         for (const auto& [mon, paths] : s.pinnedExePathsPerMonitor) {
+            if (!firstMon) j += ",\n";
+            firstMon = false;
+            j += "    ";
+            AppendJsonEscaped(j, mon);
+            j += ": [";
+            if (!paths.empty()) {
+                j += "\n";
+                for (size_t k = 0; k < paths.size(); ++k) {
+                    j += "      ";
+                    AppendJsonEscaped(j, paths[k]);
+                    if (k + 1 < paths.size()) j += ",";
+                    j += "\n";
+                }
+                j += "    ";
+            }
+            j += "]";
+        }
+        j += "\n  ";
+    }
+    j += "},\n";
+
+    // appMenuPinnedPathsPerMonitor — last field, no trailing comma
+    j += "  \"appMenuPinnedPathsPerMonitor\": {";
+    if (!s.appMenuPinnedPathsPerMonitor.empty()) {
+        j += "\n";
+        bool firstMon = true;
+        for (const auto& [mon, paths] : s.appMenuPinnedPathsPerMonitor) {
             if (!firstMon) j += ",\n";
             firstMon = false;
             j += "    ";
@@ -616,6 +658,7 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     rb("appMenuClassicShowShutDown",     ns.appMenuClassicShowShutDown);
     rb("pinnedAppsAsButtonsWhenOpen",   ns.pinnedAppsAsButtonsWhenOpen);
     rb("pinnedAppsPerMonitor",          ns.pinnedAppsPerMonitor);
+    rb("appMenuPinnedPerMonitor",       ns.appMenuPinnedPerMonitor);
     ri("settingsDlgX", ns.settingsDlgX);
     ri("settingsDlgY", ns.settingsDlgY);
     ri("settingsDlgW", ns.settingsDlgW);
@@ -646,11 +689,17 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     { size_t p = FindValue(content, "pinnedExePaths");
       if (p != std::string::npos) ParseStringArray(content, p, ns.pinnedExePaths); }
 
+    { size_t p = FindValue(content, "appMenuPinnedPaths");
+      if (p != std::string::npos) ParseStringArray(content, p, ns.appMenuPinnedPaths); }
+
     { size_t p = FindValue(content, "trayIconOrder");
       if (p != std::string::npos) ParseStringArray(content, p, ns.trayIconOrder); }
 
     { size_t p = FindValue(content, "pinnedExePathsPerMonitor");
       if (p != std::string::npos) ParseStringArrayMap(content, p, ns.pinnedExePathsPerMonitor); }
+
+    { size_t p = FindValue(content, "appMenuPinnedPathsPerMonitor");
+      if (p != std::string::npos) ParseStringArrayMap(content, p, ns.appMenuPinnedPathsPerMonitor); }
 
     // Basic sanity: the file must contain at least one recognized key to be considered
     // a valid settings export. If not, leave s unchanged and the file in place.

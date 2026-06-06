@@ -2,10 +2,12 @@
 #include <windows.h>
 #include <unordered_map>
 #include <vector>
+#include <functional>
 #include "AppEntry.h"
 #include "AppTreeNode.h"
 #include "Settings.h"
 #include "Theme.h"
+#include "DragController.h"
 
 enum class AppMenuCloseReason { Selection, Escape, ClickedOutside };
 
@@ -31,7 +33,9 @@ public:
                      TaskbarPosition position,
                      std::vector<AppEntry> entries,   // by value – owns snapshot
                      const Settings& settings,
-                     const ThemeColors& colors, int dpi);
+                     const ThemeColors& colors, int dpi,
+                     const std::wstring& monitorDeviceName = L"",
+                     std::function<void(const Settings&)> onSettingsChanged = {});
 
 private:
     // Internal Show used for both the root menu and recursive submenus.
@@ -45,7 +49,15 @@ private:
         std::vector<AppTreeNode> nodes,
         const Settings& settings,
         const ThemeColors& colors, int dpi,
-        HWND* pChildHwnd = nullptr);
+        HWND* pChildHwnd = nullptr,
+        // Context for user-pinned apps. Submenus inherit the callback, monitor name and
+        // shared-settings pointer from the root so pinning works at any level:
+        int pinnedCount = 0,
+        std::vector<AppEntry> entries = {},
+        const std::wstring& monitorDeviceName = L"",
+        std::function<void(const Settings&)> onSettingsChanged = {},
+        Settings* pinSettings = nullptr,
+        HWND rootHwnd = nullptr);
 
     static bool RegisterWndClass(HINSTANCE hInst);
     static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -58,6 +70,10 @@ private:
     bool HitTestClassicFooter(POINT ptClient) const;
     void ActivateNode(int idx);
     void ActivateSidebarBtn(int idx);
+    void ShowEntryContextMenu(int idx, POINT ptScreen);
+    void OnPinsMutated();    // persist + (root only) rebuild the displayed list
+    void RebuildRootNodes(); // rebuild ownedNodes_ (pinned section first) and re-layout
+    int  ComputeDropIndex(POINT ptClient) const; // insertion index within the pinned section
     void ActivateClassicRight(int linkIdx);
     void ToggleAllPrograms();
     void Scroll(int delta);
@@ -80,6 +96,18 @@ private:
 
     std::vector<AppTreeNode> ownedNodes_;
     Settings                 ownedSettings_;
+
+    // User-pinned apps.
+    std::vector<AppEntry>                ownedEntries_;       // snapshot for rebuilding nodes (root)
+    std::wstring                         monitorDeviceName_;  // for per-monitor pin list
+    std::function<void(const Settings&)> onSettingsChanged_;  // persist + propagate callback
+    // Authoritative settings used for reading/mutating the pin list. Points at the root
+    // menu's ownedSettings_ so submenus mutate the same shared list.
+    Settings*                            pinSettings_ = nullptr;
+    HWND                                 rootHwnd_    = nullptr; // root menu window (for live refresh)
+    int                                  pinnedCount_ = 0;    // # pinned nodes at front of ownedNodes_
+    DragController                       drag_;
+    int                                  dropIndex_ = -1;     // current drag insertion index
 
     std::vector<RECT> entryRects_;  // content-space (un-scrolled)
 

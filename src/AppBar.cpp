@@ -112,8 +112,20 @@ void AppBar::OnCallback(WPARAM wParam, LPARAM lParam)
         SetPosition(position_, thicknessPx_);
         break;
     case ABN_FULLSCREENAPP:
-        if (hwnd_)
-            ShowWindow(hwnd_, lParam ? SW_HIDE : SW_SHOW);
+        // ABN_FULLSCREENAPP is system-wide, so only hide when the fullscreen app is
+        // actually on this taskbar's monitor — otherwise a fullscreen window on one
+        // monitor would blank the bars on all the others.
+        if (hwnd_) {
+            if (lParam) {
+                HWND fg = GetForegroundWindow();
+                HMONITOR fgMon = fg ? MonitorFromWindow(fg, MONITOR_DEFAULTTONULL) : nullptr;
+                HMONITOR myMon = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY);
+                if (fgMon == myMon)
+                    ShowWindow(hwnd_, SW_HIDE);
+            } else {
+                ShowWindow(hwnd_, SW_SHOW);
+            }
+        }
         break;
     default:
         break;

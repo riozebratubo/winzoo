@@ -109,9 +109,14 @@ bool RegistryKey::WriteMultiString(const wchar_t* name, const std::vector<std::w
 
 static constexpr wchar_t kPerMonPrefix[]  = L"PinnedPaths_";
 static constexpr size_t  kPerMonPrefixLen = 12;
+// Separate namespace for per-monitor Apps-Menu pins.
+static constexpr wchar_t kAppMenuPerMonPrefix[]  = L"AppMenuPins_";
+static constexpr size_t  kAppMenuPerMonPrefixLen = 12;
 
 static void LoadPerMonitorPins(HKEY hKey,
-                               std::map<std::wstring, std::vector<std::wstring>>& out)
+                               std::map<std::wstring, std::vector<std::wstring>>& out,
+                               const wchar_t* prefix    = kPerMonPrefix,
+                               size_t         prefixLen = kPerMonPrefixLen)
 {
     DWORD valueCount = 0, maxNameLen = 0;
     if (RegQueryInfoKeyW(hKey, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
@@ -126,9 +131,9 @@ static void LoadPerMonitorPins(HKEY hKey,
                           nullptr, &type, nullptr, nullptr) != ERROR_SUCCESS)
             continue;
         if (type != REG_MULTI_SZ) continue;
-        if (wcsncmp(nameBuf.data(), kPerMonPrefix, kPerMonPrefixLen) != 0) continue;
+        if (wcsncmp(nameBuf.data(), prefix, prefixLen) != 0) continue;
 
-        std::wstring monName = nameBuf.data() + kPerMonPrefixLen;
+        std::wstring monName = nameBuf.data() + prefixLen;
         if (monName.empty()) continue;
 
         // Read data by name (avoids double-enumeration index mismatch)
@@ -154,7 +159,9 @@ static void LoadPerMonitorPins(HKEY hKey,
 }
 
 static void SavePerMonitorPins(HKEY hKey,
-                               const std::map<std::wstring, std::vector<std::wstring>>& pins)
+                               const std::map<std::wstring, std::vector<std::wstring>>& pins,
+                               const wchar_t* prefix    = kPerMonPrefix,
+                               size_t         prefixLen = kPerMonPrefixLen)
 {
     // Collect and delete existing PinnedPaths_* values before writing new ones.
     DWORD valueCount = 0, maxNameLen = 0;
@@ -170,7 +177,7 @@ static void SavePerMonitorPins(HKEY hKey,
             if (RegEnumValueW(hKey, i, nameBuf.data(), &nameLen,
                               nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS)
                 continue;
-            if (wcsncmp(nameBuf.data(), kPerMonPrefix, kPerMonPrefixLen) == 0)
+            if (wcsncmp(nameBuf.data(), prefix, prefixLen) == 0)
                 toDelete.push_back(nameBuf.data());
         }
         for (const auto& name : toDelete)
@@ -178,7 +185,7 @@ static void SavePerMonitorPins(HKEY hKey,
     }
 
     for (const auto& [monName, paths] : pins) {
-        std::wstring valueName = kPerMonPrefix;
+        std::wstring valueName = prefix;
         valueName += monName;
         std::wstring buf;
         for (const auto& p : paths) { buf += p; buf += L'\0'; }
@@ -280,6 +287,11 @@ Settings LoadSettings()
     if (key.ReadDword(L"PinnedAppsAsButtonsWhenOpen", val)) s.pinnedAppsAsButtonsWhenOpen = val != 0;
     if (key.ReadDword(L"PinnedAppsPerMonitor",        val)) s.pinnedAppsPerMonitor        = val != 0;
     LoadPerMonitorPins(key.GetHKey(), s.pinnedExePathsPerMonitor);
+
+    key.ReadMultiString(L"AppMenuPinnedPaths", s.appMenuPinnedPaths);
+    if (key.ReadDword(L"AppMenuPinnedPerMonitor", val)) s.appMenuPinnedPerMonitor = val != 0;
+    LoadPerMonitorPins(key.GetHKey(), s.appMenuPinnedPathsPerMonitor,
+                       kAppMenuPerMonPrefix, kAppMenuPerMonPrefixLen);
 
     DWORD amVal = 0;
     if (key.ReadDword(L"AppMenuLayout",       amVal)) s.appMenuLayout       = static_cast<AppMenuLayout>(amVal);
@@ -426,6 +438,11 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"PinnedAppsAsButtonsWhenOpen", s.pinnedAppsAsButtonsWhenOpen ? 1u : 0u);
     key.WriteDword(L"PinnedAppsPerMonitor",        s.pinnedAppsPerMonitor        ? 1u : 0u);
     SavePerMonitorPins(key.GetHKey(), s.pinnedExePathsPerMonitor);
+
+    key.WriteMultiString(L"AppMenuPinnedPaths", s.appMenuPinnedPaths);
+    key.WriteDword(L"AppMenuPinnedPerMonitor", s.appMenuPinnedPerMonitor ? 1u : 0u);
+    SavePerMonitorPins(key.GetHKey(), s.appMenuPinnedPathsPerMonitor,
+                       kAppMenuPerMonPrefix, kAppMenuPerMonPrefixLen);
     key.WriteDword(L"AppMenuLayout",       static_cast<DWORD>(s.appMenuLayout));
     key.WriteDword(L"AppMenuWidth",        static_cast<DWORD>(s.appMenuWidth));
     key.WriteDword(L"AppMenuMaxHeight",    static_cast<DWORD>(s.appMenuMaxHeight));

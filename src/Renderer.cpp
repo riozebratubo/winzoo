@@ -8,7 +8,10 @@ Renderer::~Renderer()
 
 void Renderer::DestroyResources()
 {
-    if (hdcMem_)  { DeleteDC(hdcMem_);      hdcMem_  = nullptr; }
+    if (hdcMem_)  {
+        if (hOldBitmap_) { SelectObject(hdcMem_, hOldBitmap_); hOldBitmap_ = nullptr; }
+        DeleteDC(hdcMem_);      hdcMem_  = nullptr;
+    }
     if (hBitmap_) { DeleteObject(hBitmap_); hBitmap_ = nullptr; }
     if (hFont_)   { DeleteObject(hFont_);   hFont_   = nullptr; }
     if (hFontSm_) { DeleteObject(hFontSm_); hFontSm_ = nullptr; }
@@ -75,7 +78,10 @@ void Renderer::Resize(int w, int h, HDC hdcRef)
 {
     if (w == width_ && h == height_ && hdcMem_) return;
 
-    if (hdcMem_)  { DeleteDC(hdcMem_);      hdcMem_  = nullptr; }
+    if (hdcMem_)  {
+        if (hOldBitmap_) { SelectObject(hdcMem_, hOldBitmap_); hOldBitmap_ = nullptr; }
+        DeleteDC(hdcMem_);      hdcMem_  = nullptr;
+    }
     if (hBitmap_) { DeleteObject(hBitmap_); hBitmap_ = nullptr; }
 
     width_  = w;
@@ -83,7 +89,7 @@ void Renderer::Resize(int w, int h, HDC hdcRef)
 
     hdcMem_  = CreateCompatibleDC(hdcRef);
     hBitmap_ = CreateCompatibleBitmap(hdcRef, w, h);
-    SelectObject(hdcMem_, hBitmap_);
+    hOldBitmap_ = static_cast<HBITMAP>(SelectObject(hdcMem_, hBitmap_));
 }
 
 static void DrawVolumeIcon(HDC hdc, RECT r, float level, bool muted, COLORREF col)

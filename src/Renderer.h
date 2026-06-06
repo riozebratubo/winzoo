@@ -103,6 +103,7 @@ public:
 private:
     HDC     hdcMem_       = nullptr;
     HBITMAP hBitmap_      = nullptr;
+    HBITMAP hOldBitmap_   = nullptr;  // DC's default bitmap, restored before DeleteDC
     HFONT   hFont_        = nullptr;
     HFONT   hFontSm_      = nullptr;
     int     width_        = 0;

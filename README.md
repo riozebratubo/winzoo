@@ -15,9 +15,8 @@ When running, winzoo hides the native Windows taskbar and takes its place, reser
 - Custom-drawn apps menu with keyboard navigation and search
 - Custom position: top, bottom, left, right, *floating*
 - Drag to reorder taskbar buttons
-- Pin/unpin separately for each monitor
-- Works with Jump Lists for apps that support it
-- Show progress bars for apps that support it
+- Pin/unpin separately for each monitor *on the taskbar and on the apps menu*
+- Works with Jump Lists and show progress bars for apps that support it
 - Settings persisted in the registry
 - Easy import/export of settings to share with others or across machines
 - And lots more...

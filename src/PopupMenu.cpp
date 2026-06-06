@@ -272,12 +272,14 @@ UINT PopupMenu::Show(HWND hwndOwner, POINT ptScreen,
     SetForegroundWindow(hwnd);
 
     MSG msg = {};
-    while (!menu.done_ && GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    BOOL got = TRUE;
+    while (!menu.done_ && (got = GetMessageW(&msg, nullptr, 0, 0)) > 0) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
-    // If GetMessageW returned 0 (WM_QUIT), repost so the app can shut down.
-    if (!menu.done_)
+    // Only WM_QUIT (GetMessageW == 0) should re-post a quit so the app can shut
+    // down. A -1 return is a GetMessage error, not a quit — don't tear down the app.
+    if (!menu.done_ && got == 0)
         PostQuitMessage(static_cast<int>(msg.wParam));
 
     if (IsWindow(hwnd)) DestroyWindow(hwnd);

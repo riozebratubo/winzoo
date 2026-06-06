@@ -13,3 +13,9 @@ void LaunchOnMonitor(HINSTANCE hInst, HMONITOR hMon,
 // Works for singleton apps (e.g. Task Manager) that reuse an existing window.
 void LaunchOrActivateOnMonitor(HWND hwndCaller, HMONITOR hMon,
                                const wchar_t* exe, const wchar_t* args, int nShow);
+
+// ShellExecute that launches at the user's (medium) integrity level when winzoo
+// is running elevated, so launched apps don't inherit our admin token. Falls
+// back to a direct ShellExecute when not elevated. Returns true on success.
+bool ShellExecuteUser(HWND hwnd, const wchar_t* verb, const wchar_t* file,
+                      const wchar_t* params, const wchar_t* dir, int nShow);

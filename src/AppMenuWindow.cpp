@@ -29,7 +29,7 @@ static void LaunchMenuApp(HWND hwndHint, bool useHint, const wchar_t* exe, const
         LaunchOnMonitor(GetModuleHandleW(nullptr), hMon, exe, args, nShow);
         return;
     }
-    ShellExecuteW(nullptr, L"open", exe, args, nullptr, nShow);
+    ShellExecuteUser(nullptr, L"open", exe, args, nullptr, nShow);
 }
 
 // ---------- cached power options ----------

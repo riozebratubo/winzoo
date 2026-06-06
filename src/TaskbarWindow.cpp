@@ -930,7 +930,7 @@ void TaskbarWindow::LaunchApp(const wchar_t* exe, const wchar_t* args, int nShow
         LaunchOnMonitor(hInst_, hMonitor_, exe, args, nShow);
         return;
     }
-    ShellExecuteW(nullptr, L"open", exe, args, nullptr, nShow);
+    ShellExecuteUser(nullptr, L"open", exe, args, nullptr, nShow);
 }
 
 void TaskbarWindow::ActivateButton(int combinedIdx)
@@ -1039,7 +1039,7 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
             if (idx < static_cast<int>(jumpItems.size())) {
                 const auto& ji = jumpItems[idx];
                 const wchar_t* verb = ji.isFolder ? L"explore" : L"open";
-                ShellExecuteW(nullptr, verb, ji.path.c_str(),
+                ShellExecuteUser(nullptr, verb, ji.path.c_str(),
                               ji.arguments.empty() ? nullptr : ji.arguments.c_str(),
                               ji.workingDir.empty() ? nullptr : ji.workingDir.c_str(),
                               ji.showCmd);
@@ -1148,7 +1148,7 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
         if (idx < static_cast<int>(jumpItems.size())) {
             const auto& ji = jumpItems[idx];
             const wchar_t* verb = ji.isFolder ? L"explore" : L"open";
-            ShellExecuteW(nullptr, verb, ji.path.c_str(),
+            ShellExecuteUser(nullptr, verb, ji.path.c_str(),
                           ji.arguments.empty() ? nullptr : ji.arguments.c_str(),
                           ji.workingDir.empty() ? nullptr : ji.workingDir.c_str(),
                           ji.showCmd);

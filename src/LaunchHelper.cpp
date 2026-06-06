@@ -1,6 +1,10 @@
 #include "LaunchHelper.h"
 #include <shellapi.h>
 #include <psapi.h>
+#include <shlobj.h>
+#include <shldisp.h>
+#include <exdisp.h>
+#include <servprov.h>
 #include <memory>
 #include <vector>
 
@@ -9,6 +13,108 @@ void RegisterLaunchHelperClass(HINSTANCE /*hInst*/) {}
 static void MoveWindowToMonitor(HWND hwnd, HMONITOR hMon);
 static bool IsRealAppWindow(HWND h);
 static HWND FindWindowByProcessName(const wchar_t* exeName);
+static bool ForegroundIsTarget(HWND fg, const wchar_t* exeName);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// De-elevated launching.
+//
+// winzoo's manifest requests highestAvailable, so for an admin user the process
+// runs elevated. A direct ShellExecute from an elevated process starts the child
+// elevated too — we do NOT want every app launched from the taskbar to run as
+// administrator. The fix is to ask Explorer (which runs at medium integrity) to
+// perform the launch on our behalf, so the child inherits Explorer's token.
+// ─────────────────────────────────────────────────────────────────────────────
+
+static bool IsProcessElevated()
+{
+    HANDLE hTok = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hTok)) return false;
+    TOKEN_ELEVATION elev{};
+    DWORD cb = sizeof(elev);
+    bool elevated = false;
+    if (GetTokenInformation(hTok, TokenElevation, &elev, sizeof(elev), &cb))
+        elevated = elev.TokenIsElevated != 0;
+    CloseHandle(hTok);
+    return elevated;
+}
+
+// Launch through Explorer's IShellDispatch2 so the child runs at the user's
+// (medium) integrity level. Returns false if the Explorer automation object is
+// unavailable (caller should then fall back to a direct ShellExecute).
+static bool ShellExecuteViaExplorer(const wchar_t* file, const wchar_t* params,
+                                    const wchar_t* dir, const wchar_t* verb, int nShow)
+{
+    bool ok = false;
+    IShellWindows* psw = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER,
+                                IID_PPV_ARGS(&psw))))
+        return false;
+
+    VARIANT vEmpty; VariantInit(&vEmpty);
+    VARIANT vLoc;   vLoc.vt = VT_I4; vLoc.lVal = CSIDL_DESKTOP;
+    long lhwnd = 0;
+    IDispatch* pdisp = nullptr;
+    if (psw->FindWindowSW(&vLoc, &vEmpty, SWC_DESKTOP, &lhwnd,
+                          SWFO_NEEDDISPATCH, &pdisp) == S_OK && pdisp) {
+        IServiceProvider* psp = nullptr;
+        if (SUCCEEDED(pdisp->QueryInterface(IID_PPV_ARGS(&psp)))) {
+            IShellBrowser* psb = nullptr;
+            if (SUCCEEDED(psp->QueryService(SID_STopLevelBrowser, IID_PPV_ARGS(&psb)))) {
+                IShellView* psv = nullptr;
+                if (SUCCEEDED(psb->QueryActiveShellView(&psv))) {
+                    IDispatch* pdispBg = nullptr;
+                    if (SUCCEEDED(psv->GetItemObject(SVGIO_BACKGROUND, IID_PPV_ARGS(&pdispBg)))) {
+                        IShellFolderViewDual* psfvd = nullptr;
+                        if (SUCCEEDED(pdispBg->QueryInterface(IID_PPV_ARGS(&psfvd)))) {
+                            IDispatch* pdispShell = nullptr;
+                            if (SUCCEEDED(psfvd->get_Application(&pdispShell))) {
+                                IShellDispatch2* psd = nullptr;
+                                if (SUCCEEDED(pdispShell->QueryInterface(IID_PPV_ARGS(&psd)))) {
+                                    VARIANT vArgs, vDir, vVerb, vShow;
+                                    VariantInit(&vArgs); VariantInit(&vDir);
+                                    VariantInit(&vVerb); VariantInit(&vShow);
+                                    if (params && *params) { vArgs.vt = VT_BSTR; vArgs.bstrVal = SysAllocString(params); }
+                                    if (dir && *dir)       { vDir.vt  = VT_BSTR; vDir.bstrVal  = SysAllocString(dir); }
+                                    if (verb && *verb)     { vVerb.vt = VT_BSTR; vVerb.bstrVal = SysAllocString(verb); }
+                                    vShow.vt = VT_I4; vShow.lVal = nShow;
+                                    BSTR bFile = SysAllocString(file);
+                                    if (bFile && SUCCEEDED(psd->ShellExecute(bFile, vArgs, vDir, vVerb, vShow)))
+                                        ok = true;
+                                    if (bFile) SysFreeString(bFile);
+                                    VariantClear(&vArgs); VariantClear(&vDir); VariantClear(&vVerb);
+                                    psd->Release();
+                                }
+                                pdispShell->Release();
+                            }
+                            psfvd->Release();
+                        }
+                        pdispBg->Release();
+                    }
+                    psv->Release();
+                }
+                psb->Release();
+            }
+            psp->Release();
+        }
+        pdisp->Release();
+    }
+    psw->Release();
+    return ok;
+}
+
+bool ShellExecuteUser(HWND hwnd, const wchar_t* verb, const wchar_t* file,
+                      const wchar_t* params, const wchar_t* dir, int nShow)
+{
+    if (IsProcessElevated() &&
+        ShellExecuteViaExplorer(file, params, dir, verb, nShow))
+        return true;
+
+    // Not elevated, or the Explorer route was unavailable — launch directly.
+    HINSTANCE rc = ShellExecuteW(hwnd, verb, file,
+                                 (params && *params) ? params : nullptr,
+                                 (dir && *dir) ? dir : nullptr, nShow);
+    return reinterpret_cast<INT_PTR>(rc) > 32;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Background thread: wait for the launched app to create its main window,
@@ -81,10 +187,12 @@ static DWORD WINAPI MoveToMonitorThread(LPVOID pv)
     if (!best && exeName[0])
         best = FindWindowByProcessName(exeName);
 
-    // Last resort: if the foreground changed to a real app window, use that.
+    // Last resort: use the foreground window only if it actually belongs to the
+    // launched exe (or its ApplicationFrameHost host). Without this check we could
+    // yank an unrelated window the user switched to during the poll.
     if (!best) {
         HWND fg = GetForegroundWindow();
-        if (fg && IsRealAppWindow(fg)) best = fg;
+        if (ForegroundIsTarget(fg, exeName)) best = fg;
     }
 
     if (!best) return 0;
@@ -105,19 +213,32 @@ void LaunchOnMonitor(HINSTANCE /*hInst*/, HMONITOR hMon,
         return TRUE;
     }, reinterpret_cast<LPARAM>(&snapshot));
 
-    SHELLEXECUTEINFOW sei = {};
-    sei.cbSize       = sizeof(sei);
-    sei.fMask        = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb       = L"open";
-    sei.lpFile       = exe;
-    sei.lpParameters = (args && *args) ? args : nullptr;
-    sei.nShow        = nShow;
+    HANDLE hProc = nullptr;
+    DWORD  pid   = 0;
+    if (IsProcessElevated()) {
+        // Launch de-elevated via Explorer; no process handle is returned, so the
+        // tracking thread relies on snapshot diff + exe-name matching instead.
+        if (!ShellExecuteViaExplorer(exe, args, nullptr, L"open", nShow)) {
+            // Explorer route unavailable — fall back to a direct (elevated) launch.
+            HINSTANCE rc = ShellExecuteW(nullptr, L"open", exe,
+                                         (args && *args) ? args : nullptr, nullptr, nShow);
+            if (reinterpret_cast<INT_PTR>(rc) <= 32) return;
+        }
+    } else {
+        SHELLEXECUTEINFOW sei = {};
+        sei.cbSize       = sizeof(sei);
+        sei.fMask        = SEE_MASK_NOCLOSEPROCESS;
+        sei.lpVerb       = L"open";
+        sei.lpFile       = exe;
+        sei.lpParameters = (args && *args) ? args : nullptr;
+        sei.nShow        = nShow;
+        if (!ShellExecuteExW(&sei)) return;
+        hProc = sei.hProcess;
+        pid   = hProc ? GetProcessId(hProc) : 0;
+    }
 
-    if (!ShellExecuteExW(&sei)) return;
-
-    DWORD pid = sei.hProcess ? GetProcessId(sei.hProcess) : 0;
     auto ctxOwner = std::make_unique<LaunchMoveCtx>();
-    ctxOwner->hProc = sei.hProcess;
+    ctxOwner->hProc = hProc;
     ctxOwner->hMon  = hMon;
     ctxOwner->snapshot = std::move(snapshot);
     ctxOwner->pid   = pid;
@@ -198,6 +319,39 @@ static bool IsRealAppWindow(HWND h)
     return true;
 }
 
+// True if window h's owning process has image filename `exeName` (case-insensitive).
+static bool WindowProcessNameIs(HWND h, const wchar_t* exeName)
+{
+    DWORD pid = 0;
+    GetWindowThreadProcessId(h, &pid);
+    if (!pid) return false;
+
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProc) return false;
+
+    wchar_t path[MAX_PATH] = {};
+    DWORD sz = MAX_PATH;
+    BOOL ok = QueryFullProcessImageNameW(hProc, 0, path, &sz);
+    CloseHandle(hProc);
+    if (!ok) return false;
+
+    const wchar_t* fname = wcsrchr(path, L'\\');
+    fname = fname ? fname + 1 : path;
+    return _wcsicmp(fname, exeName) == 0;
+}
+
+// A foreground window is only an acceptable "last resort" target if it actually
+// belongs to the launched exe, or to ApplicationFrameHost (which hosts UWP/WinUI
+// apps under its own process name). This prevents yanking an unrelated window the
+// user switched to while we were polling.
+static bool ForegroundIsTarget(HWND fg, const wchar_t* exeName)
+{
+    if (!fg || !IsRealAppWindow(fg)) return false;
+    if (exeName && exeName[0] && WindowProcessNameIs(fg, exeName)) return true;
+    if (WindowProcessNameIs(fg, L"ApplicationFrameHost.exe")) return true;
+    return false;
+}
+
 // Find a visible top-level window whose owning process exe matches `exeName`
 // (case-insensitive, filename only).
 static HWND FindWindowByProcessName(const wchar_t* exeName)
@@ -208,27 +362,9 @@ static HWND FindWindowByProcessName(const wchar_t* exeName)
     EnumWindows([](HWND h, LPARAM lp) -> BOOL {
         auto& c = *reinterpret_cast<Ctx*>(lp);
         if (!IsRealAppWindow(h)) return TRUE;
-
-        DWORD pid = 0;
-        GetWindowThreadProcessId(h, &pid);
-        if (!pid) return TRUE;
-
-        HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-        if (!hProc) return TRUE;
-
-        wchar_t path[MAX_PATH] = {};
-        DWORD sz = MAX_PATH;
-        BOOL ok = QueryFullProcessImageNameW(hProc, 0, path, &sz);
-        CloseHandle(hProc);
-
-        if (ok) {
-            // Extract filename from path.
-            const wchar_t* fname = wcsrchr(path, L'\\');
-            fname = fname ? fname + 1 : path;
-            if (_wcsicmp(fname, c.name) == 0) {
-                c.found = h;
-                return FALSE;  // stop enumeration
-            }
+        if (WindowProcessNameIs(h, c.name)) {
+            c.found = h;
+            return FALSE;  // stop enumeration
         }
         return TRUE;
     }, reinterpret_cast<LPARAM>(&ctx));
@@ -248,8 +384,9 @@ static DWORD WINAPI WaitAndMoveThread(LPVOID pv)
     auto ctx = std::unique_ptr<ActivateMoveCtx>(static_cast<ActivateMoveCtx*>(pv));
 
     // Phase 1: Wait up to 3s for the foreground to change to a valid app window.
-    // Skip our taskbar (hwndCaller) but NOT hwndBefore — the launched app might
-    // have already been foreground.
+    // Skip our taskbar (hwndCaller) and hwndBefore — if focus stays on the window
+    // that was already foreground, the launch didn't open a new window and we must
+    // not move it. A genuinely-already-foreground singleton is handled in Phase 2.
     for (int i = 0; i < 300; ++i) {
         Sleep(10);
         HWND fg = GetForegroundWindow();
@@ -271,10 +408,12 @@ static DWORD WINAPI WaitAndMoveThread(LPVOID pv)
     }
 
     // Phase 3: Process-name scan failed (e.g. WinUI app hosted in
-    // ApplicationFrameHost). Last resort: move whatever is currently foreground
-    // if it's a valid app window and not our taskbar.
+    // ApplicationFrameHost). Last resort: move the foreground window only if it
+    // belongs to the launched exe or its ApplicationFrameHost host — never an
+    // unrelated window the user may have switched to.
     HWND fg = GetForegroundWindow();
-    if (fg && fg != ctx->hwndCaller && IsRealAppWindow(fg))
+    if (fg && fg != ctx->hwndCaller && fg != ctx->hwndBefore &&
+        ForegroundIsTarget(fg, ctx->exeName))
         MoveWindowToMonitor(fg, ctx->hMon);
 
     return 0;
@@ -287,7 +426,10 @@ void LaunchOrActivateOnMonitor(HWND hwndCaller, HMONITOR hMon,
 
     HWND fgBefore = GetForegroundWindow();
 
-    ShellExecuteW(hwndCaller, L"open", exe, (args && *args) ? args : nullptr, nullptr, nShow);
+    // Launch de-elevated when we're elevated; ShellExecuteUser reports success so
+    // we don't spawn the tracking thread (which would relocate some unrelated
+    // window) if the launch failed.
+    if (!ShellExecuteUser(hwndCaller, L"open", exe, args, nullptr, nShow)) return;
 
     // Extract filename from exe path for Phase 2 process-name matching.
     const wchar_t* fname = wcsrchr(exe, L'\\');

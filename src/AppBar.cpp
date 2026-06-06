@@ -77,6 +77,26 @@ static void CarveWorkArea(RECT& r, UINT edge, int thickness)
     }
 }
 
+// Re-fit windows that are maximized on `mon` to `work`. We change the work area without
+// SPIF_SENDCHANGE (broadcasting re-triggers the shell into re-stacking its own taskbar
+// strip), so USER does not reposition maximized windows for us — they stay sized to the
+// old, larger reservation, leaving a gap above the bar. Resize them ourselves, targeted
+// to this monitor, so no global broadcast is involved.
+static void RefitMaximizedWindows(HMONITOR mon, const RECT& work)
+{
+    struct Ctx { HMONITOR mon; RECT work; } ctx{ mon, work };
+    EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
+        auto* c = reinterpret_cast<Ctx*>(lp);
+        if (IsWindowVisible(hwnd) && IsZoomed(hwnd) &&
+            MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) == c->mon) {
+            SetWindowPos(hwnd, nullptr, c->work.left, c->work.top,
+                         c->work.right - c->work.left, c->work.bottom - c->work.top,
+                         SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&ctx));
+}
+
 bool AppBar::SetPosition(TaskbarPosition position, int thicknessPx)
 {
     position_    = position;
@@ -132,10 +152,13 @@ bool AppBar::SetPosition(TaskbarPosition position, int thicknessPx)
         RECT desiredWA = mon;
         CarveWorkArea(desiredWA, edge, thicknessPx);
         MONITORINFO mi = { sizeof(mi) };
-        if (GetMonitorInfo(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY), &mi)
-            && !EqualRect(&mi.rcWork, &desiredWA)) {
+        HMONITOR hMon = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY);
+        if (GetMonitorInfo(hMon, &mi) && !EqualRect(&mi.rcWork, &desiredWA)) {
             adjustingWorkArea_ = true;
             SystemParametersInfo(SPI_SETWORKAREA, 0, &desiredWA, 0);
+            // The silent SPI_SETWORKAREA above won't re-fit already-maximized windows;
+            // do it ourselves so they fill the corrected area instead of staying short.
+            RefitMaximizedWindows(hMon, desiredWA);
             adjustingWorkArea_ = false;
         }
     }

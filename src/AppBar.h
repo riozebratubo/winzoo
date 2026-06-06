@@ -27,7 +27,13 @@ private:
     UINT            callbackMsg_  = 0;
 
     static UINT EdgeForPosition(TaskbarPosition p);
-    RECT MonitorRectForWindow() const;
+    RECT MonitorRectForWindow(bool* isPrimary = nullptr) const;
 
     bool            adjustingWorkArea_ = false;
+
+    // Idempotency state: the strip we last reserved, so a spurious ABN_POSCHANGED
+    // (e.g. Explorer's hidden taskbar reasserting its own edge) becomes a no-op
+    // instead of re-issuing ABM_SETPOS and re-triggering the two-appbar loop.
+    RECT            lastStrip_   = {};
+    bool            haveApplied_ = false;
 };

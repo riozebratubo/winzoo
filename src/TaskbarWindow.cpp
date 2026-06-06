@@ -6,6 +6,7 @@
 #include "SystemStatus.h"
 #include "LaunchHelper.h"
 #include "JumpList.h"
+#include "TaskbarRelocate.h"
 #include <algorithm>
 #include <atomic>
 #include <memory>
@@ -1581,15 +1582,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         return 0;
     }
     if (taskbarCreatedMsg_ && uMsg == taskbarCreatedMsg_) {
-        HWND tray = FindWindow(L"Shell_TrayWnd", nullptr);
-        // If FindWindow returns our own proxy window, look past it for Explorer's.
-        if (tray) {
-            DWORD pid = 0;
-            GetWindowThreadProcessId(tray, &pid);
-            if (pid == GetCurrentProcessId())
-                tray = FindWindowEx(nullptr, tray, L"Shell_TrayWnd", nullptr);
-        }
-        if (tray) ShowWindow(tray, SW_HIDE);
+        // A restarted Explorer re-creates its taskbars on every monitor (primary and
+        // secondary) and re-registers their appbars. Re-hide them all so they don't
+        // reappear over winzoo's bars or steal the work area.
+        HideExplorerTaskbars();
         appBar_.Unregister();
         appBar_.Register(hwnd_, settings_.position, EffectiveThicknessPx());
         // For floating mode, AppBar is not registered so GetReservedRect() returns {0,0,0,0};
@@ -2245,6 +2241,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         } else if (wParam == kTimerAppScan) {
             StartScanThread(false);
         } else if (wParam == kTimerStatus) {
+            // Safety net: Windows 11 re-shows Explorer's taskbars (especially the
+            // secondary-monitor ones) on display/work-area changes, and SW_HIDE at
+            // startup doesn't stick. Re-hide any that reappeared. One bar drives this so
+            // the monitors aren't swept redundantly; the sweep itself covers all of them.
+            if (isPrimary_) HideExplorerTaskbars();
             SystemStatusData fresh = PollSystemStatus();
             bool availChanged = (fresh.volAvailable != statusData_.volAvailable ||
                                  fresh.netAvailable != statusData_.netAvailable ||

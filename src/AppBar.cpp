@@ -11,12 +11,14 @@ UINT AppBar::EdgeForPosition(TaskbarPosition p)
     }
 }
 
-RECT AppBar::MonitorRectForWindow() const
+RECT AppBar::MonitorRectForWindow(bool* isPrimary) const
 {
     HMONITOR hMon = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO mi = {};
     mi.cbSize = sizeof(mi);
     GetMonitorInfo(hMon, &mi);
+    if (isPrimary)
+        *isPrimary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
     return mi.rcMonitor;
 }
 
@@ -43,7 +45,36 @@ bool AppBar::Register(HWND hwnd, TaskbarPosition position, int thicknessPx)
     SHAppBarMessage(ABM_NEW, &abd_);
     registered_ = true;
 
+    // Force the next SetPosition to actually re-issue ABM_SETPOS: ABM_NEW resets the
+    // shell's reservation, so the idempotency guard must not short-circuit it.
+    haveApplied_ = false;
+    lastStrip_   = {};
+
     return SetPosition(position, thicknessPx);
+}
+
+// Shrink a full-monitor rect down to a strip of `thickness` px on the given edge.
+static void StripForEdge(RECT& r, UINT edge, int thickness)
+{
+    switch (edge) {
+    case ABE_BOTTOM: r.top    = r.bottom - thickness; break;
+    case ABE_TOP:    r.bottom = r.top    + thickness; break;
+    case ABE_LEFT:   r.right  = r.left   + thickness; break;
+    case ABE_RIGHT:  r.left   = r.right  - thickness; break;
+    default: break;
+    }
+}
+
+// Carve a strip of `thickness` px out of a full-monitor work-area rect on the given edge.
+static void CarveWorkArea(RECT& r, UINT edge, int thickness)
+{
+    switch (edge) {
+    case ABE_BOTTOM: r.bottom -= thickness; break;
+    case ABE_TOP:    r.top    += thickness; break;
+    case ABE_LEFT:   r.left   += thickness; break;
+    case ABE_RIGHT:  r.right  -= thickness; break;
+    default: break;
+    }
 }
 
 bool AppBar::SetPosition(TaskbarPosition position, int thicknessPx)
@@ -54,38 +85,48 @@ bool AppBar::SetPosition(TaskbarPosition position, int thicknessPx)
     if (position == TaskbarPosition::Floating || !registered_)
         return false;
 
-    RECT mon = MonitorRectForWindow();
-    abd_.uEdge = EdgeForPosition(position);
-    abd_.rc    = mon;
+    bool isPrimary = false;
+    RECT mon  = MonitorRectForWindow(&isPrimary);
+    UINT edge = EdgeForPosition(position);
 
-    switch (abd_.uEdge) {
-    case ABE_BOTTOM: abd_.rc.top    = abd_.rc.bottom - thicknessPx; break;
-    case ABE_TOP:    abd_.rc.bottom = abd_.rc.top    + thicknessPx; break;
-    case ABE_LEFT:   abd_.rc.right  = abd_.rc.left   + thicknessPx; break;
-    case ABE_RIGHT:  abd_.rc.left   = abd_.rc.right  - thicknessPx; break;
-    default: break;
-    }
+    // The strip we want to reserve on this monitor's edge.
+    RECT strip = mon;
+    StripForEdge(strip, edge, thicknessPx);
 
+    // Idempotency guard: if our own reserved strip is unchanged since the last apply,
+    // do nothing. The shell sends ABN_POSCHANGED whenever ANY appbar moves — including
+    // Explorer's hidden taskbar reasserting its edge. Without this guard we'd re-issue
+    // ABM_SETPOS, which re-notifies Explorer, which reasserts again: the endless
+    // two-appbar loop that makes windows tremble and resize on every focus change.
+    if (haveApplied_ && edge == abd_.uEdge && EqualRect(&strip, &lastStrip_))
+        return true;
+
+    abd_.uEdge = edge;
+    abd_.rc    = strip;
     SHAppBarMessage(ABM_QUERYPOS, &abd_);
-    SHAppBarMessage(ABM_SETPOS,   &abd_);
+    // ABM_QUERYPOS may have nudged the rect to avoid other appbars; re-clamp to our
+    // exact thickness on the chosen edge so the bar size stays stable.
+    StripForEdge(abd_.rc, edge, thicknessPx);
+    SHAppBarMessage(ABM_SETPOS, &abd_);
     reservedRect_ = abd_.rc;
 
     // The shell includes Explorer's hidden taskbar in its work area calculation even
     // after SW_HIDE (SW_HIDE doesn't call ABM_REMOVE). Override the work area so only
-    // our strip is reserved. Re-entry guard prevents the SPIF_SENDCHANGE -> ABN_POSCHANGED
-    // -> SetPosition loop from running forever.
-    if (!adjustingWorkArea_) {
-        adjustingWorkArea_ = true;
-        RECT workArea = mon;
-        switch (abd_.uEdge) {
-        case ABE_BOTTOM: workArea.bottom -= thicknessPx; break;
-        case ABE_TOP:    workArea.top    += thicknessPx; break;
-        case ABE_LEFT:   workArea.left   += thicknessPx; break;
-        case ABE_RIGHT:  workArea.right  -= thicknessPx; break;
-        default: break;
+    // our strip is reserved. SPI_SETWORKAREA acts on the primary monitor's work area,
+    // so only the primary bar drives it; doing it from every monitor's bar would let
+    // them clobber each other. We also skip it when the work area is already correct,
+    // which (together with the idempotency guard) stops the SPIF_SENDCHANGE broadcast
+    // from feeding the loop.
+    if (isPrimary && !adjustingWorkArea_) {
+        RECT desiredWA = mon;
+        CarveWorkArea(desiredWA, edge, thicknessPx);
+        RECT curWA = {};
+        SystemParametersInfo(SPI_GETWORKAREA, 0, &curWA, 0);
+        if (!EqualRect(&curWA, &desiredWA)) {
+            adjustingWorkArea_ = true;
+            SystemParametersInfo(SPI_SETWORKAREA, 0, &desiredWA, SPIF_SENDCHANGE);
+            adjustingWorkArea_ = false;
         }
-        SystemParametersInfo(SPI_SETWORKAREA, 0, &workArea, SPIF_SENDCHANGE);
-        adjustingWorkArea_ = false;
     }
 
     SetWindowPos(hwnd_, HWND_TOPMOST,
@@ -93,6 +134,9 @@ bool AppBar::SetPosition(TaskbarPosition position, int thicknessPx)
                  reservedRect_.right  - reservedRect_.left,
                  reservedRect_.bottom - reservedRect_.top,
                  SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    lastStrip_   = strip;
+    haveApplied_ = true;
     return true;
 }
 
@@ -102,7 +146,9 @@ void AppBar::Unregister()
     abd_.cbSize = sizeof(abd_);
     abd_.hWnd   = hwnd_;
     SHAppBarMessage(ABM_REMOVE, &abd_);
-    registered_ = false;
+    registered_  = false;
+    haveApplied_ = false;
+    lastStrip_   = {};
 }
 
 void AppBar::OnCallback(WPARAM wParam, LPARAM lParam)

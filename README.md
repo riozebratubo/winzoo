@@ -4,22 +4,34 @@ A lightweight taskbar replacement for Windows 10/11, written in C++20 using only
 
 When running, winzoo hides the native Windows taskbar and takes its place, reserving the same desktop space via the Windows AppBar API.
 
+<p align="center">
+    <img src="screenshots/taskbar_example_1.png" alt="Taskbar example 1" width="50%"/>
+</p>
+
+<p align="center">
+    <img src="screenshots/taskbar_example_2.png" alt="Taskbar example 2" width="50%"/>
+</p>
+
+<p align="center">
+    <img src="screenshots/apps_menu_example_1.png" alt="Apps menu example 1" width="300"/>
+</p>
+
 ## Features
 
-- No nonsense
-- *Very* lightweight
-- Single executable, no installer needed
-- Lots of configurations
-- Per monitor DPI aware
-- Custom-drawn task buttons with app icon and title
-- Custom-drawn apps menu with keyboard navigation and search
-- Custom position: top, bottom, left, right, *floating*
-- Drag to reorder taskbar buttons
-- Pin/unpin separately for each monitor *on the taskbar and on the apps menu*
-- Works with Jump Lists and show progress bars for apps that support it
-- Settings persisted in the registry
-- Easy import/export of settings to share with others or across machines
-- And lots more...
+- [x] No nonsense
+- [x] *Very* lightweight
+- [x] Single executable, no installer needed
+- [x] Lots of configurations
+- [x] Per monitor DPI aware
+- [x] Custom-drawn task buttons with app icon and title
+- [x] Custom-drawn apps menu with keyboard navigation and search
+- [x] Custom position: top, bottom, left, right, *floating*
+- [x] Drag to reorder taskbar buttons
+- [x] Pin/unpin separately for each monitor *on the taskbar and on the apps menu*
+- [x] Works with Jump Lists and show progress bars for apps that support it
+- [x] Settings persisted in the registry
+- [x] Easy import/export of settings to share with others or across machines
+- [x] And lots more...
 
 ## Requirements to use
 

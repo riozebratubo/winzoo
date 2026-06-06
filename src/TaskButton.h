@@ -42,6 +42,7 @@ struct TaskButton {
     bool         iconOnly   = false;  // draw only icon, centered (no text)
     int          iconDrawSz = 16;     // logical icon draw size in px
     HMONITOR     lastKnownMonitor = nullptr;  // monitor while non-minimized; reused when minimized
+    POINT        minTarget = { 0x7FFFFFFF, 0x7FFFFFFF };  // last ptMinPosition we wrote (sentinel = none)
     ProgressInfo progress;
 
     bool IsRunning() const { return hwnd != nullptr; }

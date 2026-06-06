@@ -910,6 +910,48 @@ void TaskbarWindow::LayoutButtons()
             for (auto& btn : taskBtns) btn.rect = {};
         }
     }
+
+    UpdateMinimizeTargets();
+}
+
+void TaskbarWindow::UpdateMinimizeTargets()
+{
+    if (!hwnd_ || settings_.position == TaskbarPosition::Floating) return;
+
+    POINT origin = {};
+    ClientToScreen(hwnd_, &origin);
+
+    // Which bar owns a window's minimize target: in multi-monitor mode the bar on the
+    // window's own monitor; otherwise the single (primary) bar owns everything.
+    bool perMonitor = (settings_.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
+
+    for (auto& btn : tracker_.MutableButtons()) {
+        // Only windows with a laid-out button on THIS bar, and only while non-minimized
+        // (so we set the target before the next minimize; touching an already-minimized
+        // window's placement risks a visible jump/restore).
+        if (!btn.hwnd || IsRectEmpty(&btn.rect) || IsIconic(btn.hwnd))
+            continue;
+
+        bool owns = perMonitor
+                  ? (MonitorFromWindow(btn.hwnd, MONITOR_DEFAULTTONEAREST) == hMonitor_)
+                  : isPrimary_;
+        if (!owns) continue;
+
+        POINT target = {
+            origin.x + (btn.rect.left + btn.rect.right)  / 2,
+            origin.y + (btn.rect.top  + btn.rect.bottom) / 2
+        };
+        if (target.x == btn.minTarget.x && target.y == btn.minTarget.y)
+            continue;  // unchanged — avoid a redundant SetWindowPlacement
+
+        WINDOWPLACEMENT wp = { sizeof(wp) };
+        if (GetWindowPlacement(btn.hwnd, &wp)) {
+            wp.ptMinPosition = target;
+            wp.flags |= WPF_SETMINPOSITION;
+            SetWindowPlacement(btn.hwnd, &wp);
+            btn.minTarget = target;
+        }
+    }
 }
 
 int TaskbarWindow::HitTestButton(POINT pt) const

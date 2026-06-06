@@ -2246,6 +2246,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             // startup doesn't stick. Re-hide any that reappeared. One bar drives this so
             // the monitors aren't swept redundantly; the sweep itself covers all of them.
             if (isPrimary_) HideExplorerTaskbars();
+            // Re-assert this monitor's work-area reservation in case the shell re-stacked
+            // its own taskbar strip under ours. SetPosition is now idempotent for the
+            // appbar/window itself, so this only re-corrects the work area when it drifted.
+            if (settings_.position != TaskbarPosition::Floating)
+                appBar_.SetPosition(settings_.position, EffectiveThicknessPx());
             SystemStatusData fresh = PollSystemStatus();
             bool availChanged = (fresh.volAvailable != statusData_.volAvailable ||
                                  fresh.netAvailable != statusData_.netAvailable ||

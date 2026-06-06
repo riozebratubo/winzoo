@@ -85,55 +85,60 @@ bool AppBar::SetPosition(TaskbarPosition position, int thicknessPx)
     if (position == TaskbarPosition::Floating || !registered_)
         return false;
 
-    bool isPrimary = false;
-    RECT mon  = MonitorRectForWindow(&isPrimary);
+    RECT mon  = MonitorRectForWindow();
     UINT edge = EdgeForPosition(position);
 
     // The strip we want to reserve on this monitor's edge.
     RECT strip = mon;
     StripForEdge(strip, edge, thicknessPx);
 
-    // Idempotency guard: if our own reserved strip is unchanged since the last apply,
-    // do nothing. The shell sends ABN_POSCHANGED whenever ANY appbar moves — including
-    // Explorer's hidden taskbar reasserting its edge. Without this guard we'd re-issue
-    // ABM_SETPOS, which re-notifies Explorer, which reasserts again: the endless
-    // two-appbar loop that makes windows tremble and resize on every focus change.
-    if (haveApplied_ && edge == abd_.uEdge && EqualRect(&strip, &lastStrip_))
-        return true;
+    // The appbar registration (ABM_SETPOS) is the part that must stay idempotent: the
+    // shell sends ABN_POSCHANGED whenever ANY appbar moves, and re-issuing ABM_SETPOS
+    // re-notifies others, which can feed an endless reassertion loop (the trembling).
+    // So only touch the appbar + window size when OUR strip actually changed. The
+    // work-area correction below, however, runs every call (see why there).
+    bool stripChanged = !(haveApplied_ && edge == abd_.uEdge && EqualRect(&strip, &lastStrip_));
 
-    abd_.uEdge = edge;
-    abd_.rc    = strip;
-    SHAppBarMessage(ABM_QUERYPOS, &abd_);
-    // ABM_QUERYPOS may have nudged the rect to avoid other appbars; re-clamp to our
-    // exact thickness on the chosen edge so the bar size stays stable.
-    StripForEdge(abd_.rc, edge, thicknessPx);
-    SHAppBarMessage(ABM_SETPOS, &abd_);
-    reservedRect_ = abd_.rc;
+    if (stripChanged) {
+        abd_.uEdge = edge;
+        abd_.rc    = strip;
+        SHAppBarMessage(ABM_QUERYPOS, &abd_);
+        // ABM_QUERYPOS may have nudged the rect to avoid other appbars; re-clamp to our
+        // exact thickness on the chosen edge so the bar size stays stable.
+        StripForEdge(abd_.rc, edge, thicknessPx);
+        SHAppBarMessage(ABM_SETPOS, &abd_);
+        reservedRect_ = abd_.rc;
 
-    // The shell includes Explorer's hidden taskbar in its work area calculation even
-    // after SW_HIDE (SW_HIDE doesn't call ABM_REMOVE). Override the work area so only
-    // our strip is reserved. SPI_SETWORKAREA acts on the primary monitor's work area,
-    // so only the primary bar drives it; doing it from every monitor's bar would let
-    // them clobber each other. We also skip it when the work area is already correct,
-    // which (together with the idempotency guard) stops the SPIF_SENDCHANGE broadcast
-    // from feeding the loop.
-    if (isPrimary && !adjustingWorkArea_) {
+        SetWindowPos(hwnd_, HWND_TOPMOST,
+                     reservedRect_.left, reservedRect_.top,
+                     reservedRect_.right  - reservedRect_.left,
+                     reservedRect_.bottom - reservedRect_.top,
+                     SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+        lastStrip_   = strip;
+        haveApplied_ = true;
+    }
+
+    // Force THIS monitor's work area to reserve ONLY our strip. Windows 11's taskbar
+    // keeps a work-area reservation (~48px) even after SW_HIDE/ABM_REMOVE — it isn't a
+    // classic appbar, so we can't remove it the normal way — and our own reservation
+    // stacks under it (measured: 60px Explorer + 50px winzoo = 110px on the primary).
+    // SPI_SETWORKAREA targets the monitor containing the rect, so this works per-monitor;
+    // we read the live work area via GetMonitorInfo (SPI_GETWORKAREA only reports the
+    // primary). Run on EVERY call (not gated by the idempotency check) so we re-correct
+    // after the shell re-stacks, and WITHOUT SPIF_SENDCHANGE — broadcasting is exactly
+    // what nudges the shell into re-reserving its strip, which created the stacking loop.
+    if (!adjustingWorkArea_) {
         RECT desiredWA = mon;
         CarveWorkArea(desiredWA, edge, thicknessPx);
-        RECT curWA = {};
-        SystemParametersInfo(SPI_GETWORKAREA, 0, &curWA, 0);
-        if (!EqualRect(&curWA, &desiredWA)) {
+        MONITORINFO mi = { sizeof(mi) };
+        if (GetMonitorInfo(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY), &mi)
+            && !EqualRect(&mi.rcWork, &desiredWA)) {
             adjustingWorkArea_ = true;
-            SystemParametersInfo(SPI_SETWORKAREA, 0, &desiredWA, SPIF_SENDCHANGE);
+            SystemParametersInfo(SPI_SETWORKAREA, 0, &desiredWA, 0);
             adjustingWorkArea_ = false;
         }
     }
-
-    SetWindowPos(hwnd_, HWND_TOPMOST,
-                 reservedRect_.left, reservedRect_.top,
-                 reservedRect_.right  - reservedRect_.left,
-                 reservedRect_.bottom - reservedRect_.top,
-                 SWP_NOACTIVATE | SWP_FRAMECHANGED);
 
     lastStrip_   = strip;
     haveApplied_ = true;

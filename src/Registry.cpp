@@ -78,8 +78,9 @@ bool RegistryKey::ReadMultiString(const wchar_t* name, std::vector<std::wstring>
         return false;
 
     out.clear();
-    const wchar_t* p = buf.data();
-    while (*p) {
+    const wchar_t* p   = buf.data();
+    const wchar_t* end = buf.data() + (size / sizeof(wchar_t));
+    while (p < end && *p) {
         out.emplace_back(p);
         p += out.back().size() + 1;
     }
@@ -242,6 +243,7 @@ Settings LoadSettings()
     if (key.ReadDword(L"ShowTrayIcons",     val)) s.showTrayIcons     = val != 0;
     if (key.ReadDword(L"ShowWinzooCustomIcons", val)) s.showWinzooCustomIcons = val != 0;
     if (key.ReadDword(L"ShowOverflowTrayIcons", val)) s.showOverflowTrayIcons = val != 0;
+    if (key.ReadDword(L"TrayIconFallbackExe",  val)) s.trayIconFallbackExe  = val != 0;
     if (key.ReadDword(L"TrayIconSize",      val)) s.trayIconSize      = static_cast<int>(val);
     if (s.trayIconSize    < 12) s.trayIconSize    = 12;
     if (s.trayIconSize    > 48) s.trayIconSize    = 48;
@@ -294,6 +296,7 @@ Settings LoadSettings()
     // App Menu Sidebar
     if (key.ReadDword(L"AppMenuSearchEnabled",          amVal)) s.appMenuSearchEnabled          = amVal != 0;
     if (key.ReadDword(L"AppMenuSearchFuzzy",            amVal)) s.appMenuSearchFuzzy            = amVal != 0;
+    if (key.ReadDword(L"AppMenuSearchSystem",           amVal)) s.appMenuSearchSystem           = amVal != 0;
     if (key.ReadDword(L"AppMenuSidebarEnabled",         amVal)) s.appMenuSidebarEnabled         = amVal != 0;
     if (key.ReadDword(L"AppMenuSidebarWidth",           amVal)) s.appMenuSidebarWidth           = static_cast<int>(amVal);
     if (key.ReadDword(L"AppMenuSidebarShowExplorer",    amVal)) s.appMenuSidebarShowExplorer    = amVal != 0;
@@ -405,6 +408,7 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"ShowTrayIcons",     s.showTrayIcons     ? 1u : 0u);
     key.WriteDword(L"ShowWinzooCustomIcons", s.showWinzooCustomIcons ? 1u : 0u);
     key.WriteDword(L"ShowOverflowTrayIcons", s.showOverflowTrayIcons ? 1u : 0u);
+    key.WriteDword(L"TrayIconFallbackExe",  s.trayIconFallbackExe  ? 1u : 0u);
     key.WriteDword(L"TrayIconSize",      static_cast<DWORD>(s.trayIconSize));
     key.WriteDword(L"TrayIconPadding",   static_cast<DWORD>(s.trayIconPadding));
     key.WriteDword(L"TrayIconMargin",    static_cast<DWORD>(s.trayIconMargin));
@@ -434,6 +438,7 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"AppMenuPadding",      static_cast<DWORD>(s.appMenuPadding));
     key.WriteDword(L"AppMenuSearchEnabled",          s.appMenuSearchEnabled          ? 1u : 0u);
     key.WriteDword(L"AppMenuSearchFuzzy",            s.appMenuSearchFuzzy            ? 1u : 0u);
+    key.WriteDword(L"AppMenuSearchSystem",           s.appMenuSearchSystem           ? 1u : 0u);
     key.WriteDword(L"AppMenuSidebarEnabled",         s.appMenuSidebarEnabled         ? 1u : 0u);
     key.WriteDword(L"AppMenuSidebarWidth",           static_cast<DWORD>(s.appMenuSidebarWidth));
     key.WriteDword(L"AppMenuSidebarShowExplorer",    s.appMenuSidebarShowExplorer    ? 1u : 0u);

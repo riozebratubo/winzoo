@@ -57,13 +57,13 @@ bool App::Init(HINSTANCE hInst)
 {
     hInst_ = hInst;
 
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    comInitialized_ = SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
 
     mutex_ = CreateMutexW(nullptr, TRUE, L"WinzooSingleInstance");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         CloseHandle(mutex_);
         mutex_ = nullptr;
-        CoUninitialize();
+        if (comInitialized_) CoUninitialize();
         return false;
     }
 
@@ -151,7 +151,7 @@ void App::Shutdown()
         mutex_ = nullptr;
     }
 
-    CoUninitialize();
+    if (comInitialized_) CoUninitialize();
 }
 
 void App::PropagateSettings(const Settings& newSettings, TaskbarWindow* origin)

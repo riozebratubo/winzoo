@@ -78,7 +78,11 @@ bool RelocateExplorerTaskbarToMatch(TaskbarPosition position)
     }
 
     blob[kEdgeOffset] = wantEdge;
-    RegSetValueExW(hKey, L"Settings", 0, REG_BINARY, blob, size);
+    LSTATUS writeErr = RegSetValueExW(hKey, L"Settings", 0, REG_BINARY, blob, size);
+    if (writeErr != ERROR_SUCCESS) {
+        RegCloseKey(hKey);
+        return false;
+    }
     RegCloseKey(hKey);
 
     // Explorer reads StuckRects3 only at shell startup, so it must restart to apply.

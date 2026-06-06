@@ -445,31 +445,34 @@ void AppMenuWindow::ApplyFilter()
             }
 
             // Executable from PATH — append below shortcut matches.
-            wchar_t exeBuf[MAX_PATH];
-            wcscpy_s(exeBuf, searchText_.c_str());
-            bool hasExt = lowerQuery.ends_with(L".exe") ||
-                          lowerQuery.ends_with(L".com") ||
-                          lowerQuery.ends_with(L".bat");
-            if (!hasExt) wcscat_s(exeBuf, L".exe");
-            if (PathFindOnPathW(exeBuf, nullptr)) {
-                std::wstring exePath(exeBuf);
-                AppTreeNode n;
-                // Use the filename portion as display name (gets correct casing).
-                auto slash = exePath.rfind(L'\\');
-                n.name     = (slash != std::wstring::npos) ? exePath.substr(slash + 1) : exePath;
-                n.type     = AppNodeType::Executable;
-                n.subtitle = L"Run command";
-                n.exePath  = exePath;
-                auto it = exeIconCache_.find(exePath);
-                if (it == exeIconCache_.end()) {
-                    HICON hi = nullptr;
-                    ExtractIconExW(exePath.c_str(), 0, nullptr, &hi, 1);
-                    exeIconCache_[exePath] = hi;
-                    n.icon = hi;
-                } else {
-                    n.icon = it->second;
+            // Guard: searchText_ could exceed MAX_PATH; PathFindOnPathW requires MAX_PATH buffer.
+            if (searchText_.size() < MAX_PATH - 5) {  // room for ".exe\0"
+                wchar_t exeBuf[MAX_PATH];
+                wcscpy_s(exeBuf, searchText_.c_str());
+                bool hasExt = lowerQuery.ends_with(L".exe") ||
+                              lowerQuery.ends_with(L".com") ||
+                              lowerQuery.ends_with(L".bat");
+                if (!hasExt) wcscat_s(exeBuf, L".exe");
+                if (PathFindOnPathW(exeBuf, nullptr)) {
+                    std::wstring exePath(exeBuf);
+                    AppTreeNode n;
+                    // Use the filename portion as display name (gets correct casing).
+                    auto slash = exePath.rfind(L'\\');
+                    n.name     = (slash != std::wstring::npos) ? exePath.substr(slash + 1) : exePath;
+                    n.type     = AppNodeType::Executable;
+                    n.subtitle = L"Run command";
+                    n.exePath  = exePath;
+                    auto it = exeIconCache_.find(exePath);
+                    if (it == exeIconCache_.end()) {
+                        HICON hi = nullptr;
+                        ExtractIconExW(exePath.c_str(), 0, nullptr, &hi, 1);
+                        exeIconCache_[exePath] = hi;
+                        n.icon = hi;
+                    } else {
+                        n.icon = it->second;
+                    }
+                    filteredNodes_.push_back(std::move(n));
                 }
-                filteredNodes_.push_back(std::move(n));
             }
         }
 

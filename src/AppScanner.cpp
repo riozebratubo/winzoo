@@ -27,7 +27,8 @@ static void EnumerateLnkFiles(const std::wstring& dir,
 
     do {
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            if (wcscmp(fd.cFileName, L".") != 0 && wcscmp(fd.cFileName, L"..") != 0) {
+            if (wcscmp(fd.cFileName, L".") != 0 && wcscmp(fd.cFileName, L"..") != 0
+                && !(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
                 std::vector<std::wstring> sub = folderPath;
                 sub.push_back(fd.cFileName);
                 EnumerateLnkFiles(dir + L"\\" + fd.cFileName, sub, out);

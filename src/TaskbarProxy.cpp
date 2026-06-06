@@ -14,6 +14,14 @@ LRESULT CALLBACK TaskbarProxy::ProxyWndProc(HWND hwnd, UINT msg, WPARAM wParam, 
         return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
 
+    // Relay progress messages (shell32's internal 0x04F3) to winzoo's taskbar windows.
+    auto* self = reinterpret_cast<TaskbarProxy*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (self && self->relayMsg_ && msg == 0x04F3 && self->winzooHwnd_) {
+        // Extract HWND (wParam) + state/percent from shell message and broadcast
+        // via the registered WinzooProgress message.
+        PostMessageW(self->winzooHwnd_, self->relayMsg_, wParam, lParam);
+    }
+
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 

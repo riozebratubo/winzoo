@@ -560,7 +560,15 @@ static std::vector<TrayIconEntry> EnumerateViaToolbar(int iconSizePx,
                                                       bool fallbackExeIcon,
                                                       bool includeOverflow)
 {
-    HWND hTray = FindWindowW(L"Shell_TrayWnd", nullptr);
+    // Find Explorer's Shell_TrayWnd — skip our own proxy which has the same class name.
+    DWORD myPid = GetCurrentProcessId();
+    HWND hTray = nullptr;
+    for (HWND h = FindWindowW(L"Shell_TrayWnd", nullptr); h;
+         h = FindWindowExW(nullptr, h, L"Shell_TrayWnd", nullptr)) {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(h, &pid);
+        if (pid != myPid) { hTray = h; break; }
+    }
     if (!hTray) return {};
     HWND hNotify = FindWindowExW(hTray, nullptr, L"TrayNotifyWnd", nullptr);
     if (!hNotify) return {};

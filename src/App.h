@@ -27,5 +27,6 @@ private:
     HANDLE        mutex_    = nullptr;
     std::vector<std::unique_ptr<TaskbarWindow>> taskbars_;
     Settings      settings_;
-    bool          restart_  = false;
+    bool          restart_        = false;
+    bool          comInitialized_ = false;
 };

@@ -271,11 +271,14 @@ UINT PopupMenu::Show(HWND hwndOwner, POINT ptScreen,
     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
     SetForegroundWindow(hwnd);
 
-    MSG msg;
+    MSG msg = {};
     while (!menu.done_ && GetMessageW(&msg, nullptr, 0, 0) > 0) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    // If GetMessageW returned 0 (WM_QUIT), repost so the app can shut down.
+    if (!menu.done_)
+        PostQuitMessage(static_cast<int>(msg.wParam));
 
     if (IsWindow(hwnd)) DestroyWindow(hwnd);
 

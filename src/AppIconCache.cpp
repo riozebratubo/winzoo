@@ -17,9 +17,11 @@ static HICON BitmapToIcon(HBITMAP hbm, int size)
 }
 
 void AppIconCache::ParseIconPath(const std::wstring& raw,
-                                  std::wstring& outPath, int& outIndex)
+                                  std::wstring& outPath, int& outIndex,
+                                  bool& outExplicitIndex)
 {
     outIndex = 0;
+    outExplicitIndex = false;
     if (raw.empty()) { outPath = raw; return; }
 
     size_t pos = raw.rfind(L',');
@@ -38,6 +40,7 @@ void AppIconCache::ParseIconPath(const std::wstring& raw,
     outPath  = raw.substr(0, pos);
     // _wtoi handles negative sign correctly; no extra negation needed
     outIndex = _wtoi(raw.c_str() + pos + 1);
+    outExplicitIndex = true;
 }
 
 HICON AppIconCache::LoadStatic(const std::wstring& iconPath, int sizePx)
@@ -46,7 +49,8 @@ HICON AppIconCache::LoadStatic(const std::wstring& iconPath, int sizePx)
 
     std::wstring path;
     int          index = 0;
-    ParseIconPath(iconPath, path, index);
+    bool         explicitIndex = false;
+    ParseIconPath(iconPath, path, index, explicitIndex);
 
     if (path.empty()) return nullptr;
 
@@ -59,7 +63,7 @@ HICON AppIconCache::LoadStatic(const std::wstring& iconPath, int sizePx)
     // the same API the Windows shell uses. It renders from the best available icon
     // asset (256 px for modern apps, 32 px anti-aliased for legacy apps) at exactly
     // sizePx × sizePx, so DrawIconEx can blit it 1:1 with no GDI scaling artifacts.
-    if (index == 0) {
+    if (index == 0 && !explicitIndex) {
         IShellItem* pItem = nullptr;
         if (SUCCEEDED(SHCreateItemFromParsingName(expanded, nullptr, IID_PPV_ARGS(&pItem)))) {
             IShellItemImageFactory* pSIIF = nullptr;

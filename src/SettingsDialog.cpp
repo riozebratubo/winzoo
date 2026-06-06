@@ -1730,7 +1730,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 
 bool SettingsDialog::Show(HWND hwndParent, Settings& settings)
 {
-    DlgData data{ &settings };
+    Settings localCopy = settings;
+    DlgData data{ &localCopy };
 
     auto prevCtx = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
@@ -1742,6 +1743,9 @@ bool SettingsDialog::Show(HWND hwndParent, Settings& settings)
         reinterpret_cast<LPARAM>(&data));
 
     SetThreadDpiAwarenessContext(prevCtx);
+
+    if (result == IDOK)
+        settings = localCopy;
 
     return result == IDOK;
 }

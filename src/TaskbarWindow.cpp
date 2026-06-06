@@ -1056,12 +1056,21 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
         case IDM_PIN_UNPIN: {
             Settings updated = settings_;
             if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
-                auto it = updated.pinnedExePathsPerMonitor.find(monitorDeviceName_);
-                if (it != updated.pinnedExePathsPerMonitor.end()) {
-                    auto& vec = it->second;
-                    vec.erase(std::remove_if(vec.begin(), vec.end(),
-                        [&](const auto& p) { return _wcsicmp(p.c_str(), exePath.c_str()) == 0; }),
-                        vec.end());
+                if (settings_.position == TaskbarPosition::Floating) {
+                    // Floating mode shows merged pins; remove from all monitor lists
+                    for (auto& [mon, vec] : updated.pinnedExePathsPerMonitor) {
+                        vec.erase(std::remove_if(vec.begin(), vec.end(),
+                            [&](const auto& p) { return _wcsicmp(p.c_str(), exePath.c_str()) == 0; }),
+                            vec.end());
+                    }
+                } else {
+                    auto it = updated.pinnedExePathsPerMonitor.find(monitorDeviceName_);
+                    if (it != updated.pinnedExePathsPerMonitor.end()) {
+                        auto& vec = it->second;
+                        vec.erase(std::remove_if(vec.begin(), vec.end(),
+                            [&](const auto& p) { return _wcsicmp(p.c_str(), exePath.c_str()) == 0; }),
+                            vec.end());
+                    }
                 }
             } else {
                 updated.pinnedExePaths.clear();
@@ -1156,10 +1165,18 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
     case IDM_PIN_UNPIN: {
         Settings updated = settings_;
         if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
-            auto& vec = updated.pinnedExePathsPerMonitor[monitorDeviceName_];
             if (!isPinned) {
+                auto& vec = updated.pinnedExePathsPerMonitor[monitorDeviceName_];
                 if (!exePath.empty()) vec.push_back(exePath);
+            } else if (settings_.position == TaskbarPosition::Floating) {
+                // Floating mode shows merged pins; remove from all monitor lists
+                for (auto& [mon, vec] : updated.pinnedExePathsPerMonitor) {
+                    vec.erase(std::remove_if(vec.begin(), vec.end(),
+                        [&](const auto& p) { return _wcsicmp(p.c_str(), exePath.c_str()) == 0; }),
+                        vec.end());
+                }
             } else {
+                auto& vec = updated.pinnedExePathsPerMonitor[monitorDeviceName_];
                 vec.erase(std::remove_if(vec.begin(), vec.end(),
                     [&](const auto& p) { return _wcsicmp(p.c_str(), exePath.c_str()) == 0; }),
                     vec.end());
@@ -1213,7 +1230,7 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
         break;
 
     case IDM_TASK_MANAGER:
-        ShellExecuteW(hwnd_, L"open", L"taskmgr.exe", nullptr, nullptr, SW_SHOWNORMAL);
+        LaunchOrActivateOnMonitor(hwnd_, hMonitor_, L"taskmgr.exe", nullptr, SW_SHOWNORMAL);
         break;
 
     case IDM_POWER_OPTIONS: {
@@ -1250,6 +1267,8 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
         break;
 
     case IDM_REBUILD_ICON_CACHE:
+        for (auto& e : appEntries_) e.icon = nullptr;
+        for (auto& btn : pinnedButtons_) btn.icon = nullptr;
         appIconCache_.Clear();
         StartIconLoadThread();
         break;
@@ -1398,7 +1417,8 @@ void TaskbarWindow::StartScanThread(bool isFirstScan)
     WPARAM wp = MAKEWPARAM(isFirstScan ? 0 : 1, static_cast<WORD>(gen));
     std::thread([hwnd, wp]() {
         auto pEntries = std::make_unique<std::vector<AppEntry>>(AppScanner::Scan());
-        if (!PostMessageW(hwnd, WM_APP_SCAN_DONE, wp,
+        if (!IsWindow(hwnd) ||
+            !PostMessageW(hwnd, WM_APP_SCAN_DONE, wp,
                           reinterpret_cast<LPARAM>(pEntries.get())))
             return;  // on failure, unique_ptr auto-deletes
         pEntries.release();  // ownership transferred to WM_APP_SCAN_DONE handler
@@ -1414,7 +1434,20 @@ void TaskbarWindow::StartIconLoadThread()
     // Determine which pinned paths this taskbar shows
     static const std::vector<std::wstring> kEmptyPinned;
     const std::vector<std::wstring>* pinnedPaths = nullptr;
-    if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
+    std::vector<std::wstring> mergedPinned;
+    if (settings_.pinnedAppsPerMonitor && settings_.position == TaskbarPosition::Floating) {
+        // Floating mode shows merged pins from all monitors
+        std::unordered_set<std::wstring> seen;
+        for (auto& [mon, monPaths] : settings_.pinnedExePathsPerMonitor) {
+            for (auto& p : monPaths) {
+                std::wstring lower = p;
+                CharLowerW(lower.data());
+                if (seen.insert(lower).second)
+                    mergedPinned.push_back(p);
+            }
+        }
+        pinnedPaths = &mergedPinned;
+    } else if (settings_.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
         auto it = settings_.pinnedExePathsPerMonitor.find(monitorDeviceName_);
         pinnedPaths = (it != settings_.pinnedExePathsPerMonitor.end()) ? &it->second : &kEmptyPinned;
     } else {
@@ -1461,7 +1494,8 @@ void TaskbarWindow::StartIconLoadThread()
             for (auto& t : workers) t.join();
         }
 
-        if (!PostMessageW(hwnd, WM_APP_ICONS_DONE, wp,
+        if (!IsWindow(hwnd) ||
+            !PostMessageW(hwnd, WM_APP_ICONS_DONE, wp,
                           reinterpret_cast<LPARAM>(pResults.get()))) {
             for (auto& [p, icon] : *pResults)
                 if (icon) DestroyIcon(icon);
@@ -2212,6 +2246,9 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                      prc->left, prc->top,
                      prc->right - prc->left, prc->bottom - prc->top,
                      SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        // Re-run AppBar positioning so the shell reservation matches the new DPI scale.
+        if (settings_.position != TaskbarPosition::Floating)
+            appBar_.SetPosition(settings_.position, EffectiveThicknessPx());
         if (isPrimary_) proxy_.UpdatePosition(*prc);
         HDC hdc = GetDC(hwnd_);
         renderer_.Resize(prc->right - prc->left, prc->bottom - prc->top, hdc);
@@ -2228,7 +2265,12 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     case WM_DISPLAYCHANGE: {
         appBar_.Unregister();
         appBar_.Register(hwnd_, settings_.position, EffectiveThicknessPx());
-        RECT rc = appBar_.GetReservedRect();
+        RECT rc;
+        if (settings_.position == TaskbarPosition::Floating) {
+            rc = CalculateWindowRect();
+        } else {
+            rc = appBar_.GetReservedRect();
+        }
         SetWindowPos(hwnd_, HWND_TOPMOST,
                      rc.left, rc.top,
                      rc.right - rc.left, rc.bottom - rc.top,

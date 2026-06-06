@@ -47,5 +47,6 @@ private:
 
     // Parses "path,index" into path + index components.
     static void ParseIconPath(const std::wstring& raw,
-                               std::wstring& outPath, int& outIndex);
+                               std::wstring& outPath, int& outIndex,
+                               bool& outExplicitIndex);
 };

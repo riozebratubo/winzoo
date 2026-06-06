@@ -369,6 +369,17 @@ bool ExportSettingsToFile(const Settings& s)
     wBool("appMenuSidebarShowExplorer",    s.appMenuSidebarShowExplorer);
     wBool("appMenuSidebarShowSettings",    s.appMenuSidebarShowSettings);
     wBool("appMenuSidebarShowPower",       s.appMenuSidebarShowPower);
+    wInt("appMenuClassicPanelWidth",       s.appMenuClassicPanelWidth);
+    wBool("appMenuClassicShowDocuments",   s.appMenuClassicShowDocuments);
+    wBool("appMenuClassicShowPictures",    s.appMenuClassicShowPictures);
+    wBool("appMenuClassicShowMusic",       s.appMenuClassicShowMusic);
+    wBool("appMenuClassicShowDownloads",   s.appMenuClassicShowDownloads);
+    wBool("appMenuClassicShowRecentItems", s.appMenuClassicShowRecentItems);
+    wBool("appMenuClassicShowThisPC",      s.appMenuClassicShowThisPC);
+    wBool("appMenuClassicShowControlPanel",s.appMenuClassicShowControlPanel);
+    wBool("appMenuClassicShowWinSettings", s.appMenuClassicShowWinSettings);
+    wBool("appMenuClassicShowRun",         s.appMenuClassicShowRun);
+    wBool("appMenuClassicShowShutDown",    s.appMenuClassicShowShutDown);
     wBool("pinnedAppsAsButtonsWhenOpen",   s.pinnedAppsAsButtonsWhenOpen);
     wBool("pinnedAppsPerMonitor",          s.pinnedAppsPerMonitor);
     wInt("settingsDlgX", s.settingsDlgX);
@@ -523,7 +534,7 @@ bool ImportAndDeleteSettingsFile(Settings& s)
       ns.taskbarHookMethod = static_cast<TaskbarHookMethod>(v); }
 
     { int v = static_cast<int>(ns.appMenuLayout);
-      rEnum("appMenuLayout", 0, 1, v);
+      rEnum("appMenuLayout", 0, 3, v);
       ns.appMenuLayout = static_cast<AppMenuLayout>(v); }
 
     { int v = static_cast<int>(ns.appMenuFlattenMode);
@@ -592,6 +603,17 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     rb("appMenuSidebarShowExplorer",    ns.appMenuSidebarShowExplorer);
     rb("appMenuSidebarShowSettings",    ns.appMenuSidebarShowSettings);
     rb("appMenuSidebarShowPower",       ns.appMenuSidebarShowPower);
+    ri("appMenuClassicPanelWidth",       ns.appMenuClassicPanelWidth);
+    rb("appMenuClassicShowDocuments",    ns.appMenuClassicShowDocuments);
+    rb("appMenuClassicShowPictures",     ns.appMenuClassicShowPictures);
+    rb("appMenuClassicShowMusic",        ns.appMenuClassicShowMusic);
+    rb("appMenuClassicShowDownloads",    ns.appMenuClassicShowDownloads);
+    rb("appMenuClassicShowRecentItems",  ns.appMenuClassicShowRecentItems);
+    rb("appMenuClassicShowThisPC",       ns.appMenuClassicShowThisPC);
+    rb("appMenuClassicShowControlPanel", ns.appMenuClassicShowControlPanel);
+    rb("appMenuClassicShowWinSettings",  ns.appMenuClassicShowWinSettings);
+    rb("appMenuClassicShowRun",          ns.appMenuClassicShowRun);
+    rb("appMenuClassicShowShutDown",     ns.appMenuClassicShowShutDown);
     rb("pinnedAppsAsButtonsWhenOpen",   ns.pinnedAppsAsButtonsWhenOpen);
     rb("pinnedAppsPerMonitor",          ns.pinnedAppsPerMonitor);
     ri("settingsDlgX", ns.settingsDlgX);
@@ -629,6 +651,14 @@ bool ImportAndDeleteSettingsFile(Settings& s)
 
     { size_t p = FindValue(content, "pinnedExePathsPerMonitor");
       if (p != std::string::npos) ParseStringArrayMap(content, p, ns.pinnedExePathsPerMonitor); }
+
+    // Basic sanity: the file must contain at least one recognized key to be considered
+    // a valid settings export. If not, leave s unchanged and the file in place.
+    if (content.find("\"position\"") == std::string::npos &&
+        content.find("\"theme\"")    == std::string::npos &&
+        content.find("\"thickness\"") == std::string::npos) {
+        return false;
+    }
 
     s = ns;
     DeleteFileW(path.c_str());

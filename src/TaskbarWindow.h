@@ -38,6 +38,12 @@ private:
     LRESULT HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
     void LayoutButtons();
+    // Keep every tracked window's ptMinPosition pointed at its taskbar button so that
+    // ALL minimize paths (title-bar button, Win+Down, our own button) animate toward
+    // winzoo and tuck the minimized stub behind the bar — instead of falling back to
+    // the legacy "no taskbar" behavior (desktop title-bar stubs / wrong direction) now
+    // that winzoo hides Explorer's taskbar. Called at the end of LayoutButtons.
+    void UpdateMinimizeTargets();
     int  HitTestButton(POINT pt) const;
     void ActivateButton(int combinedIdx);
     void ShowButtonMenu(int combinedIdx, POINT ptScreen);

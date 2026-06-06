@@ -53,6 +53,78 @@ static void RelaunchShell()
     ShellExecuteW(nullptr, L"open", L"explorer.exe", nullptr, nullptr, SW_SHOWNORMAL);
 }
 
+// Infer which monitor edge a (visible) tray window is docked on from its rectangle.
+static UINT EdgeFromTrayRect(HWND tray)
+{
+    RECT r{};
+    if (!GetWindowRect(tray, &r)) return ABE_BOTTOM;
+    HMONITOR hm = MonitorFromWindow(tray, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO mi{ sizeof(mi) };
+    if (!GetMonitorInfo(hm, &mi)) return ABE_BOTTOM;
+    RECT m = mi.rcMonitor;
+    int w = r.right - r.left, h = r.bottom - r.top;
+    if (w >= h) // horizontal bar -> top or bottom
+        return (r.top - m.top) <= (m.bottom - r.bottom) ? ABE_TOP : ABE_BOTTOM;
+    // vertical bar -> left or right
+    return (r.left - m.left) <= (m.right - r.right) ? ABE_LEFT : ABE_RIGHT;
+}
+
+void RemoveShellAppBarReservation(HWND tray)
+{
+    if (!tray) return;
+    APPBARDATA abd{};
+    abd.cbSize = sizeof(abd);
+    abd.hWnd   = tray;
+    // The shell tracks appbars by hWnd globally, so removing Explorer's tray strip from
+    // another process frees the work area it was reserving. Harmless if it wasn't there.
+    SHAppBarMessage(ABM_REMOVE, &abd);
+}
+
+void RestoreShellAppBarReservation(HWND tray)
+{
+    if (!tray) return;
+    RECT r{};
+    if (!GetWindowRect(tray, &r)) return;
+    APPBARDATA abd{};
+    abd.cbSize = sizeof(abd);
+    abd.hWnd   = tray;
+    abd.uEdge  = EdgeFromTrayRect(tray);
+    abd.rc     = r;
+    // Re-add the reservation so a visible taskbar reserves its strip again after winzoo
+    // quits. ABM_NEW is a no-op (returns FALSE) if it's somehow still registered.
+    SHAppBarMessage(ABM_NEW,    &abd);
+    SHAppBarMessage(ABM_SETPOS, &abd);
+}
+
+void HideExplorerTaskbars()
+{
+    const DWORD myPid = GetCurrentProcessId();
+
+    // Primary tray(s). Skip winzoo's own Shell_TrayWnd proxy (same PID) — only hide
+    // Explorer's. Guard on visibility so repeated calls are cheap no-ops.
+    for (HWND h = FindWindowExW(nullptr, nullptr, L"Shell_TrayWnd", nullptr); h;
+         h = FindWindowExW(nullptr, h, L"Shell_TrayWnd", nullptr)) {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(h, &pid);
+        if (pid == myPid) continue;
+        if (IsWindowVisible(h)) {
+            ShowWindow(h, SW_HIDE);
+            RemoveShellAppBarReservation(h);
+        }
+    }
+
+    // Secondary trays (one per extra monitor). winzoo does not proxy this class, so any
+    // window of it is Explorer's. Windows 11 re-creates/re-shows these on display and
+    // work-area changes, which is why this must be callable repeatedly.
+    for (HWND h = FindWindowExW(nullptr, nullptr, L"Shell_SecondaryTrayWnd", nullptr); h;
+         h = FindWindowExW(nullptr, h, L"Shell_SecondaryTrayWnd", nullptr)) {
+        if (IsWindowVisible(h)) {
+            ShowWindow(h, SW_HIDE);
+            RemoveShellAppBarReservation(h);
+        }
+    }
+}
+
 bool RelocateExplorerTaskbarToMatch(TaskbarPosition position)
 {
     BYTE wantEdge = 0;

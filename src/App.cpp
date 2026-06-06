@@ -84,14 +84,11 @@ bool App::Init(HINSTANCE hInst)
     if (settings_.taskbarHookMethod == TaskbarHookMethod::BeforeExplorer)
         RelocateExplorerTaskbarToMatch(settings_.position);
 
-    // Hide the native Windows taskbar
-    HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
-    if (tray) ShowWindow(tray, SW_HIDE);
-
-    // Hide secondary trays (multi-monitor)
-    HWND sec = nullptr;
-    while ((sec = FindWindowExW(nullptr, sec, L"Shell_SecondaryTrayWnd", nullptr)) != nullptr)
-        ShowWindow(sec, SW_HIDE);
+    // Hide the native Windows taskbar on every monitor and drop its appbar reservations.
+    // SW_HIDE alone leaves Explorer's appbars reserving their strips (and reasserting
+    // their edge, fighting winzoo); HideExplorerTaskbars also removes those. Runs before
+    // winzoo's own bars/proxy exist, so it only sees Explorer's real trays.
+    HideExplorerTaskbars();
 
     // Enumerate monitors
     std::vector<HMONITOR> monitors;
@@ -137,13 +134,22 @@ void App::Shutdown()
         tb->Destroy();
     taskbars_.clear();
 
-    // Restore the native Windows taskbar
+    // Restore the native Windows taskbar. Our bars' Unregister() (in TaskbarWindow::
+    // Destroy above) already released winzoo's own work-area reservations; now re-show
+    // Explorer's trays and re-add the appbar reservation we removed at startup, so the
+    // desktop work area reserves the real taskbar's strip again instead of being left
+    // clobbered. The taskbars are destroyed first, so FindWindow returns the real trays.
     HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
-    if (tray) ShowWindow(tray, SW_SHOW);
+    if (tray) {
+        ShowWindow(tray, SW_SHOW);
+        RestoreShellAppBarReservation(tray);
+    }
 
     HWND sec = nullptr;
-    while ((sec = FindWindowExW(nullptr, sec, L"Shell_SecondaryTrayWnd", nullptr)) != nullptr)
+    while ((sec = FindWindowExW(nullptr, sec, L"Shell_SecondaryTrayWnd", nullptr)) != nullptr) {
         ShowWindow(sec, SW_SHOW);
+        RestoreShellAppBarReservation(sec);
+    }
 
     if (mutex_) {
         ReleaseMutex(mutex_);

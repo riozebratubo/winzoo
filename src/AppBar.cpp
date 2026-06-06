@@ -11,12 +11,14 @@ UINT AppBar::EdgeForPosition(TaskbarPosition p)
     }
 }
 
-RECT AppBar::MonitorRectForWindow() const
+RECT AppBar::MonitorRectForWindow(bool* isPrimary) const
 {
     HMONITOR hMon = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO mi = {};
     mi.cbSize = sizeof(mi);
     GetMonitorInfo(hMon, &mi);
+    if (isPrimary)
+        *isPrimary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
     return mi.rcMonitor;
 }
 
@@ -43,7 +45,56 @@ bool AppBar::Register(HWND hwnd, TaskbarPosition position, int thicknessPx)
     SHAppBarMessage(ABM_NEW, &abd_);
     registered_ = true;
 
+    // Force the next SetPosition to actually re-issue ABM_SETPOS: ABM_NEW resets the
+    // shell's reservation, so the idempotency guard must not short-circuit it.
+    haveApplied_ = false;
+    lastStrip_   = {};
+
     return SetPosition(position, thicknessPx);
+}
+
+// Shrink a full-monitor rect down to a strip of `thickness` px on the given edge.
+static void StripForEdge(RECT& r, UINT edge, int thickness)
+{
+    switch (edge) {
+    case ABE_BOTTOM: r.top    = r.bottom - thickness; break;
+    case ABE_TOP:    r.bottom = r.top    + thickness; break;
+    case ABE_LEFT:   r.right  = r.left   + thickness; break;
+    case ABE_RIGHT:  r.left   = r.right  - thickness; break;
+    default: break;
+    }
+}
+
+// Carve a strip of `thickness` px out of a full-monitor work-area rect on the given edge.
+static void CarveWorkArea(RECT& r, UINT edge, int thickness)
+{
+    switch (edge) {
+    case ABE_BOTTOM: r.bottom -= thickness; break;
+    case ABE_TOP:    r.top    += thickness; break;
+    case ABE_LEFT:   r.left   += thickness; break;
+    case ABE_RIGHT:  r.right  -= thickness; break;
+    default: break;
+    }
+}
+
+// Re-fit windows that are maximized on `mon` to `work`. We change the work area without
+// SPIF_SENDCHANGE (broadcasting re-triggers the shell into re-stacking its own taskbar
+// strip), so USER does not reposition maximized windows for us — they stay sized to the
+// old, larger reservation, leaving a gap above the bar. Resize them ourselves, targeted
+// to this monitor, so no global broadcast is involved.
+static void RefitMaximizedWindows(HMONITOR mon, const RECT& work)
+{
+    struct Ctx { HMONITOR mon; RECT work; } ctx{ mon, work };
+    EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
+        auto* c = reinterpret_cast<Ctx*>(lp);
+        if (IsWindowVisible(hwnd) && IsZoomed(hwnd) &&
+            MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) == c->mon) {
+            SetWindowPos(hwnd, nullptr, c->work.left, c->work.top,
+                         c->work.right - c->work.left, c->work.bottom - c->work.top,
+                         SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&ctx));
 }
 
 bool AppBar::SetPosition(TaskbarPosition position, int thicknessPx)
@@ -54,45 +105,66 @@ bool AppBar::SetPosition(TaskbarPosition position, int thicknessPx)
     if (position == TaskbarPosition::Floating || !registered_)
         return false;
 
-    RECT mon = MonitorRectForWindow();
-    abd_.uEdge = EdgeForPosition(position);
-    abd_.rc    = mon;
+    RECT mon  = MonitorRectForWindow();
+    UINT edge = EdgeForPosition(position);
 
-    switch (abd_.uEdge) {
-    case ABE_BOTTOM: abd_.rc.top    = abd_.rc.bottom - thicknessPx; break;
-    case ABE_TOP:    abd_.rc.bottom = abd_.rc.top    + thicknessPx; break;
-    case ABE_LEFT:   abd_.rc.right  = abd_.rc.left   + thicknessPx; break;
-    case ABE_RIGHT:  abd_.rc.left   = abd_.rc.right  - thicknessPx; break;
-    default: break;
+    // The strip we want to reserve on this monitor's edge.
+    RECT strip = mon;
+    StripForEdge(strip, edge, thicknessPx);
+
+    // The appbar registration (ABM_SETPOS) is the part that must stay idempotent: the
+    // shell sends ABN_POSCHANGED whenever ANY appbar moves, and re-issuing ABM_SETPOS
+    // re-notifies others, which can feed an endless reassertion loop (the trembling).
+    // So only touch the appbar + window size when OUR strip actually changed. The
+    // work-area correction below, however, runs every call (see why there).
+    bool stripChanged = !(haveApplied_ && edge == abd_.uEdge && EqualRect(&strip, &lastStrip_));
+
+    if (stripChanged) {
+        abd_.uEdge = edge;
+        abd_.rc    = strip;
+        SHAppBarMessage(ABM_QUERYPOS, &abd_);
+        // ABM_QUERYPOS may have nudged the rect to avoid other appbars; re-clamp to our
+        // exact thickness on the chosen edge so the bar size stays stable.
+        StripForEdge(abd_.rc, edge, thicknessPx);
+        SHAppBarMessage(ABM_SETPOS, &abd_);
+        reservedRect_ = abd_.rc;
+
+        SetWindowPos(hwnd_, HWND_TOPMOST,
+                     reservedRect_.left, reservedRect_.top,
+                     reservedRect_.right  - reservedRect_.left,
+                     reservedRect_.bottom - reservedRect_.top,
+                     SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+        lastStrip_   = strip;
+        haveApplied_ = true;
     }
 
-    SHAppBarMessage(ABM_QUERYPOS, &abd_);
-    SHAppBarMessage(ABM_SETPOS,   &abd_);
-    reservedRect_ = abd_.rc;
-
-    // The shell includes Explorer's hidden taskbar in its work area calculation even
-    // after SW_HIDE (SW_HIDE doesn't call ABM_REMOVE). Override the work area so only
-    // our strip is reserved. Re-entry guard prevents the SPIF_SENDCHANGE -> ABN_POSCHANGED
-    // -> SetPosition loop from running forever.
+    // Force THIS monitor's work area to reserve ONLY our strip. Windows 11's taskbar
+    // keeps a work-area reservation (~48px) even after SW_HIDE/ABM_REMOVE — it isn't a
+    // classic appbar, so we can't remove it the normal way — and our own reservation
+    // stacks under it (measured: 60px Explorer + 50px winzoo = 110px on the primary).
+    // SPI_SETWORKAREA targets the monitor containing the rect, so this works per-monitor;
+    // we read the live work area via GetMonitorInfo (SPI_GETWORKAREA only reports the
+    // primary). Run on EVERY call (not gated by the idempotency check) so we re-correct
+    // after the shell re-stacks, and WITHOUT SPIF_SENDCHANGE — broadcasting is exactly
+    // what nudges the shell into re-reserving its strip, which created the stacking loop.
     if (!adjustingWorkArea_) {
-        adjustingWorkArea_ = true;
-        RECT workArea = mon;
-        switch (abd_.uEdge) {
-        case ABE_BOTTOM: workArea.bottom -= thicknessPx; break;
-        case ABE_TOP:    workArea.top    += thicknessPx; break;
-        case ABE_LEFT:   workArea.left   += thicknessPx; break;
-        case ABE_RIGHT:  workArea.right  -= thicknessPx; break;
-        default: break;
+        RECT desiredWA = mon;
+        CarveWorkArea(desiredWA, edge, thicknessPx);
+        MONITORINFO mi = { sizeof(mi) };
+        HMONITOR hMon = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY);
+        if (GetMonitorInfo(hMon, &mi) && !EqualRect(&mi.rcWork, &desiredWA)) {
+            adjustingWorkArea_ = true;
+            SystemParametersInfo(SPI_SETWORKAREA, 0, &desiredWA, 0);
+            // The silent SPI_SETWORKAREA above won't re-fit already-maximized windows;
+            // do it ourselves so they fill the corrected area instead of staying short.
+            RefitMaximizedWindows(hMon, desiredWA);
+            adjustingWorkArea_ = false;
         }
-        SystemParametersInfo(SPI_SETWORKAREA, 0, &workArea, SPIF_SENDCHANGE);
-        adjustingWorkArea_ = false;
     }
 
-    SetWindowPos(hwnd_, HWND_TOPMOST,
-                 reservedRect_.left, reservedRect_.top,
-                 reservedRect_.right  - reservedRect_.left,
-                 reservedRect_.bottom - reservedRect_.top,
-                 SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    lastStrip_   = strip;
+    haveApplied_ = true;
     return true;
 }
 
@@ -102,7 +174,9 @@ void AppBar::Unregister()
     abd_.cbSize = sizeof(abd_);
     abd_.hWnd   = hwnd_;
     SHAppBarMessage(ABM_REMOVE, &abd_);
-    registered_ = false;
+    registered_  = false;
+    haveApplied_ = false;
+    lastStrip_   = {};
 }
 
 void AppBar::OnCallback(WPARAM wParam, LPARAM lParam)

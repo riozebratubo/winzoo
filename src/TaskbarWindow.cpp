@@ -6,6 +6,7 @@
 #include "SystemStatus.h"
 #include "LaunchHelper.h"
 #include "JumpList.h"
+#include "TaskbarRelocate.h"
 #include <algorithm>
 #include <atomic>
 #include <memory>
@@ -910,6 +911,48 @@ void TaskbarWindow::LayoutButtons()
             for (auto& btn : taskBtns) btn.rect = {};
         }
     }
+
+    UpdateMinimizeTargets();
+}
+
+void TaskbarWindow::UpdateMinimizeTargets()
+{
+    if (!hwnd_ || settings_.position == TaskbarPosition::Floating) return;
+
+    POINT origin = {};
+    ClientToScreen(hwnd_, &origin);
+
+    // Which bar owns a window's minimize target: in multi-monitor mode the bar on the
+    // window's own monitor; otherwise the single (primary) bar owns everything.
+    bool perMonitor = (settings_.taskbarMonitorMode == TaskbarMonitorMode::AllMonitors);
+
+    for (auto& btn : tracker_.MutableButtons()) {
+        // Only windows with a laid-out button on THIS bar, and only while non-minimized
+        // (so we set the target before the next minimize; touching an already-minimized
+        // window's placement risks a visible jump/restore).
+        if (!btn.hwnd || IsRectEmpty(&btn.rect) || IsIconic(btn.hwnd))
+            continue;
+
+        bool owns = perMonitor
+                  ? (MonitorFromWindow(btn.hwnd, MONITOR_DEFAULTTONEAREST) == hMonitor_)
+                  : isPrimary_;
+        if (!owns) continue;
+
+        POINT target = {
+            origin.x + (btn.rect.left + btn.rect.right)  / 2,
+            origin.y + (btn.rect.top  + btn.rect.bottom) / 2
+        };
+        if (target.x == btn.minTarget.x && target.y == btn.minTarget.y)
+            continue;  // unchanged — avoid a redundant SetWindowPlacement
+
+        WINDOWPLACEMENT wp = { sizeof(wp) };
+        if (GetWindowPlacement(btn.hwnd, &wp)) {
+            wp.ptMinPosition = target;
+            wp.flags |= WPF_SETMINPOSITION;
+            SetWindowPlacement(btn.hwnd, &wp);
+            btn.minTarget = target;
+        }
+    }
 }
 
 int TaskbarWindow::HitTestButton(POINT pt) const
@@ -1539,15 +1582,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         return 0;
     }
     if (taskbarCreatedMsg_ && uMsg == taskbarCreatedMsg_) {
-        HWND tray = FindWindow(L"Shell_TrayWnd", nullptr);
-        // If FindWindow returns our own proxy window, look past it for Explorer's.
-        if (tray) {
-            DWORD pid = 0;
-            GetWindowThreadProcessId(tray, &pid);
-            if (pid == GetCurrentProcessId())
-                tray = FindWindowEx(nullptr, tray, L"Shell_TrayWnd", nullptr);
-        }
-        if (tray) ShowWindow(tray, SW_HIDE);
+        // A restarted Explorer re-creates its taskbars on every monitor (primary and
+        // secondary) and re-registers their appbars. Re-hide them all so they don't
+        // reappear over winzoo's bars or steal the work area.
+        HideExplorerTaskbars();
         appBar_.Unregister();
         appBar_.Register(hwnd_, settings_.position, EffectiveThicknessPx());
         // For floating mode, AppBar is not registered so GetReservedRect() returns {0,0,0,0};
@@ -2203,6 +2241,16 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         } else if (wParam == kTimerAppScan) {
             StartScanThread(false);
         } else if (wParam == kTimerStatus) {
+            // Safety net: Windows 11 re-shows Explorer's taskbars (especially the
+            // secondary-monitor ones) on display/work-area changes, and SW_HIDE at
+            // startup doesn't stick. Re-hide any that reappeared. One bar drives this so
+            // the monitors aren't swept redundantly; the sweep itself covers all of them.
+            if (isPrimary_) HideExplorerTaskbars();
+            // Re-assert this monitor's work-area reservation in case the shell re-stacked
+            // its own taskbar strip under ours. SetPosition is now idempotent for the
+            // appbar/window itself, so this only re-corrects the work area when it drifted.
+            if (settings_.position != TaskbarPosition::Floating)
+                appBar_.SetPosition(settings_.position, EffectiveThicknessPx());
             SystemStatusData fresh = PollSystemStatus();
             bool availChanged = (fresh.volAvailable != statusData_.volAvailable ||
                                  fresh.netAvailable != statusData_.netAvailable ||

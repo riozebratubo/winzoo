@@ -93,7 +93,8 @@ private:
     HMONITOR        hMonitor_       = nullptr;
     std::vector<TaskButton>        pinnedButtons_;   // rebuilt from settings_.pinnedExePaths
     std::vector<AppEntry>          appEntries_;
-    std::vector<TrayIconEntry>     trayIcons_;       // owns the HICONs
+    std::vector<TrayIconEntry>     trayIcons_;       // owns the HICONs (visible only)
+    std::vector<TrayIconEntry>     hiddenTrayIcons_; // NIS_HIDDEN icons (tracked for state transitions)
     std::vector<RECT>              trayIconRects_;
     std::wstring    monitorDeviceName_;
     std::wstring    currentLangText_;    // e.g. "EN-US" — updated by kTimerActiveWindow

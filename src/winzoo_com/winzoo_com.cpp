@@ -263,6 +263,7 @@ static void RelayTrayRecord(const SHELLTRAYDATA* st, SIZE_T cbData) {
 
     WinzooTrayRecord rec = {};
     rec.dwMessage    = st->dwMessage;
+    rec.reserved     = sizeof(WinzooTrayRecord);  // signals header size to receiver
     rec.ownerHwnd    = static_cast<UINT64>(nid.hWnd);   // 32-bit handle, zero-extended
     rec.uID          = nid.uID;
     rec.uFlags       = nid.uFlags;
@@ -273,6 +274,15 @@ static void RelayTrayRecord(const SHELLTRAYDATA* st, SIZE_T cbData) {
     if (cbData >= sizeof(SHELLTRAYDATA)) {
         if (nid.uFlags & NIF_GUID) rec.guidItem = nid.guidItem;
         rec.uVersion = nid.uVersion;  // meaningful for NIM_SETVERSION
+    }
+
+    // State (NIS_HIDDEN etc.) — dwState/dwStateMask are at fixed offsets past szTip.
+    // Only safe to read when the blob covers through dwStateMask.
+    constexpr SIZE_T kMinState = offsetof(SHELLTRAYDATA, nid) +
+                                 offsetof(WireNID, dwStateMask) + sizeof(DWORD);
+    if ((nid.uFlags & kNIF_STATE) && cbData >= kMinState) {
+        rec.dwState     = nid.dwState;
+        rec.dwStateMask = nid.dwStateMask;
     }
 
     // Tooltip (szTip) — bounded, NUL-clamped.

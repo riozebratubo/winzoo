@@ -16,6 +16,11 @@
 // COPYDATASTRUCT.dwData magic identifying a winzoo tray record. ('WZTR')
 constexpr ULONG_PTR kWinzooTrayMagic = 0x575A5452;
 
+// NIF/NIS constants used by both sides (avoids pulling in shellapi.h everywhere).
+constexpr UINT kNIF_ICON   = 0x00000002;
+constexpr UINT kNIF_STATE  = 0x00000008;
+constexpr UINT kNIS_HIDDEN = 0x00000001;
+
 // ---------------------------------------------------------------------------
 // Diagnostic logging (temporary). Both winzoo.exe and the injected DLL append
 // to %TEMP%\winzoo_tray.log so we can see the cross-process tray data flow.
@@ -47,9 +52,13 @@ inline void WinzooTrayLog(const char* tag, const char* fmt, ...) {
 }
 
 #pragma pack(push, 4)
+// Minimum record size for backward compat: receivers should accept records at
+// least this large (the original layout without dwState fields).
+constexpr size_t kWinzooTrayRecordMinSize = 64;
+
 struct WinzooTrayRecord {
     DWORD  dwMessage;     // NIM_ADD / NIM_MODIFY / NIM_DELETE / NIM_SETVERSION
-    DWORD  reserved;
+    DWORD  reserved;      // == sizeof(WinzooTrayRecord) from sender; 0 for old senders
     UINT64 ownerHwnd;     // NOTIFYICONDATA.hWnd (owner), 64-bit for x64
     UINT   uID;
     UINT   uCallbackMsg;  // 0 if NIF_MESSAGE not set
@@ -60,6 +69,12 @@ struct WinzooTrayRecord {
     INT    iconH;
     UINT   cbTooltip;     // bytes of tooltip text that follow (no null terminator)
     UINT   cbIconBits;    // bytes of BGRA that follow (== iconW*iconH*4, or 0)
+    // --- v2 fields (appended for backward compat) ---
+    DWORD  dwState;       // NOTIFYICONDATA.dwState (NIS_HIDDEN etc.), 0 if unknown
+    DWORD  dwStateMask;   // which bits of dwState are valid
     // followed by: wchar_t tooltip[cbTooltip/2], then BYTE bgra[cbIconBits]
 };
 #pragma pack(pop)
+
+static_assert(kWinzooTrayRecordMinSize == 64, "old header size mismatch");
+static_assert(sizeof(WinzooTrayRecord) == 72, "struct grew unexpectedly");

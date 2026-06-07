@@ -487,6 +487,8 @@ void TaskbarWindow::RefreshTrayIcons()
     if (!settings_.showTrayIcons) {
         for (auto& e : trayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
         trayIcons_.clear();
+        for (auto& e : hiddenTrayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
+        hiddenTrayIcons_.clear();
         return;
     }
 
@@ -629,62 +631,204 @@ void TaskbarWindow::OnTrayPush(const WinzooTrayRecord& rec, const wchar_t* tip,
         trayPushActive_ = true;
         for (auto& e : trayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
         trayIcons_.clear();
+        for (auto& e : hiddenTrayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
+        hiddenTrayIcons_.clear();
     }
 
     HWND owner = reinterpret_cast<HWND>(static_cast<UINT_PTR>(rec.ownerHwnd));
 
-    auto match = [&](const TrayIconEntry& e) {
+    auto matchFn = [&](const TrayIconEntry& e) {
         return e.hWnd == owner && e.uID == rec.uID;
     };
-    auto it = std::find_if(trayIcons_.begin(), trayIcons_.end(), match);
+    auto itVis = std::find_if(trayIcons_.begin(), trayIcons_.end(), matchFn);
+    auto itHid = std::find_if(hiddenTrayIcons_.begin(), hiddenTrayIcons_.end(), matchFn);
+    bool inVisible = (itVis != trayIcons_.end());
+    bool inHidden  = (itHid != hiddenTrayIcons_.end());
 
     if (rec.dwMessage == NIM_DELETE) {
-        if (it != trayIcons_.end()) {
-            if (it->hIcon) DestroyIcon(it->hIcon);
-            trayIcons_.erase(it);
+        if (inVisible) {
+            if (itVis->hIcon) DestroyIcon(itVis->hIcon);
+            trayIcons_.erase(itVis);
             LayoutButtons();
             InvalidateRect(hwnd_, nullptr, FALSE);
+        }
+        if (inHidden) {
+            if (itHid->hIcon) DestroyIcon(itHid->hIcon);
+            hiddenTrayIcons_.erase(itHid);
         }
         return;
     }
 
     if (rec.dwMessage != NIM_ADD && rec.dwMessage != NIM_MODIFY)
-        return;  // NIM_SETVERSION etc.: nothing to render (we always send both formats)
+        return;
+
+    // Determine hidden state from NIS_HIDDEN (dedup: apps like Task Manager register
+    // many icons but hide all except the active one).
+    bool wantHidden = false;
+    bool stateKnown = false;
+    if (rec.uFlags & kNIF_STATE) {
+        if (rec.dwStateMask & kNIS_HIDDEN) {
+            wantHidden = !!(rec.dwState & kNIS_HIDDEN);
+            stateKnown = true;
+        }
+    }
+
+    // For icons already tracked, inherit their current hidden state if this message
+    // doesn't carry NIF_STATE (just a tooltip/icon update, no visibility change).
+    // Exception: if a hidden icon receives a NIF_ICON update (the app is actively
+    // changing its visual), treat it as an implicit "make visible" — the app clearly
+    // intends this icon to be the one shown (e.g. Task Manager cycling CPU% images).
+    if (!stateKnown) {
+        if (inVisible) {
+            wantHidden = false;
+        } else if (inHidden) {
+            if (rec.uFlags & kNIF_ICON)
+                wantHidden = false;  // promote: app is actively using this icon
+            else
+                wantHidden = true;   // inherit hidden state for non-visual updates
+        }
+    }
 
     // Build the incoming icon, if this record carried one.
     HICON newIcon = (rec.cbIconBits && bgra)
                   ? IconFromBGRA(bgra, rec.iconW, rec.iconH) : nullptr;
 
-    if (it == trayIcons_.end()) {
-        // New icon — create the entry and place it at the front of the order list.
-        TrayIconEntry e = {};
-        e.hWnd         = owner;
-        e.uID          = rec.uID;
-        e.uCallbackMsg = rec.uCallbackMsg;
-        ExeInfoFromHwnd(owner, e.exePath, e.exeName);
-        e.orderKey     = e.exeName + L"|" + std::to_wstring(e.uID);
-        e.tooltip.assign(tip, tip + tipChars);
-        e.hIcon        = newIcon;
-        if (!e.hIcon && owner) e.hIcon = TrayIconFromOwner(owner);  // fallback
+    // --- Transition: visible → hidden ---
+    if (inVisible && wantHidden) {
+        TrayIconEntry moved = std::move(*itVis);
+        trayIcons_.erase(itVis);
+        moved.hidden = true;
+        if (rec.uCallbackMsg) moved.uCallbackMsg = rec.uCallbackMsg;
+        if (rec.uFlags & NIF_TIP) moved.tooltip.assign(tip, tip + tipChars);
+        if (newIcon) {
+            if (moved.hIcon) DestroyIcon(moved.hIcon);
+            moved.hIcon = newIcon;
+        }
+        hiddenTrayIcons_.push_back(std::move(moved));
+        LayoutButtons();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+
+    // --- Transition: hidden → visible ---
+    if (inHidden && !wantHidden) {
+        TrayIconEntry moved = std::move(*itHid);
+        hiddenTrayIcons_.erase(itHid);
+        moved.hidden = false;
+        if (rec.uCallbackMsg) moved.uCallbackMsg = rec.uCallbackMsg;
+        if (rec.uFlags & NIF_TIP) moved.tooltip.assign(tip, tip + tipChars);
+        if (newIcon) {
+            if (moved.hIcon) DestroyIcon(moved.hIcon);
+            moved.hIcon = newIcon;
+        }
+        if (!moved.hIcon && owner) moved.hIcon = TrayIconFromOwner(owner);
+
+        // Demote siblings: if another icon from the same hWnd is currently visible,
+        // move it to hidden (the new icon is taking over as the "active" one).
+        if (owner) {
+            for (auto it2 = trayIcons_.begin(); it2 != trayIcons_.end(); ) {
+                if (it2->hWnd == owner) {
+                    TrayIconEntry demoted = std::move(*it2);
+                    it2 = trayIcons_.erase(it2);
+                    demoted.hidden = true;
+                    hiddenTrayIcons_.push_back(std::move(demoted));
+                } else {
+                    ++it2;
+                }
+            }
+        }
 
         auto& order = settings_.trayIconOrder;
-        if (std::find(order.begin(), order.end(), e.orderKey) == order.end()) {
-            order.insert(order.begin(), e.orderKey);
+        if (std::find(order.begin(), order.end(), moved.orderKey) == order.end()) {
+            order.insert(order.begin(), moved.orderKey);
             SaveSettings(settings_);
         }
-        // Insert respecting saved order: position by orderKey index.
-        InsertTrayIconOrdered(std::move(e));
-    } else {
-        // Existing icon — update in place.
-        if (rec.uCallbackMsg) it->uCallbackMsg = rec.uCallbackMsg;
-        if (rec.uFlags & NIF_TIP)
-            it->tooltip.assign(tip, tip + tipChars);
+        InsertTrayIconOrdered(std::move(moved));
+        LayoutButtons();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+
+    // --- Update in place (no visibility transition) ---
+    if (inVisible) {
+        if (rec.uCallbackMsg) itVis->uCallbackMsg = rec.uCallbackMsg;
+        if (rec.uFlags & NIF_TIP) itVis->tooltip.assign(tip, tip + tipChars);
         if (newIcon) {
-            if (it->hIcon) DestroyIcon(it->hIcon);
-            it->hIcon = newIcon;
+            if (itVis->hIcon) DestroyIcon(itVis->hIcon);
+            itVis->hIcon = newIcon;
+
+            // Demote siblings: if another icon from the same hWnd is visible,
+            // move it to hidden (this icon is now the "active" one for this app).
+            if (owner) {
+                for (auto it2 = trayIcons_.begin(); it2 != trayIcons_.end(); ) {
+                    if (it2->hWnd == owner && it2 != itVis) {
+                        TrayIconEntry demoted = std::move(*it2);
+                        it2 = trayIcons_.erase(it2);
+                        demoted.hidden = true;
+                        hiddenTrayIcons_.push_back(std::move(demoted));
+                        // itVis may have been invalidated by erase; re-find it
+                        itVis = std::find_if(trayIcons_.begin(), trayIcons_.end(), matchFn);
+                    } else {
+                        ++it2;
+                    }
+                }
+            }
+        }
+        LayoutButtons();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+
+    if (inHidden) {
+        if (rec.uCallbackMsg) itHid->uCallbackMsg = rec.uCallbackMsg;
+        if (rec.uFlags & NIF_TIP) itHid->tooltip.assign(tip, tip + tipChars);
+        if (newIcon) {
+            if (itHid->hIcon) DestroyIcon(itHid->hIcon);
+            itHid->hIcon = newIcon;
+        }
+        return;  // no visual change
+    }
+
+    // --- Brand new icon (not in either list) ---
+    TrayIconEntry e = {};
+    e.hWnd         = owner;
+    e.uID          = rec.uID;
+    e.uCallbackMsg = rec.uCallbackMsg;
+    e.hidden       = wantHidden;
+    ExeInfoFromHwnd(owner, e.exePath, e.exeName);
+    e.orderKey     = e.exeName + L"|" + std::to_wstring(e.uID);
+    e.tooltip.assign(tip, tip + tipChars);
+    e.hIcon        = newIcon;
+
+    if (wantHidden) {
+        hiddenTrayIcons_.push_back(std::move(e));
+        return;  // no visual change
+    }
+
+    if (!e.hIcon && owner) e.hIcon = TrayIconFromOwner(owner);
+
+    // Demote siblings: if other icons from the same hWnd are already visible,
+    // move them to hidden (only the latest one should show — matches the legacy
+    // scrape's per-hWnd dedup for apps like Task Manager that register many icons).
+    if (owner) {
+        for (auto it2 = trayIcons_.begin(); it2 != trayIcons_.end(); ) {
+            if (it2->hWnd == owner) {
+                TrayIconEntry demoted = std::move(*it2);
+                it2 = trayIcons_.erase(it2);
+                demoted.hidden = true;
+                hiddenTrayIcons_.push_back(std::move(demoted));
+            } else {
+                ++it2;
+            }
         }
     }
 
+    auto& order = settings_.trayIconOrder;
+    if (std::find(order.begin(), order.end(), e.orderKey) == order.end()) {
+        order.insert(order.begin(), e.orderKey);
+        SaveSettings(settings_);
+    }
+    InsertTrayIconOrdered(std::move(e));
     LayoutButtons();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
@@ -728,6 +872,15 @@ void TaskbarWindow::PruneDeadTrayIcons()
             if (it->hIcon) DestroyIcon(it->hIcon);
             it = trayIcons_.erase(it);
             changed = true;
+        } else {
+            ++it;
+        }
+    }
+    // Also prune dead entries from the hidden list (no visual change needed).
+    for (auto it = hiddenTrayIcons_.begin(); it != hiddenTrayIcons_.end(); ) {
+        if (it->hWnd && !IsWindow(it->hWnd)) {
+            if (it->hIcon) DestroyIcon(it->hIcon);
+            it = hiddenTrayIcons_.erase(it);
         } else {
             ++it;
         }
@@ -1826,15 +1979,28 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     if (uMsg == WM_COPYDATA) {
         auto* cds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
         if (cds && cds->dwData == kWinzooTrayMagic && cds->lpData &&
-            cds->cbData >= sizeof(WinzooTrayRecord)) {
+            cds->cbData >= kWinzooTrayRecordMinSize) {
             const BYTE* base = static_cast<const BYTE*>(cds->lpData);
-            WinzooTrayRecord rec;
-            memcpy(&rec, base, sizeof(rec));
-            size_t need = sizeof(rec) + rec.cbTooltip + rec.cbIconBits;
-            if (cds->cbData >= need) {
-                const wchar_t* tip = reinterpret_cast<const wchar_t*>(base + sizeof(rec));
+            WinzooTrayRecord rec = {};  // zero-init ensures dwState/dwStateMask=0 if absent
+
+            // Read the minimum header first to discover the actual header size.
+            memcpy(&rec, base, kWinzooTrayRecordMinSize);
+
+            // rec.reserved carries the sender's sizeof(WinzooTrayRecord). If 0 (old
+            // DLL) or out of range, fall back to the old 64-byte header layout.
+            size_t hdrSize = kWinzooTrayRecordMinSize;
+            if (rec.reserved >= kWinzooTrayRecordMinSize &&
+                cds->cbData >= rec.reserved) {
+                // Copy as much of the header as we understand; skip the rest for payload.
+                size_t copyable = (std::min)(static_cast<size_t>(rec.reserved), sizeof(rec));
+                memcpy(&rec, base, copyable);
+                hdrSize = rec.reserved;  // payload starts after sender's full header
+            }
+
+            if (cds->cbData >= hdrSize + rec.cbTooltip + rec.cbIconBits) {
+                const wchar_t* tip = reinterpret_cast<const wchar_t*>(base + hdrSize);
                 size_t tipChars    = rec.cbTooltip / sizeof(wchar_t);
-                const BYTE* bgra   = base + sizeof(rec) + rec.cbTooltip;
+                const BYTE* bgra   = base + hdrSize + rec.cbTooltip;
                 OnTrayPush(rec, tip, tipChars, rec.cbIconBits ? bgra : nullptr);
             }
             return TRUE;
@@ -2686,6 +2852,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         }
         for (auto& e : trayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
         trayIcons_.clear();
+        for (auto& e : hiddenTrayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
+        hiddenTrayIcons_.clear();
         tracker_.Shutdown();
         appBar_.Unregister();
         PostQuitMessage(0);

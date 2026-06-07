@@ -2491,6 +2491,14 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             // EnsureExplorerHook is cheap when already hooked and also re-hooks a
             // restarted Explorer (pid change), so this doubles as restart recovery.
             if (isPrimary_) proxy_.EnsureExplorerHook();
+            // Re-assert Explorer's hidden Shell_TrayWnd onto winzoo's rect every tick.
+            // DWM reads that window's screen rect to aim the minimize animation; a fresh
+            // Explorer (after our restart) re-docks its tray to its own edge AFTER our
+            // one-time move, so without this every window animates to the wrong edge.
+            if (isPrimary_) {
+                RECT prc; GetWindowRect(hwnd_, &prc);
+                proxy_.UpdatePosition(prc);
+            }
             // Re-assert this monitor's work-area reservation in case the shell re-stacked
             // its own taskbar strip under ours. SetPosition is now idempotent for the
             // appbar/window itself, so this only re-corrects the work area when it drifted.

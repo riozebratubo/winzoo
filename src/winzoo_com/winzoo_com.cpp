@@ -355,12 +355,52 @@ static void CollapseEdge(RECT& rc, UINT edge) {
     }
 }
 
+// Infer the docked edge (ABE_*) of a window from its rect relative to its monitor.
+static UINT EdgeFromWindowRect(HWND h) {
+    RECT r{};
+    if (!GetWindowRect(h, &r)) return ABE_BOTTOM;
+    HMONITOR hm = MonitorFromWindow(h, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO mi{ sizeof(mi) };
+    if (!GetMonitorInfo(hm, &mi)) return ABE_BOTTOM;
+    RECT m = mi.rcMonitor;
+    int w = r.right - r.left, ht = r.bottom - r.top;
+    if (w >= ht)  // horizontal bar -> top or bottom
+        return (r.top - m.top) <= (m.bottom - r.bottom) ? ABE_TOP : ABE_BOTTOM;
+    return (r.left - m.left) <= (m.right - r.right) ? ABE_LEFT : ABE_RIGHT;  // vertical
+}
+
+// Find winzoo's taskbar on the same monitor as `ref`, and return its docked edge.
+// Returns false if no winzoo bar is on that monitor (then we leave the edge alone).
+static bool WinzooEdgeForMonitor(HWND ref, UINT& outEdge) {
+    HMONITOR refMon = MonitorFromWindow(ref, MONITOR_DEFAULTTOPRIMARY);
+    for (HWND h = FindWindowW(L"WinzooTaskbar", nullptr); h;
+         h = FindWindowExW(nullptr, h, L"WinzooTaskbar", nullptr)) {
+        if (MonitorFromWindow(h, MONITOR_DEFAULTTOPRIMARY) == refMon) {
+            outEdge = EdgeFromWindowRect(h);
+            return true;
+        }
+    }
+    return false;
+}
+
 static UINT_PTR WINAPI Hook_SHAppBarMessage(DWORD dwMessage, PAPPBARDATA abd) {
-    // ABM_SETPOS is the call that actually reserves work area. Collapse Explorer's own
-    // taskbar reservation to zero thickness so it no longer stacks under winzoo's strip.
-    // (ABM_QUERYPOS just echoes an adjusted rect back, so vetoing it is pointless.)
-    if (abd && dwMessage == ABM_SETPOS && IsExplorerTaskbar(abd->hWnd))
-        CollapseEdge(abd->rc, abd->uEdge);
+    // For Explorer's OWN taskbars on ABM_SETPOS, rewrite the registration so it (1)
+    // docks on winzoo's edge and (2) reserves zero thickness:
+    //   - (c) work-area: collapsing the rect to zero stops Explorer's taskbar strip from
+    //     stacking its reservation under winzoo's (the "appbar fight"). Primary fix.
+    //   - (b) minimize: genuine ApplicationFrameWindow/UWP apps (e.g. Settings) resolve
+    //     the taskbar from the *registered appbar edge*, not ptMinPosition (verified by
+    //     test). Keeping Explorer's appbar on winzoo's edge keeps those minimizing toward
+    //     winzoo even mid-session. (Win11's Task Manager is a XAML-island special case
+    //     that ignores this and still needs the BeforeExplorer restart path.)
+    if (abd && dwMessage == ABM_SETPOS && IsExplorerTaskbar(abd->hWnd)) {
+        UINT edge = abd->uEdge;
+        UINT wedge;
+        if (WinzooEdgeForMonitor(abd->hWnd, wedge))
+            edge = wedge;
+        abd->uEdge = edge;
+        CollapseEdge(abd->rc, edge);
+    }
     return g_realSHAppBarMessage(dwMessage, abd);
 }
 

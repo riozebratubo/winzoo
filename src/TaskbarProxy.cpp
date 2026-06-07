@@ -193,9 +193,16 @@ void TaskbarProxy::UpdatePosition(RECT rc) {
     // (obtained at system startup) and reads its screen rect to determine where to
     // animate minimizing windows. Moving the hidden tray window to match Winzoo's
     // position redirects those animations to the correct edge.
-    if (!explorerTray_) {
+    //
+    // Re-find whenever the cached handle is stale — crucially after winzoo restarts
+    // Explorer (BeforeExplorer), where the cached handle points at the destroyed old
+    // tray and the new Shell_TrayWnd would otherwise never get moved, leaving every
+    // window minimizing toward Explorer's default edge instead of winzoo's.
+    if (!explorerTray_ || !IsWindow(explorerTray_)) {
+        explorerTray_ = nullptr;
         for (HWND h = FindWindowW(L"Shell_TrayWnd", nullptr); h;
              h = FindWindowExW(nullptr, h, L"Shell_TrayWnd", nullptr)) {
+            if (h == proxyHwnd_) continue;
             DWORD pid = 0;
             GetWindowThreadProcessId(h, &pid);
             if (pid != GetCurrentProcessId()) { explorerTray_ = h; break; }

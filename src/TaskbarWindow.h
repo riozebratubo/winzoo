@@ -45,6 +45,7 @@ private:
     // that winzoo hides Explorer's taskbar. Called at the end of LayoutButtons.
     void UpdateMinimizeTargets();
     int  HitTestButton(POINT pt) const;
+    bool HitTestStartButton(POINT pt) const;
     void ActivateButton(int combinedIdx);
     void ShowButtonMenu(int combinedIdx, POINT ptScreen);
     void ShowBackgroundMenu(POINT ptScreen);

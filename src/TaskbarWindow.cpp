@@ -1136,17 +1136,41 @@ void TaskbarWindow::UpdateMinimizeTargets()
 
 int TaskbarWindow::HitTestButton(POINT pt) const
 {
+    // Extend hit area to the full taskbar thickness so clicks in the
+    // top/bottom (or left/right for vertical) padding still register.
+    bool isHoriz = (settings_.position != TaskbarPosition::Left &&
+                    settings_.position != TaskbarPosition::Right);
+
+    auto hitTest = [&](const TaskButton& btn) -> bool {
+        if (IsRectEmpty(&btn.rect)) return false;
+        if (isHoriz)
+            return pt.x >= btn.rect.left && pt.x < btn.rect.right;
+        else
+            return pt.y >= btn.rect.top && pt.y < btn.rect.bottom;
+    };
+
     // Check pinned buttons first
     for (int i = 0; std::cmp_less(i, pinnedButtons_.size()); ++i) {
-        if (pinnedButtons_[i].HitTest(pt)) return i;
+        if (hitTest(pinnedButtons_[i])) return i;
     }
     // Then task buttons (combined index offset by pinned count)
     const auto& taskBtns = tracker_.Buttons();
     int offset = (int)pinnedButtons_.size();
     for (int i = 0; std::cmp_less(i, taskBtns.size()); ++i) {
-        if (taskBtns[i].HitTest(pt)) return offset + i;
+        if (hitTest(taskBtns[i])) return offset + i;
     }
     return -1;
+}
+
+bool TaskbarWindow::HitTestStartButton(POINT pt) const
+{
+    if (!showStartButton_ || IsRectEmpty(&startBtnRect_)) return false;
+    bool isHoriz = (settings_.position != TaskbarPosition::Left &&
+                    settings_.position != TaskbarPosition::Right);
+    if (isHoriz)
+        return pt.x >= startBtnRect_.left && pt.x < startBtnRect_.right;
+    else
+        return pt.y >= startBtnRect_.top && pt.y < startBtnRect_.bottom;
 }
 
 void TaskbarWindow::LaunchApp(const wchar_t* exe, const wchar_t* args, int nShow)
@@ -2022,7 +2046,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (clientPt.x >= crc.right - b)  return HTRIGHT;
 
         if (HitTestButton(clientPt) >= 0)                                   return HTCLIENT;
-        if (PtInRect(&startBtnRect_, clientPt))                             return HTCLIENT;
+        if (HitTestStartButton(clientPt))                                   return HTCLIENT;
         if (settings_.showLangIndicator && !currentLangText_.empty()
             && PtInRect(&langIconRect_, clientPt))                          return HTCLIENT;
         if (scrollNeeded_ && (PtInRect(&scrollLeftRect_,  clientPt)
@@ -2071,7 +2095,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             InvalidateRect(hwnd, nullptr, FALSE);
         }
 
-        bool newHovStart = (PtInRect(&startBtnRect_, pt) != FALSE);
+        bool newHovStart = HitTestStartButton(pt);
         if (newHovStart != hoveredStart_) {
             hoveredStart_ = newHovStart;
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -2154,7 +2178,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
 
         // Start button takes priority
-        if (PtInRect(&startBtnRect_, pt)) {
+        if (HitTestStartButton(pt)) {
             if (!menuOpen_ && GetTickCount() - menuLastClosedTick_ > 200)
                 ShowAppMenu();
             return 0;

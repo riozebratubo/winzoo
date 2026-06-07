@@ -15,6 +15,12 @@ public:
     void Uninstall();
     void UpdatePosition(RECT screenRect);
 
+    // (Re)install the Explorer-thread hook (progress + tray interception). Safe to
+    // call repeatedly — e.g. from the TaskbarCreated handler after Explorer restarts,
+    // which is exactly when the initial install can miss (Explorer mid-restart).
+    // Returns true if a fresh hook was installed on this call.
+    bool EnsureExplorerHook();
+
     UINT RelayMsg() const { return relayMsg_; }
 
     static HWND DecodeHwnd   (WPARAM wp) { return reinterpret_cast<HWND>(wp); }
@@ -33,5 +39,6 @@ private:
     bool         registered_     = false;
     bool         updatingPosition_ = false;
     HMODULE      hHookDll_       = nullptr;
+    DWORD        hookedExplorerPid_ = 0;   // pid of the Explorer we currently hook (0 = none)
     std::wstring dllPath_;
 };

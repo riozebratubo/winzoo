@@ -62,7 +62,12 @@ private:
     void UpdateMonitorDeviceName();
 
     // Tray icon management
-    void RefreshTrayIcons();
+    void RefreshTrayIcons();                       // legacy cross-process scrape (fallback)
+    void OnTrayPush(const struct WinzooTrayRecord& rec, const wchar_t* tip,
+                    size_t tipChars, const BYTE* bgra);
+    void InsertTrayIconOrdered(TrayIconEntry&& e);
+    HICON TrayIconFromOwner(HWND owner);
+    void PruneDeadTrayIcons();
 
     void ComputeClockFontSizes();
     int  EffectiveThicknessPx() const;
@@ -146,6 +151,7 @@ private:
     bool            menuOpen_       = false;
     bool            trayDragging_   = false;
     bool            shutdownPending_= false;
+    bool            trayPushActive_ = false;  // first WinzooTray push received → stop scraping
 
     // Generation counters to discard stale background-thread results
     unsigned        scanGen_        = 0;

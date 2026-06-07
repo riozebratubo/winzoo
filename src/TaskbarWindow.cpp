@@ -7,6 +7,7 @@
 #include "LaunchHelper.h"
 #include "JumpList.h"
 #include "TaskbarRelocate.h"
+#include "WinzooTrayIpc.h"
 #include <algorithm>
 #include <atomic>
 #include <memory>
@@ -392,6 +393,62 @@ void TaskbarWindow::RebuildPinnedButtons()
     pinnedButtons_ = std::move(newPinned);
 }
 
+// Rebuild a local HICON from the top-down BGRA bits pushed by winzoo_com.dll.
+// The DLL already resolved alpha (32bpp or mask-derived), so a zeroed mask suffices.
+static HICON IconFromBGRA(const BYTE* bits, int w, int h)
+{
+    if (!bits || w <= 0 || h <= 0 || w > 256 || h > 256) return nullptr;
+
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth       = w;
+    bi.bmiHeader.biHeight      = -h;   // top-down
+    bi.bmiHeader.biPlanes      = 1;
+    bi.bmiHeader.biBitCount    = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+
+    void* pv = nullptr;
+    HBITMAP color = CreateDIBSection(nullptr, &bi, DIB_RGB_COLORS, &pv, nullptr, 0);
+    if (!color) return nullptr;
+    memcpy(pv, bits, static_cast<size_t>(w) * h * 4);
+
+    // 1bpp mask, scanlines padded to a WORD, all opaque (0).
+    std::vector<BYTE> maskBits((static_cast<size_t>((w + 15) / 16) * 2) * h, 0);
+    HBITMAP mask = CreateBitmap(w, h, 1, 1, maskBits.data());
+
+    ICONINFO ii = {};
+    ii.fIcon    = TRUE;
+    ii.hbmColor = color;
+    ii.hbmMask  = mask;
+    HICON icon  = CreateIconIndirect(&ii);  // copies the bitmaps
+
+    DeleteObject(color);
+    if (mask) DeleteObject(mask);
+    return icon;
+}
+
+// Resolve a window's owning-process exe path + basename (e.g. "Discord.exe"),
+// matching the orderKey scheme used by the legacy enumerator.
+static void ExeInfoFromHwnd(HWND hWnd, std::wstring& exePath, std::wstring& exeName)
+{
+    exePath.clear();
+    exeName.clear();
+    if (!hWnd) return;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hWnd, &pid);
+    if (!pid) return;
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProc) return;
+    wchar_t path[MAX_PATH] = {};
+    DWORD sz = MAX_PATH;
+    if (QueryFullProcessImageNameW(hProc, 0, path, &sz)) {
+        exePath = path;
+        const wchar_t* slash = wcsrchr(path, L'\\');
+        exeName = slash ? slash + 1 : path;
+    }
+    CloseHandle(hProc);
+}
+
 // Forward a mouse notification to a tray icon's owner window.
 // Sends both NOTIFYICON_VERSION_4 format (modern) and VERSION_3 format (legacy)
 // so all apps respond regardless of which version they registered with.
@@ -557,6 +614,128 @@ void TaskbarWindow::RefreshTrayIcons()
 
     LayoutButtons();
     InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+// Apply one tray delta pushed by winzoo_com.dll (intercepted Shell_NotifyIcon).
+// Maintains trayIcons_ incrementally so the cross-process scrape is no longer needed.
+void TaskbarWindow::OnTrayPush(const WinzooTrayRecord& rec, const wchar_t* tip,
+                               size_t tipChars, const BYTE* bgra)
+{
+    if (!settings_.showTrayIcons) return;
+
+    // First authoritative push: drop anything the legacy scrape fallback left behind
+    // so we hand off cleanly to a pure push model (TaskbarCreated re-adds repopulate).
+    if (!trayPushActive_) {
+        trayPushActive_ = true;
+        for (auto& e : trayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
+        trayIcons_.clear();
+    }
+
+    HWND owner = reinterpret_cast<HWND>(static_cast<UINT_PTR>(rec.ownerHwnd));
+
+    auto match = [&](const TrayIconEntry& e) {
+        return e.hWnd == owner && e.uID == rec.uID;
+    };
+    auto it = std::find_if(trayIcons_.begin(), trayIcons_.end(), match);
+
+    if (rec.dwMessage == NIM_DELETE) {
+        if (it != trayIcons_.end()) {
+            if (it->hIcon) DestroyIcon(it->hIcon);
+            trayIcons_.erase(it);
+            LayoutButtons();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
+        return;
+    }
+
+    if (rec.dwMessage != NIM_ADD && rec.dwMessage != NIM_MODIFY)
+        return;  // NIM_SETVERSION etc.: nothing to render (we always send both formats)
+
+    // Build the incoming icon, if this record carried one.
+    HICON newIcon = (rec.cbIconBits && bgra)
+                  ? IconFromBGRA(bgra, rec.iconW, rec.iconH) : nullptr;
+
+    if (it == trayIcons_.end()) {
+        // New icon — create the entry and place it at the front of the order list.
+        TrayIconEntry e = {};
+        e.hWnd         = owner;
+        e.uID          = rec.uID;
+        e.uCallbackMsg = rec.uCallbackMsg;
+        ExeInfoFromHwnd(owner, e.exePath, e.exeName);
+        e.orderKey     = e.exeName + L"|" + std::to_wstring(e.uID);
+        e.tooltip.assign(tip, tip + tipChars);
+        e.hIcon        = newIcon;
+        if (!e.hIcon && owner) e.hIcon = TrayIconFromOwner(owner);  // fallback
+
+        auto& order = settings_.trayIconOrder;
+        if (std::find(order.begin(), order.end(), e.orderKey) == order.end()) {
+            order.insert(order.begin(), e.orderKey);
+            SaveSettings(settings_);
+        }
+        // Insert respecting saved order: position by orderKey index.
+        InsertTrayIconOrdered(std::move(e));
+    } else {
+        // Existing icon — update in place.
+        if (rec.uCallbackMsg) it->uCallbackMsg = rec.uCallbackMsg;
+        if (rec.uFlags & NIF_TIP)
+            it->tooltip.assign(tip, tip + tipChars);
+        if (newIcon) {
+            if (it->hIcon) DestroyIcon(it->hIcon);
+            it->hIcon = newIcon;
+        }
+    }
+
+    LayoutButtons();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+// Insert a tray entry into trayIcons_ at the position dictated by settings_.trayIconOrder.
+void TaskbarWindow::InsertTrayIconOrdered(TrayIconEntry&& e)
+{
+    const auto& order = settings_.trayIconOrder;
+    auto rank = [&](const std::wstring& key) -> size_t {
+        auto p = std::find(order.begin(), order.end(), key);
+        return static_cast<size_t>(std::distance(order.begin(), p));
+    };
+    size_t myRank = rank(e.orderKey);
+    auto pos = std::find_if(trayIcons_.begin(), trayIcons_.end(),
+        [&](const TrayIconEntry& other) { return rank(other.orderKey) > myRank; });
+    trayIcons_.insert(pos, std::move(e));
+}
+
+// Best-effort icon for an owner window when a push carried no NIF_ICON bits.
+HICON TaskbarWindow::TrayIconFromOwner(HWND owner)
+{
+    DWORD_PTR ir = 0;
+    if (SendMessageTimeoutW(owner, WM_GETICON, ICON_SMALL2, 0,
+                            SMTO_ABORTIFHUNG, 200, &ir) && ir)
+        return CopyIcon(reinterpret_cast<HICON>(ir));
+    ir = 0;
+    if (SendMessageTimeoutW(owner, WM_GETICON, ICON_SMALL, 0,
+                            SMTO_ABORTIFHUNG, 200, &ir) && ir)
+        return CopyIcon(reinterpret_cast<HICON>(ir));
+    HICON hcls = reinterpret_cast<HICON>(GetClassLongPtrW(owner, GCLP_HICONSM));
+    return hcls ? CopyIcon(hcls) : nullptr;
+}
+
+// Drop tray entries whose owner window no longer exists. Apps that crash don't
+// send NIM_DELETE, so the old full-rescan's implicit pruning is done here instead.
+void TaskbarWindow::PruneDeadTrayIcons()
+{
+    bool changed = false;
+    for (auto it = trayIcons_.begin(); it != trayIcons_.end(); ) {
+        if (it->hWnd && !IsWindow(it->hWnd)) {
+            if (it->hIcon) DestroyIcon(it->hIcon);
+            it = trayIcons_.erase(it);
+            changed = true;
+        } else {
+            ++it;
+        }
+    }
+    if (changed) {
+        LayoutButtons();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
 }
 
 void TaskbarWindow::ComputeClockFontSizes()
@@ -1597,7 +1776,13 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                      rc.left, rc.top,
                      rc.right - rc.left, rc.bottom - rc.top,
                      SWP_NOACTIVATE | SWP_FRAMECHANGED);
-        if (isPrimary_) proxy_.UpdatePosition(rc);
+        if (isPrimary_) {
+            proxy_.UpdatePosition(rc);
+            // Explorer just (re)created its taskbars — this is the reliable moment to
+            // (re)install the injected hook, since the initial install at startup can
+            // race Explorer's restart and find no Shell_TrayWnd.
+            proxy_.EnsureExplorerHook();
+        }
         return 0;
     }
     if (appBarCallbackMsg_ && uMsg == appBarCallbackMsg_) {
@@ -1610,6 +1795,25 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         return 0;
     }
 
+    // Tray-icon push from winzoo_com.dll (intercepted Shell_NotifyIcon in Explorer).
+    if (uMsg == WM_COPYDATA) {
+        auto* cds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
+        if (cds && cds->dwData == kWinzooTrayMagic && cds->lpData &&
+            cds->cbData >= sizeof(WinzooTrayRecord)) {
+            const BYTE* base = static_cast<const BYTE*>(cds->lpData);
+            WinzooTrayRecord rec;
+            memcpy(&rec, base, sizeof(rec));
+            size_t need = sizeof(rec) + rec.cbTooltip + rec.cbIconBits;
+            if (cds->cbData >= need) {
+                const wchar_t* tip = reinterpret_cast<const wchar_t*>(base + sizeof(rec));
+                size_t tipChars    = rec.cbTooltip / sizeof(wchar_t);
+                const BYTE* bgra   = base + sizeof(rec) + rec.cbTooltip;
+                OnTrayPush(rec, tip, tipChars, rec.cbIconBits ? bgra : nullptr);
+            }
+            return TRUE;
+        }
+    }
+
     switch (uMsg) {
     case WM_CREATE: {
         dpi_ = GetWindowDpi(hwnd);
@@ -1618,6 +1822,17 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         HDC hdc = GetDC(hwnd);
         renderer_.Resize(client.right, client.bottom, hdc);
         ReleaseDC(hwnd, hdc);
+
+        // winzoo runs elevated (high integrity); the injected winzoo_com.dll lives in
+        // Explorer (medium integrity). UIPI silently drops messages from a lower-IL
+        // sender, so explicitly allow the tray push (WM_COPYDATA), the progress relay,
+        // and the TaskbarCreated broadcast through the message filter — otherwise none
+        // of the injected DLL's messages reach us.
+        ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ALLOW, nullptr);
+        if (UINT mProg = RegisterWindowMessageW(L"WinzooProgress"))
+            ChangeWindowMessageFilterEx(hwnd, mProg, MSGFLT_ALLOW, nullptr);
+        if (UINT mTc = RegisterWindowMessageW(L"TaskbarCreated"))
+            ChangeWindowMessageFilterEx(hwnd, mTc, MSGFLT_ALLOW, nullptr);
 
         if (settings_.position != TaskbarPosition::Floating)
             appBar_.Register(hwnd_, settings_.position, EffectiveThicknessPx());
@@ -2246,6 +2461,12 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             // startup doesn't stick. Re-hide any that reappeared. One bar drives this so
             // the monitors aren't swept redundantly; the sweep itself covers all of them.
             if (isPrimary_) HideExplorerTaskbars();
+            // Ensure the injected Explorer hook is installed. The initial install at
+            // startup races Explorer's restart (Winzoo relocates+restarts it), and the
+            // TaskbarCreated broadcast can land before our window exists — so poll here.
+            // EnsureExplorerHook is cheap when already hooked and also re-hooks a
+            // restarted Explorer (pid change), so this doubles as restart recovery.
+            if (isPrimary_) proxy_.EnsureExplorerHook();
             // Re-assert this monitor's work-area reservation in case the shell re-stacked
             // its own taskbar strip under ours. SetPosition is now idempotent for the
             // appbar/window itself, so this only re-corrects the work area when it drifted.
@@ -2259,7 +2480,14 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             if (availChanged) LayoutButtons();
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (wParam == kTimerTray) {
-            RefreshTrayIcons();
+            // Push model (winzoo_com.dll) is authoritative once active — just prune
+            // icons whose owner crashed without sending NIM_DELETE. Until the first
+            // push arrives, fall back to the legacy cross-process scrape so the tray
+            // still works if injection failed on this build.
+            if (trayPushActive_)
+                PruneDeadTrayIcons();
+            else
+                RefreshTrayIcons();
         }
         return 0;
 

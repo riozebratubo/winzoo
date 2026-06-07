@@ -12,7 +12,7 @@ if(MSVC)
     set_target_properties(winzoo_com PROPERTIES LINK_FLAGS "/MANIFEST:NO")
 endif()
 
-target_link_libraries(winzoo_com PRIVATE user32 ole32)
+target_link_libraries(winzoo_com PRIVATE user32 ole32 gdi32)
 
 # Place the DLL next to winzoo.exe
 set_target_properties(winzoo_com PROPERTIES

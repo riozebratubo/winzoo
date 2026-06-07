@@ -32,11 +32,33 @@ bool TaskbarProxy::Install(HWND winzooHwnd) {
     if (!relayMsg_) return false;
     winzooHwnd_  = winzooHwnd;
 
-    // --- Extract embedded DLL to disk ---
-    wchar_t exePath[MAX_PATH] = {};
-    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    if (wchar_t* p = wcsrchr(exePath, L'\\')) *(p + 1) = L'\0';
-    dllPath_ = std::wstring(exePath) + L"winzoo_com.dll";
+    // --- Extract embedded DLL to a per-launch unique path under %LOCALAPPDATA% ---
+    // Deliberately NOT next to the exe: that file is the build output, and once Explorer
+    // injects it, the lock would block rebuilds. A unique name per launch also avoids
+    // loading a stale copy that a previously force-killed session left mapped in Explorer.
+    std::wstring dir;
+    {
+        wchar_t local[MAX_PATH] = {};
+        if (GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH))
+            dir = std::wstring(local) + L"\\winzoo";
+        else {  // fallback: next to the exe
+            wchar_t exePath[MAX_PATH] = {};
+            GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+            if (wchar_t* p = wcsrchr(exePath, L'\\')) *p = L'\0';
+            dir = exePath;
+        }
+        CreateDirectoryW(dir.c_str(), nullptr);
+
+        // Best-effort cleanup of stale copies from prior sessions (locked ones are skipped).
+        WIN32_FIND_DATAW fd = {};
+        HANDLE hFind = FindFirstFileW((dir + L"\\winzoo_com_*.dll").c_str(), &fd);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            do { DeleteFileW((dir + L"\\" + fd.cFileName).c_str()); }
+            while (FindNextFileW(hFind, &fd));
+            FindClose(hFind);
+        }
+    }
+    dllPath_ = dir + L"\\winzoo_com_" + std::to_wstring(GetCurrentProcessId()) + L".dll";
 
     DeleteFileW(dllPath_.c_str());
     HRSRC hRes = FindResource(nullptr, MAKEINTRESOURCE(IDR_WINZOO_COM_DLL), RT_RCDATA);
@@ -96,37 +118,63 @@ bool TaskbarProxy::Install(HWND winzooHwnd) {
         UpdatePosition(rc);
     }
 
-    // Broadcast TaskbarCreated: apps reinitialize ITaskbarList3 and get winzoo_com.dll.
+    // Hook Explorer's Shell_TrayWnd thread (progress + tray interception). This can
+    // legitimately fail here when Explorer is mid-restart (Winzoo itself may relocate
+    // and restart it at startup), so it is also retried from the TaskbarCreated handler.
+    EnsureExplorerHook();
+
+    return true;
+}
+
+// (Re)install the Explorer-thread hook. Idempotent per-Explorer-instance: if the same
+// Explorer process is already hooked, it does nothing. On a fresh install it also
+// re-broadcasts TaskbarCreated so apps re-issue Shell_NotifyIcon(NIM_ADD) AND
+// ITaskbarList3 progress *after* our hook is live, giving a complete tray snapshot.
+bool TaskbarProxy::EnsureExplorerHook() {
+    DWORD myPid = GetCurrentProcessId();
+
+    // Find Explorer's real Shell_TrayWnd (not our topmost proxy, not our own process).
+    HWND explorerTray = nullptr;
+    DWORD explorerPid = 0;
+    for (HWND h = FindWindowW(L"Shell_TrayWnd", nullptr); h;
+         h = FindWindowExW(nullptr, h, L"Shell_TrayWnd", nullptr)) {
+        if (h == proxyHwnd_) continue;
+        DWORD pid = 0;
+        GetWindowThreadProcessId(h, &pid);
+        if (pid && pid != myPid) { explorerTray = h; explorerPid = pid; break; }
+    }
+
+    if (!explorerTray)
+        return false;
+
+    // Already hooked to this same Explorer instance — nothing to do.
+    if (hookedExplorerPid_ == explorerPid && hHookDll_)
+        return false;
+
+    if (!hHookDll_) {
+        hHookDll_ = LoadLibraryW(dllPath_.c_str());
+        if (!hHookDll_) return false;
+    }
+
+    using FnInstall   = void (__stdcall *)(HWND);
+    using FnUninstall = void (__stdcall *)();
+    auto fnInstall   = reinterpret_cast<FnInstall>(
+        GetProcAddress(hHookDll_, "WinzooCom_InstallHook"));
+    auto fnUninstall = reinterpret_cast<FnUninstall>(
+        GetProcAddress(hHookDll_, "WinzooCom_UninstallHook"));
+    if (!fnInstall) return false;
+
+    // Explorer changed identity (restart): drop the stale hook handles first.
+    if (hookedExplorerPid_ && hookedExplorerPid_ != explorerPid && fnUninstall)
+        fnUninstall();
+
+    fnInstall(explorerTray);
+    hookedExplorerPid_ = explorerPid;
+
+    // Re-broadcast so apps repopulate now that the hook is live.
     UINT taskbarCreatedMsg = RegisterWindowMessageW(L"TaskbarCreated");
     if (taskbarCreatedMsg)
         PostMessageW(HWND_BROADCAST, taskbarCreatedMsg, 0, 0);
-
-    // --- Hook Explorer's Shell_TrayWnd thread ---
-    // Explorer caches its Shell_TrayWnd HWND at startup (before Winzoo), so our proxy
-    // window is never found. A thread-specific WH_GETMESSAGE hook on Explorer's tray
-    // thread intercepts the internal progress messages (0x04F3).
-    {
-        DWORD myPid = GetCurrentProcessId();
-        HWND  h     = FindWindowW(L"Shell_TrayWnd", nullptr);
-        HWND  explorerTray = nullptr;
-        while (h) {
-            if (h != proxyHwnd_) {
-                DWORD pid = 0;
-                GetWindowThreadProcessId(h, &pid);
-                if (pid != myPid) { explorerTray = h; break; }
-            }
-            h = FindWindowExW(nullptr, h, L"Shell_TrayWnd", nullptr);
-        }
-        if (explorerTray) {
-            hHookDll_ = LoadLibraryW(dllPath.c_str());
-            if (hHookDll_) {
-                using FnInstall = void (__stdcall *)(HWND);
-                auto fnInstall = reinterpret_cast<FnInstall>(
-                    GetProcAddress(hHookDll_, "WinzooCom_InstallHook"));
-                if (fnInstall) fnInstall(explorerTray);
-            }
-        }
-    }
 
     return true;
 }
@@ -172,6 +220,7 @@ void TaskbarProxy::Uninstall() {
         FreeLibrary(hHookDll_);
         hHookDll_ = nullptr;
     }
+    hookedExplorerPid_ = 0;
 
     if (proxyHwnd_) {
         DestroyWindow(proxyHwnd_);

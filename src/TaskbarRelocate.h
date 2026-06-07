@@ -33,3 +33,14 @@ void RestoreShellAppBarReservation(HWND tray);
 // so a one-shot hide at startup doesn't stick. Call at startup, on TaskbarCreated, and
 // periodically.
 void HideExplorerTaskbars();
+
+// Reclaim the desktop work area on every monitor that has NO winzoo bar. Windows 11's
+// taskbar keeps a ~48px work-area reservation even after SW_HIDE/ABM_REMOVE (it isn't a
+// classic appbar), and only AppBar::SetPosition's explicit SPI_SETWORKAREA reclaims it —
+// which runs solely on monitors winzoo actually occupies. So a monitor with no winzoo bar
+// (e.g. a secondary monitor in "primary monitor only" mode, or one Explorer re-asserts on)
+// is left with a dead strip — and a re-shown Explorer taskbar — at the bar edge. This sets
+// those monitors' work area back to the full monitor rect and re-fits maximized windows
+// there. Monitors that have a winzoo bar are skipped (their AppBar owns the work area), so
+// this is a no-op when every monitor is occupied. Idempotent; safe to call periodically.
+void ReclaimUnoccupiedWorkAreas();

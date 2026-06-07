@@ -1806,6 +1806,9 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             // (re)install the injected hook, since the initial install at startup can
             // race Explorer's restart and find no Shell_TrayWnd.
             proxy_.EnsureExplorerHook();
+            // The freshly recreated Explorer taskbars re-reserved their strips; reclaim the
+            // work area on any monitor winzoo has no bar on. One bar drives the global sweep.
+            ReclaimUnoccupiedWorkAreas();
         }
         return 0;
     }
@@ -2485,6 +2488,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             // startup doesn't stick. Re-hide any that reappeared. One bar drives this so
             // the monitors aren't swept redundantly; the sweep itself covers all of them.
             if (isPrimary_) HideExplorerTaskbars();
+            // Re-reclaim the work area on monitors with no winzoo bar — Explorer re-asserts
+            // its hidden taskbar's reservation on display/work-area changes, and only the
+            // primary sweep covers all monitors at once. No-op when every monitor is occupied.
+            if (isPrimary_) ReclaimUnoccupiedWorkAreas();
             // Ensure the injected Explorer hook is installed. The initial install at
             // startup races Explorer's restart (Winzoo relocates+restarts it), and the
             // TaskbarCreated broadcast can land before our window exists — so poll here.

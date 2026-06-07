@@ -6,7 +6,8 @@
       "Bash('C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe' --build D:/dev/winzoo/build --config Release)",
       "Bash(cmd /c build.bat)",
       "Bash(cmd /c tools\\reset-winzoo.bat)",
-      "Bash(tools/reset-winzoo.bat)"
+      "Bash(tools/reset-winzoo.bat)",
+      "PowerShell(.\\\\build.bat)"
     ]
   }
 }

@@ -2,6 +2,8 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <string>
+#include <vector>
+#include <algorithm>
 
 static constexpr wchar_t kStuckKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StuckRects3";
@@ -123,6 +125,51 @@ void HideExplorerTaskbars()
             RemoveShellAppBarReservation(h);
         }
     }
+}
+
+// Re-fit windows maximized on `mon` to `work` after a silent work-area change. Mirrors
+// AppBar's helper: SPI_SETWORKAREA without SPIF_SENDCHANGE won't resize already-maximized
+// windows, so we do it ourselves, targeted to this monitor (no global broadcast that would
+// nudge the shell into re-reserving its strip).
+static void RefitMaximizedWindowsOnMonitor(HMONITOR mon, const RECT& work)
+{
+    struct Ctx { HMONITOR mon; RECT work; } ctx{ mon, work };
+    EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
+        auto* c = reinterpret_cast<Ctx*>(lp);
+        if (IsWindowVisible(hwnd) && IsZoomed(hwnd) &&
+            MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) == c->mon) {
+            SetWindowPos(hwnd, nullptr, c->work.left, c->work.top,
+                         c->work.right - c->work.left, c->work.bottom - c->work.top,
+                         SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&ctx));
+}
+
+void ReclaimUnoccupiedWorkAreas()
+{
+    // Monitors that currently host a winzoo bar — their AppBar manages the work area.
+    std::vector<HMONITOR> occupied;
+    for (HWND h = FindWindowExW(nullptr, nullptr, L"WinzooTaskbar", nullptr); h;
+         h = FindWindowExW(nullptr, h, L"WinzooTaskbar", nullptr)) {
+        if (HMONITOR m = MonitorFromWindow(h, MONITOR_DEFAULTTONULL))
+            occupied.push_back(m);
+    }
+
+    EnumDisplayMonitors(nullptr, nullptr,
+        [](HMONITOR hMon, HDC, LPRECT, LPARAM lp) -> BOOL {
+            auto* occ = reinterpret_cast<std::vector<HMONITOR>*>(lp);
+            if (std::find(occ->begin(), occ->end(), hMon) != occ->end())
+                return TRUE;  // winzoo owns this monitor; leave its work area to the AppBar
+            MONITORINFO mi{ sizeof(mi) };
+            if (!GetMonitorInfo(hMon, &mi)) return TRUE;
+            if (EqualRect(&mi.rcWork, &mi.rcMonitor)) return TRUE;  // already full, nothing reserved
+            RECT full = mi.rcMonitor;
+            // No SPIF_SENDCHANGE: broadcasting is what nudges the shell into re-reserving.
+            SystemParametersInfoW(SPI_SETWORKAREA, 0, &full, 0);
+            RefitMaximizedWindowsOnMonitor(hMon, full);
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&occupied));
 }
 
 bool RelocateExplorerTaskbarToMatch(TaskbarPosition position)

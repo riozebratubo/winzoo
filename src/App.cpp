@@ -125,6 +125,12 @@ bool App::Init(HINSTANCE hInst)
         taskbars_.push_back(std::move(tb));
     }
 
+    // Reclaim the work area on any monitor winzoo left without a bar (e.g. the secondary
+    // monitors in "primary monitor only" mode). Their hidden Explorer taskbar's ~48px
+    // reservation isn't cleared by SW_HIDE/ABM_REMOVE, and no AppBar runs there to reclaim
+    // it. Runs after the bars exist so occupied monitors are correctly skipped.
+    ReclaimUnoccupiedWorkAreas();
+
     return true;
 }
 

@@ -526,11 +526,17 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
         for (int i = 0; std::cmp_less(i, tray.icons.size()); ++i) {
             if (i == tray.dragGhostIdx) continue; // drawn separately as ghost
             const auto& ti = tray.icons[i];
-            if (!ti.hIcon) continue;
+            if (!ti.hIcon && !ti.synthNet) continue;
             if (ti.hovered) {
                 HBRUSH hb = CreateSolidBrush(colors.buttonHover);
                 FillRect(hdcMem_, &ti.rect, hb);
                 DeleteObject(hb);
+            }
+            if (ti.synthNet) {
+                // Win11 has no classic network tray icon — draw winzoo's own glyph from
+                // live connectivity state, matching the status-zone network icon.
+                DrawNetworkIcon(hdcMem_, ti.rect, ti.netConnected, colors.textDimmed);
+                continue;
             }
             int iw = ti.rect.right  - ti.rect.left;
             int ih = ti.rect.bottom - ti.rect.top;

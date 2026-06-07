@@ -69,6 +69,10 @@ private:
     void InsertTrayIconOrdered(TrayIconEntry&& e);
     HICON TrayIconFromOwner(HWND owner);
     void PruneDeadTrayIcons();
+    // Win11's network icon is XAML-only (uncapturable) — synthesize one from live state
+    // and keep it pinned to the trailing end of the captured tray row.
+    bool ShowNetInTrayRow() const;
+    void EnsureNetworkTrayIcon();
 
     void ComputeClockFontSizes();
     int  EffectiveThicknessPx() const;

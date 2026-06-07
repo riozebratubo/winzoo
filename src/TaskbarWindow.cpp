@@ -633,6 +633,7 @@ void TaskbarWindow::OnTrayPush(const WinzooTrayRecord& rec, const wchar_t* tip,
         trayIcons_.clear();
         for (auto& e : hiddenTrayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
         hiddenTrayIcons_.clear();
+        EnsureNetworkTrayIcon();  // re-add the synthetic net icon dropped by the wipe
     }
 
     HWND owner = reinterpret_cast<HWND>(static_cast<UINT_PTR>(rec.ownerHwnd));
@@ -891,6 +892,43 @@ void TaskbarWindow::PruneDeadTrayIcons()
     }
 }
 
+// Should winzoo's synthetic network icon live inline in the captured tray row?
+// (Win11's real network icon is XAML-only and cannot be captured — see the tray-row
+// network handling.) Shown whenever the tray row itself is enabled and connectivity is
+// queryable — deliberately NOT gated on showWinzooCustomIcons, so the network icon always
+// appears alongside the captured icons. When active it replaces the status-zone net icon.
+bool TaskbarWindow::ShowNetInTrayRow() const
+{
+    return settings_.showTrayIcons && statusData_.netAvailable;
+}
+
+// Keep exactly one synthetic network entry pinned to the trailing (clock-side) end of
+// trayIcons_ when ShowNetInTrayRow(), and none otherwise. Idempotent: only re-lays out
+// when the structural presence actually changes. The icon's connectivity state is read
+// live from statusData_ at paint time, so connect/disconnect needs no rebuild here.
+void TaskbarWindow::EnsureNetworkTrayIcon()
+{
+    auto it = std::find_if(trayIcons_.begin(), trayIcons_.end(),
+                           [](const TrayIconEntry& e) { return e.synthNet; });
+    bool have = (it != trayIcons_.end());
+    bool want = ShowNetInTrayRow();
+
+    if (want == have) return;  // nothing structural to change
+
+    if (want) {
+        TrayIconEntry e = {};
+        e.synthNet = true;
+        e.tooltip  = L"Network";
+        e.orderKey = L"";  // sentinel: never persisted into settings_.trayIconOrder
+        trayIcons_.push_back(std::move(e));  // trailing/rightmost, like Windows
+    } else {
+        if (it->hIcon) DestroyIcon(it->hIcon);
+        trayIcons_.erase(it);
+    }
+    LayoutButtons();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
 void TaskbarWindow::ComputeClockFontSizes()
 {
     if (!settings_.showClock) {
@@ -1042,7 +1080,7 @@ void TaskbarWindow::LayoutButtons()
     int langW = 0;
     if (settings_.showStatusZone && isHoriz) {
         if (statusData_.volAvailable && settings_.showWinzooCustomIcons) statusZoneW += statusIconW;
-        if (statusData_.netAvailable && settings_.showWinzooCustomIcons) statusZoneW += statusIconW;
+        if (statusData_.netAvailable && settings_.showWinzooCustomIcons && !ShowNetInTrayRow()) statusZoneW += statusIconW;
         if (statusData_.batAvailable) statusZoneW += statusIconW;
     }
     if (settings_.showLangIndicator && isHoriz && !currentLangText_.empty()) {
@@ -1104,7 +1142,7 @@ void TaskbarWindow::LayoutButtons()
                 volIconRect_ = { x, iconTop, x + statusIconW, iconBot };
                 x += statusIconW;
             }
-            if (statusData_.netAvailable && settings_.showWinzooCustomIcons) {
+            if (statusData_.netAvailable && settings_.showWinzooCustomIcons && !ShowNetInTrayRow()) {
                 netIconRect_ = { x, iconTop, x + statusIconW, iconBot };
                 x += statusIconW;
             }
@@ -2123,7 +2161,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 status.volLevel     = statusData_.volLevel;
                 status.volMuted     = statusData_.volMuted;
                 status.volHovered   = (hoveredStatus_ == 1);
-                status.netAvailable = statusData_.netAvailable && settings_.showWinzooCustomIcons;
+                status.netAvailable = statusData_.netAvailable && settings_.showWinzooCustomIcons && !ShowNetInTrayRow();
                 status.netRect      = netIconRect_;
                 status.netConnected = statusData_.netConnected;
                 status.netHovered   = (hoveredStatus_ == 2);
@@ -2148,9 +2186,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             int n = static_cast<int>(trayIcons_.size());
             tray.icons.resize(n);
             for (int i = 0; i < n; ++i) {
-                tray.icons[i].hIcon   = trayIcons_[i].hIcon;
-                tray.icons[i].rect    = std::cmp_less(i, trayIconRects_.size()) ? trayIconRects_[i] : RECT{};
-                tray.icons[i].hovered = (i == hoveredTrayIdx_);
+                tray.icons[i].hIcon        = trayIcons_[i].hIcon;
+                tray.icons[i].rect         = std::cmp_less(i, trayIconRects_.size()) ? trayIconRects_[i] : RECT{};
+                tray.icons[i].hovered      = (i == hoveredTrayIdx_);
+                tray.icons[i].synthNet     = trayIcons_[i].synthNet;
+                tray.icons[i].netConnected = statusData_.netConnected;
             }
             if (trayDragging_) {
                 tray.dragGhostIdx = trayDragStart_;
@@ -2427,9 +2467,12 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                     int insertAt = (to > from) ? to - 1 : to;
                     trayIcons_.insert(trayIcons_.begin() + insertAt, std::move(moved));
 
-                    // Rebuild trayIconOrder from new display order
+                    // Rebuild trayIconOrder from new display order (skip the synthetic
+                    // network entry — it carries a sentinel key and is re-pinned by
+                    // EnsureNetworkTrayIcon, so it must not be persisted).
                     settings_.trayIconOrder.clear();
-                    for (const auto& e : trayIcons_) settings_.trayIconOrder.push_back(e.orderKey);
+                    for (const auto& e : trayIcons_)
+                        if (!e.synthNet) settings_.trayIconOrder.push_back(e.orderKey);
                     SaveSettings(settings_);
                     LayoutButtons();
                 }
@@ -2437,7 +2480,9 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             } else {
                 // Plain left click — forward notification to the icon's owner
                 int i = trayDragStart_;
-                if (std::cmp_less(i, trayIcons_.size()) && trayIcons_[i].hWnd &&
+                if (std::cmp_less(i, trayIcons_.size()) && trayIcons_[i].synthNet) {
+                    LaunchApp(L"ms-availablenetworks:");  // Win11 network/Wi-Fi flyout
+                } else if (std::cmp_less(i, trayIcons_.size()) && trayIcons_[i].hWnd &&
                     trayIcons_[i].uCallbackMsg)
                 {
                     POINT screenPt = pt;
@@ -2575,7 +2620,9 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (settings_.showTrayIcons) {
             for (int i = 0; std::cmp_less(i, trayIconRects_.size()); ++i) {
                 if (PtInRect(&trayIconRects_[i], pt)) {
-                    if (std::cmp_less(i, trayIcons_.size()) && trayIcons_[i].hWnd &&
+                    if (std::cmp_less(i, trayIcons_.size()) && trayIcons_[i].synthNet) {
+                        ShowStatusIconMenu(2, screenPt);  // net context menu
+                    } else if (std::cmp_less(i, trayIcons_.size()) && trayIcons_[i].hWnd &&
                         trayIcons_[i].uCallbackMsg)
                     {
                         ForwardTrayNotification(trayIcons_[i].hWnd, trayIcons_[i].uCallbackMsg,
@@ -2693,6 +2740,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 PruneDeadTrayIcons();
             else
                 RefreshTrayIcons();
+            EnsureNetworkTrayIcon();  // keep the synthetic Win11 network icon present/pinned
         }
         return 0;
 

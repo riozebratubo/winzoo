@@ -65,9 +65,11 @@ struct TrayZoneInfo {
     bool visible = false;
 
     struct Icon {
-        RECT  rect    = {};
-        HICON hIcon   = nullptr;
-        bool  hovered = false;
+        RECT  rect         = {};
+        HICON hIcon        = nullptr;
+        bool  hovered      = false;
+        bool  synthNet     = false;  // draw the synthetic network glyph instead of hIcon
+        bool  netConnected = false;  // connectivity state for the synthetic network glyph
     };
     std::vector<Icon> icons;
 

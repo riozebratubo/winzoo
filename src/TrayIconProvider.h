@@ -14,6 +14,7 @@ struct TrayIconEntry {
     std::wstring exePath;      // full path e.g. "C:\...\Discord.exe", used for icon fallback
     std::wstring orderKey;     // exeName + "|" + str(uID), stable per-session key
     bool         hidden;       // NIS_HIDDEN — icon is registered but should not be rendered
+    bool         synthNet;     // synthetic Win11 network icon (no hWnd/hIcon; drawn from live state)
 };
 
 // Enumerate visible icons from the Windows notification area toolbar.

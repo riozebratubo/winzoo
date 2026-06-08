@@ -161,11 +161,74 @@ static void DrawVolumeIcon(HDC hdc, RECT r, float level, bool muted, COLORREF co
     DeleteObject(pen);
 }
 
-static void DrawNetworkIcon(HDC hdc, RECT r, bool connected, COLORREF col)
+// Small "no internet" exclamation overlaid on the upper-right of a connected
+// glyph (link is up but there's no route to the internet).
+static void DrawNoInternetMark(HDC hdc, RECT r, int sz, COLORREF bg)
+{
+    // High-contrast mark: a short stroke + dot. Drawn in the inverse-ish accent
+    // so it reads on top of the base glyph regardless of theme.
+    COLORREF mark = RGB(255, 196, 0);   // amber warning
+    HBRUSH brM = CreateSolidBrush(mark);
+    int w  = std::max(2, sz / 8);
+    int mx = r.right - w - 1;
+    int top = r.top + 1;
+    int h  = std::max(3, sz / 3);
+    RECT stroke = { mx, top, mx + w, top + h };
+    RECT dot    = { mx, top + h + std::max(1, w / 2), mx + w, top + h + std::max(1, w / 2) + w };
+    // Knock out a 1px halo so it stays legible over filled bars.
+    HBRUSH brBg = CreateSolidBrush(bg);
+    RECT halo = { stroke.left - 1, stroke.top - 1, dot.right + 1, dot.bottom + 1 };
+    FillRect(hdc, &halo, brBg);
+    FillRect(hdc, &stroke, brM);
+    FillRect(hdc, &dot, brM);
+    DeleteObject(brM);
+    DeleteObject(brBg);
+}
+
+// Draws the network status glyph.
+//   link       : a network link is present (wired up or Wi-Fi associated)
+//   wired      : link is ethernet → draw a LAN glyph (signal strength is N/A)
+//   wifiSignal : 0–100 Wi-Fi signal quality, or -1 when not associated to Wi-Fi
+//   internet   : link has actual internet connectivity (else show a warning)
+static void DrawNetworkIcon(HDC hdc, RECT r, bool link, bool wired, int wifiSignal,
+                            bool internet, COLORREF col)
 {
     int rw = r.right  - r.left;
     int rh = r.bottom - r.top;
     int sz = std::min(rw, rh);  // work within the square
+
+    HPEN   pen  = CreatePen(PS_SOLID, 1, col);
+    HBRUSH brOn = CreateSolidBrush(col);
+
+    if (wired) {
+        // LAN glyph: two small boxes (a PC and a node) joined by an L-shaped
+        // link line — reads as a wired/ethernet connection.
+        int box = std::max(3, sz / 3);
+        int cx0 = r.left + (rw - sz) / 2 + 2;             // top-left box
+        int cy0 = r.top  + (rh - sz) / 2 + 2;
+        int cx1 = r.left + (rw - sz) / 2 + sz - box - 2;  // bottom-right box
+        int cy1 = r.top  + (rh - sz) / 2 + sz - box - 2;
+
+        RECT a = { cx0, cy0, cx0 + box, cy0 + box };
+        RECT b = { cx1, cy1, cx1 + box, cy1 + box };
+        FillRect(hdc, &a, brOn);
+        FillRect(hdc, &b, brOn);
+
+        HPEN oldP = static_cast<HPEN>(SelectObject(hdc, pen));
+        int ax = cx0 + box / 2, ay = cy0 + box;   // bottom-centre of box a
+        int bx = cx1 + box / 2, by = cy1;         // top-centre of box b
+        MoveToEx(hdc, ax, ay, nullptr);           // down then across (L-shape)
+        LineTo(hdc, ax, by);
+        LineTo(hdc, bx, by);
+        SelectObject(hdc, oldP);
+
+        if (!internet) DrawNoInternetMark(hdc, r, sz, col);
+        DeleteObject(brOn);
+        DeleteObject(pen);
+        return;
+    }
+
+    // Wi-Fi signal bars.
     int bars = 4;
     // Leave 2px inset on each side; divide remaining width evenly
     int inner  = sz - 4;
@@ -176,8 +239,18 @@ static void DrawNetworkIcon(HDC hdc, RECT r, bool connected, COLORREF col)
     int base   = r.bottom - 2;
     int maxH   = sz - 4;
 
-    HPEN   pen  = CreatePen(PS_SOLID, 1, col);
-    HBRUSH brOn = CreateSolidBrush(col);
+    // How many bars to fill: from live signal quality when associated, else a
+    // coarse on/off fallback from link state.
+    int filled;
+    if (wifiSignal >= 0) {
+        filled = wifiSignal <= 0  ? 0
+               : wifiSignal < 25  ? 1
+               : wifiSignal < 50  ? 2
+               : wifiSignal < 75  ? 3
+               : 4;
+    } else {
+        filled = link ? bars : 0;
+    }
 
     for (int i = 0; i < bars; ++i) {
         int barH = std::max(2, maxH * (i + 1) / bars);
@@ -187,20 +260,29 @@ static void DrawNetworkIcon(HDC hdc, RECT r, bool connected, COLORREF col)
             ox + i * (barW + gap) + barW,
             base
         };
-        if (connected) {
+        if (i < filled) {
             FillRect(hdc, &bar, brOn);
         } else {
-            // Disconnected: smallest bar filled, rest outlined
-            if (i == 0) {
-                FillRect(hdc, &bar, brOn);
-            } else {
-                HPEN   oldP = static_cast<HPEN>  (SelectObject(hdc, pen));
-                HBRUSH oldB = static_cast<HBRUSH>(SelectObject(hdc, GetStockObject(NULL_BRUSH)));
-                Rectangle(hdc, bar.left, bar.top, bar.right, bar.bottom);
-                SelectObject(hdc, oldP);
-                SelectObject(hdc, oldB);
-            }
+            // Above the current signal level: outlined (empty) bar.
+            HPEN   oldP = static_cast<HPEN>  (SelectObject(hdc, pen));
+            HBRUSH oldB = static_cast<HBRUSH>(SelectObject(hdc, GetStockObject(NULL_BRUSH)));
+            Rectangle(hdc, bar.left, bar.top, bar.right, bar.bottom);
+            SelectObject(hdc, oldP);
+            SelectObject(hdc, oldB);
         }
+    }
+
+    if (!link) {
+        // No network link at all: strike the (empty) bars through with a bold
+        // diagonal slash so "disconnected" is unmistakable.
+        HPEN slashPen = CreatePen(PS_SOLID, std::max(2, sz / 12), col);
+        HPEN oldP = static_cast<HPEN>(SelectObject(hdc, slashPen));
+        MoveToEx(hdc, ox - 1, r.top + (rh - sz) / 2 + 2, nullptr);
+        LineTo(hdc, ox + totalW + 1, base);
+        SelectObject(hdc, oldP);
+        DeleteObject(slashPen);
+    } else if (!internet) {
+        DrawNoInternetMark(hdc, r, sz, col);
     }
 
     DeleteObject(brOn);
@@ -487,7 +569,8 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
                 FillRect(hdcMem_, &status.netRect, hb);
                 DeleteObject(hb);
             }
-            DrawNetworkIcon(hdcMem_, status.netRect, status.netConnected, iconCol);
+            DrawNetworkIcon(hdcMem_, status.netRect, status.netLink, status.netWired,
+                            status.wifiSignal, status.netInternet, iconCol);
         }
         if (status.batAvailable) {
             if (status.batHovered) {
@@ -535,7 +618,8 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
             if (ti.synthNet) {
                 // Win11 has no classic network tray icon — draw winzoo's own glyph from
                 // live connectivity state, matching the status-zone network icon.
-                DrawNetworkIcon(hdcMem_, ti.rect, ti.netConnected, colors.textDimmed);
+                DrawNetworkIcon(hdcMem_, ti.rect, ti.netLink, ti.netWired,
+                                ti.wifiSignal, ti.netInternet, colors.textDimmed);
                 continue;
             }
             int iw = ti.rect.right  - ti.rect.left;

@@ -45,7 +45,10 @@ struct StatusZoneInfo {
 
     bool netAvailable = false;
     RECT netRect      = {};
-    bool netConnected = false;
+    bool netLink      = false;
+    bool netInternet  = false;
+    bool netWired     = false;
+    int  wifiSignal   = -1;
     bool netHovered   = false;
 
     bool batAvailable = false;
@@ -69,7 +72,10 @@ struct TrayZoneInfo {
         HICON hIcon        = nullptr;
         bool  hovered      = false;
         bool  synthNet     = false;  // draw the synthetic network glyph instead of hIcon
-        bool  netConnected = false;  // connectivity state for the synthetic network glyph
+        bool  netLink      = false;  // a network link is present
+        bool  netInternet  = false;  // link has internet connectivity
+        bool  netWired     = false;  // active connection is wired ethernet
+        int   wifiSignal   = -1;     // Wi-Fi signal quality 0–100; -1 when not on Wi-Fi
     };
     std::vector<Icon> icons;
 

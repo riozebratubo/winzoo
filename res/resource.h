@@ -163,6 +163,7 @@
 // Network icon context menu
 #define IDM_NET_SETTINGS    511
 #define IDM_NET_SHARING     512
+#define IDM_NET_LOCATION    513
 
 // Battery icon context menu
 #define IDM_BAT_BRIGHTNESS  521

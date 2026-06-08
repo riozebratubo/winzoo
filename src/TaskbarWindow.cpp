@@ -1750,6 +1750,17 @@ void TaskbarWindow::ShowStatusIconMenu(int which, POINT ptScreen)
             { L"Open Network & Internet settings",  IDM_NET_SETTINGS, false, false, false },
             { L"Open Network and Sharing Center",   IDM_NET_SHARING,  false, false, false },
         };
+        // On Wi-Fi but unable to read signal strength → the Location permission
+        // is denied. Offer a shortcut to the privacy page so the bars can reflect
+        // real signal once granted.
+        const bool wifiNoSignal = statusData_.netLink &&
+                                  !statusData_.netWired &&
+                                  statusData_.wifiSignal < 0;
+        if (wifiNoSignal) {
+            items.push_back({ {}, 0, true });   // separator
+            items.push_back({ L"Enable location for signal strength",
+                              IDM_NET_LOCATION, false, false, false });
+        }
         UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
         switch (id) {
         case IDM_NET_SETTINGS:
@@ -1757,6 +1768,9 @@ void TaskbarWindow::ShowStatusIconMenu(int which, POINT ptScreen)
             break;
         case IDM_NET_SHARING:
             LaunchApp(L"control.exe", L"/name Microsoft.NetworkAndSharingCenter");
+            break;
+        case IDM_NET_LOCATION:
+            LaunchApp(L"ms-settings:privacy-location");
             break;
         default: break;
         }
@@ -2163,7 +2177,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 status.volHovered   = (hoveredStatus_ == 1);
                 status.netAvailable = statusData_.netAvailable && settings_.showWinzooCustomIcons && !ShowNetInTrayRow();
                 status.netRect      = netIconRect_;
-                status.netConnected = statusData_.netConnected;
+                status.netLink      = statusData_.netLink;
+                status.netInternet  = statusData_.netInternet;
+                status.netWired     = statusData_.netWired;
+                status.wifiSignal   = statusData_.wifiSignal;
                 status.netHovered   = (hoveredStatus_ == 2);
                 status.batAvailable = statusData_.batAvailable;
                 status.batRect      = batIconRect_;
@@ -2190,7 +2207,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 tray.icons[i].rect         = std::cmp_less(i, trayIconRects_.size()) ? trayIconRects_[i] : RECT{};
                 tray.icons[i].hovered      = (i == hoveredTrayIdx_);
                 tray.icons[i].synthNet     = trayIcons_[i].synthNet;
-                tray.icons[i].netConnected = statusData_.netConnected;
+                tray.icons[i].netLink      = statusData_.netLink;
+                tray.icons[i].netInternet  = statusData_.netInternet;
+                tray.icons[i].netWired     = statusData_.netWired;
+                tray.icons[i].wifiSignal   = statusData_.wifiSignal;
             }
             if (trayDragging_) {
                 tray.dragGhostIdx = trayDragStart_;

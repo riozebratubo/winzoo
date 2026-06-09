@@ -20,6 +20,29 @@
 #include <initguid.h>
 #include <msctf.h>
 
+// Find the live HMONITOR whose device name matches `name` (e.g. "DISPLAY1"). Monitor
+// HANDLES are invalidated whenever the display topology changes (a monitor dropping and
+// returning across sleep/logon), but the device name is stable, so it's the only reliable
+// key for re-binding a bar to its monitor after such a change. Returns nullptr when no
+// monitor with that name is currently present (the monitor is asleep / disconnected).
+static HMONITOR MonitorByDeviceName(const std::wstring& name)
+{
+    if (name.empty()) return nullptr;
+    struct Ctx { const std::wstring& name; HMONITOR found; } ctx{ name, nullptr };
+    EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR hMon, HDC, LPRECT, LPARAM lp) -> BOOL {
+        auto* c = reinterpret_cast<Ctx*>(lp);
+        MONITORINFOEXW mi = {};
+        mi.cbSize = sizeof(mi);
+        if (GetMonitorInfoW(hMon, &mi)) {
+            const wchar_t* dev = mi.szDevice;
+            if (wcsncmp(dev, L"\\\\.\\", 4) == 0) dev += 4;
+            if (c->name == dev) { c->found = hMon; return FALSE; }
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&ctx));
+    return ctx.found;
+}
+
 static std::wstring ApplyClockPattern(const std::wstring& pattern, const SYSTEMTIME& st, bool isTime)
 {
     std::wstring result = pattern;
@@ -2874,6 +2897,38 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     }
 
     case WM_DISPLAYCHANGE: {
+        // Re-bind this bar to its monitor by stable device name. The cached hMonitor_ is
+        // invalidated by a topology change, and the AppBar keys off the window's CURRENT
+        // position — so if we just re-registered in place, a bar that Windows shoved onto
+        // a surviving monitor (because its own monitor briefly dropped across sleep/logon)
+        // would reserve a strip there, leaving both bars stacked on one monitor. Resolving
+        // by device name and moving the window home first fixes that.
+        HMONITOR hMon = monitorDeviceName_.empty()
+                      ? hMonitor_
+                      : MonitorByDeviceName(monitorDeviceName_);
+
+        if (!hMon && !monitorDeviceName_.empty()) {
+            // Our monitor is currently absent (still asleep / disconnected). Don't let the
+            // bar collapse onto a neighbour and fight for its edge — hide it and wait for
+            // the monitor to return, which fires another WM_DISPLAYCHANGE.
+            appBar_.Unregister();
+            ShowWindow(hwnd_, SW_HIDE);
+            return 0;
+        }
+        if (hMon) hMonitor_ = hMon;
+
+        // For docked bars, place the window on its monitor BEFORE (re)registering the
+        // appbar, since the appbar derives its target monitor from the window position.
+        if (settings_.position != TaskbarPosition::Floating && hMonitor_) {
+            MONITORINFO mi = { sizeof(mi) };
+            if (GetMonitorInfo(hMonitor_, &mi)) {
+                RECT m = mi.rcMonitor;
+                SetWindowPos(hwnd_, HWND_TOPMOST, m.left, m.top,
+                             m.right - m.left, m.bottom - m.top,
+                             SWP_NOACTIVATE | SWP_NOREDRAW);
+            }
+        }
+
         appBar_.Unregister();
         appBar_.Register(hwnd_, settings_.position, EffectiveThicknessPx());
         RECT rc;
@@ -2886,6 +2941,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                      rc.left, rc.top,
                      rc.right - rc.left, rc.bottom - rc.top,
                      SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        ShowWindow(hwnd_, SW_SHOWNOACTIVATE);  // undo a hide from an earlier absent-monitor pass
         if (isPrimary_) proxy_.UpdatePosition(rc);
         RECT client;
         GetClientRect(hwnd_, &client);

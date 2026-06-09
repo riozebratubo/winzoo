@@ -245,6 +245,9 @@ Settings LoadSettings()
     if (s.minimizedIndicatorW > 40) s.minimizedIndicatorW = 40;
     if (s.minimizedIndicatorH < 1)  s.minimizedIndicatorH = 1;
     if (s.minimizedIndicatorH > 20) s.minimizedIndicatorH = 20;
+    if (key.ReadDword(L"MinimizedIndicatorDim", val)) s.minimizedIndicatorDim = static_cast<int>(val);
+    if (s.minimizedIndicatorDim < 0)   s.minimizedIndicatorDim = 0;
+    if (s.minimizedIndicatorDim > 100) s.minimizedIndicatorDim = 100;
     if (key.ReadDword(L"ShowStatusZone",    val)) s.showStatusZone    = val != 0;
     if (key.ReadDword(L"ShowLangIndicator", val)) s.showLangIndicator = val != 0;
     if (key.ReadDword(L"ShowTrayIcons",     val)) s.showTrayIcons     = val != 0;
@@ -415,6 +418,7 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"MinimizedIndicatorType", static_cast<DWORD>(s.minimizedIndicatorType));
     key.WriteDword(L"MinimizedIndicatorW",    static_cast<DWORD>(s.minimizedIndicatorW));
     key.WriteDword(L"MinimizedIndicatorH",    static_cast<DWORD>(s.minimizedIndicatorH));
+    key.WriteDword(L"MinimizedIndicatorDim",  static_cast<DWORD>(s.minimizedIndicatorDim));
     key.WriteDword(L"ShowStatusZone",    s.showStatusZone    ? 1u : 0u);
     key.WriteDword(L"ShowLangIndicator", s.showLangIndicator ? 1u : 0u);
     key.WriteDword(L"ShowTrayIcons",     s.showTrayIcons     ? 1u : 0u);

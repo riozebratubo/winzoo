@@ -10,6 +10,7 @@ struct MinimizedIndicatorOptions {
     MinimizedIndicatorType type = MinimizedIndicatorType::SmallRectangle;
     int  width   = 10;
     int  height  = 4;
+    int  dim     = 60;  // 0–100, % dimmed (higher = darker)
 };
 
 // TBPFLAG values (from shobjidl.h)

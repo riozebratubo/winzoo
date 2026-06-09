@@ -1,4 +1,5 @@
 #include "TaskButton.h"
+#include <algorithm>
 
 void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
                       bool hovered, bool pressed, bool isDragGhost, int dpi,
@@ -37,12 +38,15 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
 
     COLORREF borderColor = colors.buttonBorder;
 
+    // Retained brightness when dimming: dim=0 → 100% (no change), dim=100 → 0% (black).
+    int bright = 100 - std::clamp(indicator.dim, 0, 100);
+
     if (dimButton) {
         // Blend toward background (darken) to indicate minimized state
-        auto dim = [](COLORREF c) -> COLORREF {
-            int r = GetRValue(c) * 60 / 100;
-            int g = GetGValue(c) * 60 / 100;
-            int b = GetBValue(c) * 60 / 100;
+        auto dim = [bright](COLORREF c) -> COLORREF {
+            int r = GetRValue(c) * bright / 100;
+            int g = GetGValue(c) * bright / 100;
+            int b = GetBValue(c) * bright / 100;
             return RGB(r, g, b);
         };
         bgColor     = dim(bgColor);
@@ -95,9 +99,9 @@ void TaskButton::Draw(HDC hdc, const ThemeColors& colors,
                 DrawIconEx(hdcMem, 0, 0, icon, iconSz, iconSz, 0, nullptr, DI_NORMAL);
                 BYTE* p = static_cast<BYTE*>(bits);
                 for (int i = 0; i < iconSz * iconSz; ++i) {
-                    p[0] = static_cast<BYTE>(p[0] * 60 / 100);
-                    p[1] = static_cast<BYTE>(p[1] * 60 / 100);
-                    p[2] = static_cast<BYTE>(p[2] * 60 / 100);
+                    p[0] = static_cast<BYTE>(p[0] * bright / 100);
+                    p[1] = static_cast<BYTE>(p[1] * bright / 100);
+                    p[2] = static_cast<BYTE>(p[2] * bright / 100);
                     p += 4;
                 }
                 BitBlt(hdc, x, y, iconSz, iconSz, hdcMem, 0, 0, SRCCOPY);

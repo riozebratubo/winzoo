@@ -2238,7 +2238,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                             settings_.showMinimizedIndicator,
                             settings_.minimizedIndicatorType,
                             settings_.minimizedIndicatorW,
-                            settings_.minimizedIndicatorH
+                            settings_.minimizedIndicatorH,
+                            settings_.minimizedIndicatorDim
                         },
                         pinnedSepX_,
                         status,

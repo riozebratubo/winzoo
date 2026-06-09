@@ -55,6 +55,7 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     MinimizedIndicatorType minimizedIndicatorType = MinimizedIndicatorType::SmallRectangle;
     int             minimizedIndicatorW    = 10;
     int             minimizedIndicatorH    = 4;
+    int             minimizedIndicatorDim  = 60;  // 0–100, % the button is dimmed in "Dim the button" mode (higher = darker)
     bool showStatusZone    = false;  // show volume / network / battery icons
     bool showLangIndicator = true;   // show current keyboard/input language (e.g. "EN", "JA")
 

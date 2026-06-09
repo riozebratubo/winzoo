@@ -167,6 +167,13 @@ BEGIN
                     UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
                     124, 152, 12, 12
 
+    LTEXT           "Dim amount (%):",        IDC_LBL_MINIMIZED_INDICATOR_DIM, 12, 138, 82, 10
+    EDITTEXT        IDC_EDIT_MINIMIZED_INDICATOR_DIM,                          96, 136, 28, 12,
+                    ES_NUMBER | WS_TABSTOP
+    CONTROL         "", IDC_SPIN_MINIMIZED_INDICATOR_DIM, "msctls_updown32",
+                    UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_NOTHOUSANDS,
+                    124, 136, 12, 12
+
     CONTROL         "Pinned apps as buttons even if the apps are open", IDC_CHECK_PINNED_AS_BUTTONS,
                     "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 170, 192, 10
 

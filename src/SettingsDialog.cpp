@@ -234,6 +234,7 @@ static const int kAppBtnControls[] = {
     IDC_LBL_MINIMIZED_INDICATOR_TYPE, IDC_COMBO_MINIMIZED_INDICATOR_TYPE,
     IDC_LBL_MINIMIZED_INDICATOR_W, IDC_EDIT_MINIMIZED_INDICATOR_W, IDC_SPIN_MINIMIZED_INDICATOR_W,
     IDC_LBL_MINIMIZED_INDICATOR_H, IDC_EDIT_MINIMIZED_INDICATOR_H, IDC_SPIN_MINIMIZED_INDICATOR_H,
+    IDC_LBL_MINIMIZED_INDICATOR_DIM, IDC_EDIT_MINIMIZED_INDICATOR_DIM, IDC_SPIN_MINIMIZED_INDICATOR_DIM,
     IDC_CHECK_PINNED_AS_BUTTONS,
     IDC_CHECK_PROGRESSBAR,
     IDC_CHECK_PROGRESSBAR_THEMECLR,
@@ -372,20 +373,33 @@ static void SetMinimizedIndicatorControlsEnabled(HWND hwnd, bool enabled)
     EnableWindow(GetDlgItem(hwnd, IDC_LBL_MINIMIZED_INDICATOR_TYPE), enabled ? TRUE : FALSE);
     EnableWindow(GetDlgItem(hwnd, IDC_COMBO_MINIMIZED_INDICATOR_TYPE), enabled ? TRUE : FALSE);
 
-    // Size controls only apply when type is SmallRectangle
-    bool sizeEnabled = enabled;
+    // Size controls apply only to SmallRectangle; the Dim control applies only to DimButton.
+    // The two groups share the same screen position, so we show one and hide the other.
+    int sel = -1;
     if (enabled) {
-        int sel = static_cast<int>(
+        sel = static_cast<int>(
             SendMessageW(GetDlgItem(hwnd, IDC_COMBO_MINIMIZED_INDICATOR_TYPE), CB_GETCURSEL, 0, 0));
-        sizeEnabled = (sel == static_cast<int>(MinimizedIndicatorType::SmallRectangle));
     }
+    bool sizeShown = enabled && (sel == static_cast<int>(MinimizedIndicatorType::SmallRectangle));
+    bool dimShown  = enabled && (sel == static_cast<int>(MinimizedIndicatorType::DimButton));
+
     static const int kSizeIds[] = {
         IDC_LBL_MINIMIZED_INDICATOR_W, IDC_EDIT_MINIMIZED_INDICATOR_W, IDC_SPIN_MINIMIZED_INDICATOR_W,
         IDC_LBL_MINIMIZED_INDICATOR_H, IDC_EDIT_MINIMIZED_INDICATOR_H, IDC_SPIN_MINIMIZED_INDICATOR_H,
         0
     };
-    for (const int* id = kSizeIds; *id; ++id)
-        EnableWindow(GetDlgItem(hwnd, *id), sizeEnabled ? TRUE : FALSE);
+    static const int kDimIds[] = {
+        IDC_LBL_MINIMIZED_INDICATOR_DIM, IDC_EDIT_MINIMIZED_INDICATOR_DIM, IDC_SPIN_MINIMIZED_INDICATOR_DIM,
+        0
+    };
+    for (const int* id = kSizeIds; *id; ++id) {
+        ShowWindow(GetDlgItem(hwnd, *id), sizeShown ? SW_SHOW : SW_HIDE);
+        EnableWindow(GetDlgItem(hwnd, *id), sizeShown ? TRUE : FALSE);
+    }
+    for (const int* id = kDimIds; *id; ++id) {
+        ShowWindow(GetDlgItem(hwnd, *id), dimShown ? SW_SHOW : SW_HIDE);
+        EnableWindow(GetDlgItem(hwnd, *id), dimShown ? TRUE : FALSE);
+    }
 }
 
 static void SetSeparatorControlsEnabled(HWND hwnd, bool enabled)
@@ -791,6 +805,12 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
         SendMessageW(hIndHSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hIndHEdit), 0);
         SendMessageW(hIndHSpin, UDM_SETRANGE32, 1, 20);
         SendMessageW(hIndHSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(data->settings->minimizedIndicatorH));
+
+        HWND hIndDimSpin = GetDlgItem(hwnd, IDC_SPIN_MINIMIZED_INDICATOR_DIM);
+        HWND hIndDimEdit = GetDlgItem(hwnd, IDC_EDIT_MINIMIZED_INDICATOR_DIM);
+        SendMessageW(hIndDimSpin, UDM_SETBUDDY,   reinterpret_cast<WPARAM>(hIndDimEdit), 0);
+        SendMessageW(hIndDimSpin, UDM_SETRANGE32, 0, 100);
+        SendMessageW(hIndDimSpin, UDM_SETPOS32,   0, static_cast<LPARAM>(data->settings->minimizedIndicatorDim));
 
         SetMinimizedIndicatorControlsEnabled(hwnd, data->settings->showMinimizedIndicator);
 
@@ -1602,6 +1622,10 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MINIMIZED_INDICATOR_H), UDM_GETPOS32, 0, 0));
             if (indW >= 2 && indW <= 40) data->settings->minimizedIndicatorW = indW;
             if (indH >= 1 && indH <= 20) data->settings->minimizedIndicatorH = indH;
+
+            int indDim = static_cast<int>(
+                SendMessageW(GetDlgItem(hBtn, IDC_SPIN_MINIMIZED_INDICATOR_DIM), UDM_GETPOS32, 0, 0));
+            if (indDim >= 0 && indDim <= 100) data->settings->minimizedIndicatorDim = indDim;
 
             data->settings->pinnedAppsAsButtonsWhenOpen =
                 IsDlgButtonChecked(hBtn, IDC_CHECK_PINNED_AS_BUTTONS) == BST_CHECKED;

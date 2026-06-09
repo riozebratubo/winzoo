@@ -332,6 +332,7 @@ bool ExportSettingsToFile(const Settings& s)
     wInt("minimizedIndicatorType", static_cast<int>(s.minimizedIndicatorType));
     wInt("minimizedIndicatorW",    s.minimizedIndicatorW);
     wInt("minimizedIndicatorH",    s.minimizedIndicatorH);
+    wInt("minimizedIndicatorDim",  s.minimizedIndicatorDim);
     wBool("showStatusZone",   s.showStatusZone);
     wBool("showLangIndicator", s.showLangIndicator);
     wBool("showTrayIcons",    s.showTrayIcons);
@@ -601,6 +602,9 @@ bool ImportAndDeleteSettingsFile(Settings& s)
       ns.minimizedIndicatorType = static_cast<MinimizedIndicatorType>(v); }
     ri("minimizedIndicatorW", ns.minimizedIndicatorW);
     ri("minimizedIndicatorH", ns.minimizedIndicatorH);
+    ri("minimizedIndicatorDim", ns.minimizedIndicatorDim);
+    if (ns.minimizedIndicatorDim < 0)   ns.minimizedIndicatorDim = 0;
+    if (ns.minimizedIndicatorDim > 100) ns.minimizedIndicatorDim = 100;
     rb("showStatusZone",   ns.showStatusZone);
     rb("showLangIndicator", ns.showLangIndicator);
     rb("showTrayIcons",    ns.showTrayIcons);

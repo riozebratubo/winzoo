@@ -107,7 +107,7 @@ bool WindowTracker::AddWindowInternal(HWND hwnd)
     TaskButton btn;
     btn.hwnd  = hwnd;
     btn.title = GetWindowTitle(hwnd);
-    btn.icon  = iconCache_ ? iconCache_->GetIcon(hwnd, kIconSize) : nullptr;
+    btn.icon  = iconCache_ ? iconCache_->GetIcon(hwnd, iconSizePx_) : nullptr;
 
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
@@ -176,8 +176,25 @@ void WindowTracker::RefreshIcon(HWND hwnd)
     if (idx < 0) return;
     // Re-probe in the background; the current icon stays until the new one
     // resolves (via SetIcon) so a title change never blinks the icon.
-    if (iconCache_) iconCache_->Refresh(hwnd, kIconSize);
+    if (iconCache_) iconCache_->Refresh(hwnd, iconSizePx_);
     if (onChange_) onChange_();
+}
+
+void WindowTracker::SetIconSize(int px)
+{
+    if (px < 1) px = 1;
+    if (px == iconSizePx_) return;
+    iconSizePx_ = px;
+    // Re-capture every tracked window at the new size. The old-size cache entries
+    // are evicted so the cache doesn't accumulate one icon per historical size;
+    // the fresh icons resolve on background workers (button shows text meanwhile).
+    if (iconCache_) {
+        for (auto& btn : buttons_) {
+            iconCache_->Evict(btn.hwnd);
+            btn.icon = iconCache_->GetIcon(btn.hwnd, iconSizePx_);
+        }
+        if (onChange_) onChange_();
+    }
 }
 
 void WindowTracker::SetIcon(HWND hwnd, HICON icon)

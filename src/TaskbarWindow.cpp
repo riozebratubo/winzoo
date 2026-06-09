@@ -305,6 +305,9 @@ void TaskbarWindow::ApplySettings(const Settings& s)
 
     RebuildPinnedButtons();
 
+    // Re-capture running-window icons if the draw size changed (no-op otherwise).
+    tracker_.SetIconSize(Scale(settings_.appButtonIconSize, dpi_));
+
     if (pinnedPathsChanged) {
         for (const auto& btn : pinnedButtons_) {
             if (!btn.icon) { StartIconLoadThread(); break; }
@@ -1397,6 +1400,50 @@ void TaskbarWindow::LaunchApp(const wchar_t* exe, const wchar_t* args, int nShow
     ShellExecuteUser(nullptr, L"open", exe, args, nullptr, nShow);
 }
 
+RECT TaskbarWindow::ClockHitRect() const
+{
+    // clockRect_ is inset by `pad` on the cross-axis and trailing edge; grow the clickable
+    // area to fill the full taskbar thickness and reach the trailing edge so clicks in the
+    // clock's margin/padding still register (mirrors HitTestButton's full-thickness span).
+    if (IsRectEmpty(&clockRect_)) return clockRect_;
+    RECT client;
+    GetClientRect(hwnd_, &client);
+    bool isHoriz = (settings_.position != TaskbarPosition::Left &&
+                    settings_.position != TaskbarPosition::Right);
+    RECT r = clockRect_;
+    if (isHoriz) {
+        r.top    = client.top;
+        r.bottom = client.bottom;
+        r.right  = client.right;
+    } else {
+        r.left   = client.left;
+        r.right  = client.right;
+        r.bottom = client.bottom;
+    }
+    return r;
+}
+
+void TaskbarWindow::OpenCalendarFlyout()
+{
+    // Win11 has no documented URI for the clock flyout; the clock-click target is the
+    // Notification Center (which contains the calendar). Synthesize its Win+N shortcut.
+    // Win+N toggles, so a second click dismisses it.
+    auto key = [](WORD vk, bool up) {
+        INPUT i = {};
+        i.type       = INPUT_KEYBOARD;
+        i.ki.wVk     = vk;
+        i.ki.dwFlags = up ? KEYEVENTF_KEYUP : 0;
+        return i;
+    };
+    INPUT in[4] = {
+        key(VK_LWIN, false),
+        key('N',     false),
+        key('N',     true),
+        key(VK_LWIN, true),
+    };
+    SendInput(4, in, sizeof(INPUT));
+}
+
 void TaskbarWindow::ActivateButton(int combinedIdx)
 {
     if (combinedIdx < 0 || combinedIdx >= TotalCount()) return;
@@ -2113,6 +2160,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         // WM_APP_WIN_ICON. Wire the sink before Seed() so the initial enumeration
         // dispatches its icon probes asynchronously instead of blocking startup.
         iconCache_.SetNotifySink(hwnd_, WM_APP_WIN_ICON);
+        // Capture window icons at the on-screen draw size so they stay crisp
+        // instead of being upscaled from a tiny default. Set before Initialize()
+        // so Seed()'s initial probes already use the right size.
+        tracker_.SetIconSize(Scale(settings_.appButtonIconSize, dpi_));
         tracker_.Initialize(hwnd_, &iconCache_,
                             [this]() {
                                 LayoutButtons();
@@ -2321,6 +2372,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 PtInRect(&netIconRect_, clientPt) ||
                 PtInRect(&batIconRect_, clientPt))  return HTCLIENT;
         }
+        if (settings_.showClock) {
+            RECT cr = ClockHitRect();
+            if (!IsRectEmpty(&cr) && PtInRect(&cr, clientPt)) return HTCLIENT;
+        }
         return HTCAPTION;
     }
 
@@ -2464,6 +2519,15 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             ClientToScreen(hwnd, &screenPt);
             ShowLangMenu(screenPt);
             return 0;
+        }
+
+        // Clock — left click opens the Win11 calendar/notification flyout
+        if (settings_.showClock) {
+            RECT cr = ClockHitRect();
+            if (!IsRectEmpty(&cr) && PtInRect(&cr, pt)) {
+                OpenCalendarFlyout();
+                return 0;
+            }
         }
 
         // Tray icon drag/click start
@@ -2893,6 +2957,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         for (auto& btn : pinnedButtons_) btn.icon = nullptr;
         appIconCache_.Clear();
         StartIconLoadThread();
+        tracker_.SetIconSize(Scale(settings_.appButtonIconSize, dpi_));
         return 0;
     }
 

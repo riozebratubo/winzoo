@@ -1,5 +1,7 @@
 #include "IconCache.h"
 #include <shellapi.h>
+#include <shlobj.h>
+#include <shobjidl.h>
 
 HICON IconCache::GetIcon(HWND hwnd, int sizePx)
 {
@@ -67,12 +69,15 @@ void IconCache::EnsureWorkers()
 
 void IconCache::WorkerLoop()
 {
+    // IShellItemImageFactory (used by LoadForWindow for high-res exe icons) needs
+    // COM on this thread. MTA matches the app-icon loader and avoids STA pumping.
+    HRESULT hrCom = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     for (;;) {
         Request req;
         {
             std::unique_lock<std::mutex> lk(mtx_);
             cv_.wait(lk, [this] { return stop_ || !queue_.empty(); });
-            if (stop_ && queue_.empty()) return;
+            if (stop_ && queue_.empty()) break;
             req = queue_.front();
             queue_.pop_front();
         }
@@ -83,6 +88,7 @@ void IconCache::WorkerLoop()
             delete res;   // sink gone — drop the result
         }
     }
+    if (SUCCEEDED(hrCom)) CoUninitialize();
 }
 
 bool IconCache::OnResolved(LPARAM lParam, HWND* outHwnd, HICON* outIcon)
@@ -143,68 +149,140 @@ void IconCache::Stop()
     stop_    = false;   // allow restart if ever reused
 }
 
-HICON IconCache::LoadForWindow(HWND hwnd, int sizePx)
+// Native pixel width of an icon's bitmap (0 if it can't be measured). Used to
+// decide whether a window's own icon is already big enough to draw without the
+// blur that comes from upscaling a small icon to the button size.
+static int IconPixelWidth(HICON h)
+{
+    if (!h) return 0;
+    ICONINFO ii = {};
+    if (!GetIconInfo(h, &ii)) return 0;
+    BITMAP bm = {};
+    HBITMAP src = ii.hbmColor ? ii.hbmColor : ii.hbmMask;
+    int w = (src && GetObjectW(src, sizeof(bm), &bm)) ? bm.bmWidth : 0;
+    if (ii.hbmColor) DeleteObject(ii.hbmColor);
+    if (ii.hbmMask)  DeleteObject(ii.hbmMask);
+    return w;
+}
+
+// Converts a 32-bit ARGB HBITMAP (from IShellItemImageFactory) to an HICON.
+static HICON BitmapToIcon(HBITMAP hbm, int size)
+{
+    HBITMAP hbmMask = CreateBitmap(size, size, 1, 1, nullptr);
+    if (!hbmMask) return nullptr;
+    ICONINFO ii = { TRUE, 0, 0, hbmMask, hbm };
+    HICON hIcon = CreateIconIndirect(&ii);
+    DeleteObject(hbmMask);
+    return hIcon;
+}
+
+// Renders the executable's icon at exactly sizePx via the same shell API the
+// taskbar uses for pinned apps — pulls from the 256 px asset (or anti-aliased
+// 32 px for legacy apps) so the result is crisp at any button size.
+static HICON LoadHiResExeIcon(const wchar_t* path, int sizePx)
 {
     HICON icon = nullptr;
-
-    // 1. WM_GETICON (ICON_SMALL2 = best small, ICON_BIG for large)
-    UINT iconType = (sizePx <= 20) ? ICON_SMALL2 : ICON_BIG;
-    DWORD_PTR result = 0;
-    if (SendMessageTimeout(hwnd, WM_GETICON, iconType, 0,
-                           SMTO_ABORTIFHUNG, 50, &result) && result)
-        icon = CopyIcon(reinterpret_cast<HICON>(result));
-
-    // 1b. Retry with ICON_SMALL if ICON_SMALL2 yielded nothing
-    if (!icon && iconType == ICON_SMALL2) {
-        result = 0;
-        if (SendMessageTimeout(hwnd, WM_GETICON, ICON_SMALL, 0,
-                               SMTO_ABORTIFHUNG, 50, &result) && result)
-            icon = CopyIcon(reinterpret_cast<HICON>(result));
-    }
-
-    // 2. Class small icon
-    if (!icon) {
-        HICON cls = reinterpret_cast<HICON>(GetClassLongPtr(hwnd, GCLP_HICONSM));
-        if (cls) icon = CopyIcon(cls);
-    }
-
-    // 3. Class large icon
-    if (!icon) {
-        HICON cls = reinterpret_cast<HICON>(GetClassLongPtr(hwnd, GCLP_HICON));
-        if (cls) icon = CopyIcon(cls);
-    }
-
-    // 4. Extract from executable
-    if (!icon) {
-        wchar_t path[MAX_PATH] = {};
-        DWORD pid = 0;
-        GetWindowThreadProcessId(hwnd, &pid);
-        HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-        if (hProc) {
-            DWORD len = MAX_PATH;
-            QueryFullProcessImageNameW(hProc, 0, path, &len);
-            CloseHandle(hProc);
-        }
-        if (*path) {
-            HICON lg = nullptr, sm = nullptr;
-            if (ExtractIconExW(path, 0, &lg, &sm, 1) > 0) {
-                // Prefer the size closest to the request; fall back to the other
-                if (sizePx <= 20)
-                    icon = sm ? sm : lg;
-                else
-                    icon = lg ? lg : sm;
-                // Destroy the one we don't use
-                if (icon != lg && lg) DestroyIcon(lg);
-                if (icon != sm && sm) DestroyIcon(sm);
+    IShellItem* pItem = nullptr;
+    if (SUCCEEDED(SHCreateItemFromParsingName(path, nullptr, IID_PPV_ARGS(&pItem)))) {
+        IShellItemImageFactory* pSIIF = nullptr;
+        if (SUCCEEDED(pItem->QueryInterface(IID_PPV_ARGS(&pSIIF)))) {
+            SIZE sz = { sizePx, sizePx };
+            HBITMAP hbm = nullptr;
+            if (SUCCEEDED(pSIIF->GetImage(sz, (SIIGBF)(SIIGBF_ICONONLY | SIIGBF_SCALEUP), &hbm)) && hbm) {
+                icon = BitmapToIcon(hbm, sizePx);
+                DeleteObject(hbm);
             }
+            pSIIF->Release();
+        }
+        pItem->Release();
+    }
+    return icon;
+}
+
+// Basename equals ApplicationFrameHost.exe — the host process for packaged/UWP
+// apps. Its own exe icon is generic, so for these windows we must keep the
+// window's own (accurate) icon rather than substituting the host's exe icon.
+static bool IsPackagedAppHost(const wchar_t* path)
+{
+    const wchar_t* base = path;
+    for (const wchar_t* p = path; *p; ++p)
+        if (*p == L'\\' || *p == L'/') base = p + 1;
+    return _wcsicmp(base, L"ApplicationFrameHost.exe") == 0;
+}
+
+HICON IconCache::LoadForWindow(HWND hwnd, int sizePx)
+{
+    // 1. Gather the window's own icon, keeping the largest available variant.
+    //    This is the accurate, app/document-specific icon (and the only correct
+    //    source for packaged/UWP apps).
+    HICON winIcon = nullptr;
+    int   winSize = 0;
+    auto consider = [&](HICON src) {
+        if (!src) return;
+        HICON copy = CopyIcon(src);
+        if (!copy) return;
+        int w = IconPixelWidth(copy);
+        if (w > winSize) {
+            if (winIcon) DestroyIcon(winIcon);
+            winIcon = copy;
+            winSize = w;
+        } else {
+            DestroyIcon(copy);
+        }
+    };
+
+    DWORD_PTR result = 0;
+    if (SendMessageTimeout(hwnd, WM_GETICON, ICON_BIG, 0, SMTO_ABORTIFHUNG, 50, &result) && result)
+        consider(reinterpret_cast<HICON>(result));
+    consider(reinterpret_cast<HICON>(GetClassLongPtr(hwnd, GCLP_HICON)));
+    result = 0;
+    if (SendMessageTimeout(hwnd, WM_GETICON, ICON_SMALL2, 0, SMTO_ABORTIFHUNG, 50, &result) && result)
+        consider(reinterpret_cast<HICON>(result));
+    result = 0;
+    if (SendMessageTimeout(hwnd, WM_GETICON, ICON_SMALL, 0, SMTO_ABORTIFHUNG, 50, &result) && result)
+        consider(reinterpret_cast<HICON>(result));
+    consider(reinterpret_cast<HICON>(GetClassLongPtr(hwnd, GCLP_HICONSM)));
+
+    // The window's own icon is already big enough — use it as-is (crisp + accurate).
+    if (winIcon && winSize >= sizePx)
+        return winIcon;
+
+    // 2. Resolve the owning executable.
+    wchar_t path[MAX_PATH] = {};
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+        DWORD len = MAX_PATH;
+        QueryFullProcessImageNameW(hProc, 0, path, &len);
+        CloseHandle(hProc);
+    }
+
+    // 3. For ordinary apps, a high-res icon rendered from the exe is the same
+    //    artwork at full resolution — prefer it over a small upscaled window icon.
+    //    Skipped for the packaged-app host, whose exe icon would be generic.
+    if (*path && !IsPackagedAppHost(path)) {
+        if (HICON hi = LoadHiResExeIcon(path, sizePx)) {
+            if (winIcon) DestroyIcon(winIcon);
+            return hi;
         }
     }
 
-    // 5. System fallback
-    if (!icon)
-        icon = CopyIcon(reinterpret_cast<HICON>(LoadImage(nullptr, IDI_APPLICATION,
-                                                  IMAGE_ICON, sizePx, sizePx,
-                                                  LR_SHARED)));
+    // 4. Otherwise keep the window's own icon (accurate; upscaled at draw time).
+    if (winIcon)
+        return winIcon;
 
-    return icon;
+    // 5. No window icon (e.g. inaccessible process): fall back to ExtractIconEx.
+    if (*path) {
+        HICON lg = nullptr, sm = nullptr;
+        if (ExtractIconExW(path, 0, &lg, &sm, 1) > 0) {
+            HICON icon = (sizePx <= 20) ? (sm ? sm : lg) : (lg ? lg : sm);
+            if (icon != lg && lg) DestroyIcon(lg);
+            if (icon != sm && sm) DestroyIcon(sm);
+            if (icon) return icon;
+        }
+    }
+
+    // 6. System default.
+    return CopyIcon(reinterpret_cast<HICON>(LoadImage(nullptr, IDI_APPLICATION,
+                                            IMAGE_ICON, sizePx, sizePx, LR_SHARED)));
 }

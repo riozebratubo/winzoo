@@ -15,6 +15,12 @@ public:
 
     void OnShellMessage(WPARAM wParam, LPARAM lParam);
     void UpdateActiveWindow();
+
+    // Pixel size at which window icons are captured. Set this to the on-screen
+    // icon draw size (Scale(appButtonIconSize, dpi)) so DrawIconEx blits close to
+    // 1:1 instead of upscaling a tiny 16 px capture into a blurry button. Changing
+    // it re-captures every tracked window's icon at the new size in the background.
+    void SetIconSize(int px);
     void RefreshTitle(HWND hwnd);
     void RefreshIcon(HWND hwnd);
     // Swap an asynchronously-resolved icon into the matching button (no-op if
@@ -53,6 +59,6 @@ private:
     // crosses kStaleThreshold, so a momentary blip during an animation never removes it.
     std::unordered_map<HWND, int> staleTicks_;
 
-    static constexpr int kIconSize       = 16;
+    int iconSizePx_ = 16;   // capture size; overwritten via SetIconSize() before Seed()
     static constexpr int kStaleThreshold = 3;   // ~0.75s at the 250ms reconcile cadence
 };

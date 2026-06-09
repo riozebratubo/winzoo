@@ -168,6 +168,7 @@ private:
     static constexpr UINT_PTR kTimerAppScan      = 3;
     static constexpr UINT_PTR kTimerStatus       = 4;
     static constexpr UINT_PTR kTimerTray         = 5;
+    static constexpr UINT_PTR kTimerTrayFirst    = 6;  // one-shot: first tray scrape off the WM_CREATE path
     static constexpr UINT     kTimerIntervalMs   = 250;
     static constexpr UINT     kTimerAppScanMs    = 30000;
     static constexpr UINT     kTimerStatusMs     = 1000;
@@ -177,4 +178,5 @@ private:
     static constexpr UINT WM_APP_SCAN_DONE  = WM_APP + 1;
     static constexpr UINT WM_APP_ICONS_DONE = WM_APP + 2;
     static constexpr UINT WM_APP_SHOW_MENU  = WM_APP + 3;
+    static constexpr UINT WM_APP_WIN_ICON   = WM_APP + 4;  // IconCache worker → resolved window icon
 };

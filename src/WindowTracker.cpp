@@ -174,11 +174,16 @@ void WindowTracker::RefreshIcon(HWND hwnd)
 {
     int idx = FindByHwnd(hwnd);
     if (idx < 0) return;
-    if (iconCache_) {
-        iconCache_->Evict(hwnd);
-        buttons_[idx].icon = iconCache_->GetIcon(hwnd, kIconSize);
-    }
+    // Re-probe in the background; the current icon stays until the new one
+    // resolves (via SetIcon) so a title change never blinks the icon.
+    if (iconCache_) iconCache_->Refresh(hwnd, kIconSize);
     if (onChange_) onChange_();
+}
+
+void WindowTracker::SetIcon(HWND hwnd, HICON icon)
+{
+    int idx = FindByHwnd(hwnd);
+    if (idx >= 0) buttons_[idx].icon = icon;
 }
 
 void WindowTracker::OnShellMessage(WPARAM wParam, LPARAM lParam)

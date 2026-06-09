@@ -1,13 +1,14 @@
 #include <windows.h>
 #include "resource.h"
+#include "winzoo_version.h"
 
 IDI_APPICON ICON "winzoo.ico"
 
 1 RT_MANIFEST "manifest.xml"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     0,1,0,0
-PRODUCTVERSION  0,1,0,0
+FILEVERSION     WINZOO_VERSION_COMMA
+PRODUCTVERSION  WINZOO_VERSION_COMMA
 FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
 FILEFLAGS       0
 FILEOS          VOS__WINDOWS32
@@ -18,8 +19,9 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "FileDescription",  "Winzoo Taskbar Replacement"
-            VALUE "FileVersion",      "0.1.0.0"
+            VALUE "FileVersion",      WINZOO_VERSION_STRING_FULL
             VALUE "ProductName",      "Winzoo"
+            VALUE "ProductVersion",   WINZOO_VERSION_STRING_FULL
             VALUE "LegalCopyright",   "2026"
         END
     END

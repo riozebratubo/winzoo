@@ -17,6 +17,9 @@ public:
     void UpdateActiveWindow();
     void RefreshTitle(HWND hwnd);
     void RefreshIcon(HWND hwnd);
+    // Swap an asynchronously-resolved icon into the matching button (no-op if
+    // the window is gone). The icon is owned by IconCache; not copied here.
+    void SetIcon(HWND hwnd, HICON icon);
 
     // Periodic safety net: shell-hook messages are unreliable (windows can be
     // created without a title yet, or destroy notifications can be missed/spurious).

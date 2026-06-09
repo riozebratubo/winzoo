@@ -8,6 +8,7 @@
 #include "JumpList.h"
 #include "TaskbarRelocate.h"
 #include "WinzooTrayIpc.h"
+#include "winzoo_version.h"
 #include <algorithm>
 #include <atomic>
 #include <memory>
@@ -1701,7 +1702,7 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
 
     case IDM_ABOUT:
         MessageBoxW(hwnd_,
-                    L"Winzoo v0.1\n\nA lightweight taskbar replacement for Windows 10/11.",
+                    L"Winzoo v" WINZOO_VERSION_STRING_W L"\n\nA lightweight taskbar replacement for Windows 10/11.",
                     L"About Winzoo",
                     MB_OK | MB_ICONINFORMATION);
         break;
@@ -2085,6 +2086,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         shellHookMsg_ = tracker_.ShellHookMessage();
         if (shellHookMsg_ == 0)
             shellHookMsg_ = RegisterWindowMessage(L"SHELLHOOK");
+        // Window icons resolve on IconCache worker threads; results come back via
+        // WM_APP_WIN_ICON. Wire the sink before Seed() so the initial enumeration
+        // dispatches its icon probes asynchronously instead of blocking startup.
+        iconCache_.SetNotifySink(hwnd_, WM_APP_WIN_ICON);
         tracker_.Initialize(hwnd_, &iconCache_,
                             [this]() {
                                 LayoutButtons();
@@ -2112,7 +2117,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         auto [lt, lh]    = GetCurrentInputLanguage();
         currentLangText_ = lt;
         currentHkl_      = lh;
-        RefreshTrayIcons();
+        // The first tray scrape (STA COM enumeration + PrintWindow capture + per-icon
+        // SendMessageTimeout) is the heaviest startup step and must stay on this STA
+        // thread — defer it just off the WM_CREATE path so the bar paints immediately.
+        SetTimer(hwnd, kTimerTrayFirst, 50, nullptr);
         LayoutButtons();
 
         // Register relay message on all windows; install proxy (COM registration) on primary only.
@@ -2713,6 +2721,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         } else if (wParam == kTimerAppScanFirst) {
             KillTimer(hwnd, kTimerAppScanFirst);
             StartScanThread(true);
+        } else if (wParam == kTimerTrayFirst) {
+            KillTimer(hwnd, kTimerTrayFirst);
+            // One-shot first scrape. Skip if the push model already took over.
+            if (!trayPushActive_) RefreshTrayIcons();
+            EnsureNetworkTrayIcon();
         } else if (wParam == kTimerAppScan) {
             StartScanThread(false);
         } else if (wParam == kTimerStatus) {
@@ -2818,6 +2831,19 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         return 0;
     }
 
+    case WM_APP_WIN_ICON: {
+        if (shutdownPending_) { IconCache::DiscardResolved(lParam); return 0; }
+        HWND  target = nullptr;
+        HICON icon   = nullptr;
+        if (iconCache_.OnResolved(lParam, &target, &icon)) {
+            // Icon presence never changes a task button's width (the icon slot is
+            // always reserved), so a redraw suffices — no relayout needed.
+            tracker_.SetIcon(target, icon);
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
+        return 0;
+    }
+
     case WM_DPICHANGED: {
         dpi_ = HIWORD(wParam);
         auto* prc = reinterpret_cast<RECT*>(lParam);
@@ -2885,7 +2911,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             return 0;
         case IDM_ABOUT:
             MessageBoxW(hwnd_,
-                        L"Winzoo v0.1\n\nA lightweight taskbar replacement for Windows 10/11.",
+                        L"Winzoo v" WINZOO_VERSION_STRING_W L"\n\nA lightweight taskbar replacement for Windows 10/11.",
                         L"About Winzoo",
                         MB_OK | MB_ICONINFORMATION);
             return 0;
@@ -2912,11 +2938,16 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         KillTimer(hwnd, kTimerAppScan);
         KillTimer(hwnd, kTimerStatus);
         KillTimer(hwnd, kTimerTray);
+        KillTimer(hwnd, kTimerTrayFirst);
+        // Join the icon workers first so no further WM_APP_WIN_ICON is posted.
+        iconCache_.Stop();
         // Drain any pending thread-posted messages to prevent heap/icon leaks.
         {
             MSG pendingMsg;
             while (PeekMessageW(&pendingMsg, hwnd, WM_APP_SCAN_DONE, WM_APP_ICONS_DONE, PM_REMOVE))
                 HandleMessage(hwnd, pendingMsg.message, pendingMsg.wParam, pendingMsg.lParam);
+            while (PeekMessageW(&pendingMsg, hwnd, WM_APP_WIN_ICON, WM_APP_WIN_ICON, PM_REMOVE))
+                IconCache::DiscardResolved(pendingMsg.lParam);
         }
         for (auto& e : trayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
         trayIcons_.clear();

@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 project(winzoo VERSION 0.4.0 LANGUAGES CXX)
 
+# Version is sourced from the project(... VERSION ...) line above. project()
+# only populates three components, so default the 4th (tweak) to 0 and build a
+# full dotted string for the manifest / VERSIONINFO.
+set(WINZOO_VERSION_TWEAK 0)
+set(WINZOO_VERSION_FULL
+    "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}.${WINZOO_VERSION_TWEAK}")
+
 if(NOT WIN32)
     message(FATAL_ERROR "winzoo is Windows-only")
 endif()
@@ -31,6 +38,19 @@ endif()
 configure_file(
     ${CMAKE_SOURCE_DIR}/res/winzoo_embed.rc.in
     ${CMAKE_BINARY_DIR}/winzoo_embed.rc
+    @ONLY
+)
+
+# Generated version header (consumed by both C++ sources and the .rc) and the
+# application manifest, both stamped from the project version above.
+configure_file(
+    ${CMAKE_SOURCE_DIR}/res/winzoo_version.h.in
+    ${CMAKE_BINARY_DIR}/winzoo_version.h
+    @ONLY
+)
+configure_file(
+    ${CMAKE_SOURCE_DIR}/res/manifest.xml.in
+    ${CMAKE_BINARY_DIR}/manifest.xml
     @ONLY
 )
 
@@ -65,7 +85,7 @@ add_subdirectory(src/winzoo_com)
 
 add_executable(winzoo WIN32 ${SOURCES})
 add_dependencies(winzoo winzoo_com)
-target_include_directories(winzoo PRIVATE src res)
+target_include_directories(winzoo PRIVATE src res ${CMAKE_BINARY_DIR})
 target_link_libraries(winzoo PRIVATE
     user32 gdi32 shell32 comctl32 advapi32 shlwapi dwmapi uxtheme comdlg32 ole32 uuid psapi propsys wlanapi
 )

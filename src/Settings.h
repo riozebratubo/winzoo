@@ -109,6 +109,11 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     bool appMenuSearchEnabled          = true;
     bool appMenuSearchFuzzy            = true;
     bool appMenuSearchSystem           = true;  // show executables from PATH and Settings page links
+    // Source for system-tool search results (Device Manager, Disk Management, …):
+    //   true  — enumerate the "All Tasks"/God-Mode shell folder (comprehensive, localized)
+    //   false — use the curated kSystemTools[] table in SystemTools.cpp
+    // No UI: flip the default here to switch sources project-wide.
+    bool appMenuSearchSystemDynamic    = true;
 
     // App Menu Sidebar
     bool appMenuSidebarEnabled         = true;

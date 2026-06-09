@@ -71,6 +71,7 @@ set(SOURCES
     src/AppIconCache.cpp
     src/AppMenuWindow.cpp
     src/SettingsFile.cpp
+    src/SystemTools.cpp
     src/SystemStatus.cpp
     src/TrayIconProvider.cpp
     src/LaunchHelper.cpp

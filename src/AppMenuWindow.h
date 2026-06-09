@@ -153,5 +153,6 @@ private:
 
     // Icons for synthesised search results — freed in WM_DESTROY.
     HICON settingsIcon_ = nullptr;
+    HICON sysToolIcon_  = nullptr;  // shared icon for system-tool results
     std::unordered_map<std::wstring, HICON> exeIconCache_;
 };

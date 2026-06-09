@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-enum class AppNodeType { Shortcut, Executable, SettingsPage };
+enum class AppNodeType { Shortcut, Executable, SettingsPage, ShellItem };
 
 // A node in the app-menu tree: either a folder (isFolder=true, has children)
 // or a leaf app (isFolder=false, has exePath/iconPath/icon).

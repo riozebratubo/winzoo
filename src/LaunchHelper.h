@@ -1,8 +1,16 @@
 #pragma once
 #include <windows.h>
 
+struct IShellDispatch2;
+
 // No-op — kept for API compatibility.
 void RegisterLaunchHelperClass(HINSTANCE hInst);
+
+// Returns Explorer's medium-integrity IShellDispatch2 automation object, so any
+// launch performed through it (ShellExecute, FolderItem::InvokeVerb) de-elevates
+// when winzoo is running as administrator. Caller must Release() the result.
+// Returns nullptr if the Explorer automation object is unavailable.
+IShellDispatch2* GetExplorerShellDispatch();
 
 // Launches exe via ShellExecuteExW and, in a background thread, moves the
 // app's first visible top-level window to the center of hMon.

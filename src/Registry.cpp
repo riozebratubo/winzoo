@@ -312,6 +312,7 @@ Settings LoadSettings()
     if (key.ReadDword(L"AppMenuSearchEnabled",          amVal)) s.appMenuSearchEnabled          = amVal != 0;
     if (key.ReadDword(L"AppMenuSearchFuzzy",            amVal)) s.appMenuSearchFuzzy            = amVal != 0;
     if (key.ReadDword(L"AppMenuSearchSystem",           amVal)) s.appMenuSearchSystem           = amVal != 0;
+    if (key.ReadDword(L"AppMenuSearchSystemDynamic",    amVal)) s.appMenuSearchSystemDynamic    = amVal != 0;
     if (key.ReadDword(L"AppMenuSidebarEnabled",         amVal)) s.appMenuSidebarEnabled         = amVal != 0;
     if (key.ReadDword(L"AppMenuSidebarWidth",           amVal)) s.appMenuSidebarWidth           = static_cast<int>(amVal);
     if (key.ReadDword(L"AppMenuSidebarShowExplorer",    amVal)) s.appMenuSidebarShowExplorer    = amVal != 0;
@@ -460,6 +461,7 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"AppMenuSearchEnabled",          s.appMenuSearchEnabled          ? 1u : 0u);
     key.WriteDword(L"AppMenuSearchFuzzy",            s.appMenuSearchFuzzy            ? 1u : 0u);
     key.WriteDword(L"AppMenuSearchSystem",           s.appMenuSearchSystem           ? 1u : 0u);
+    key.WriteDword(L"AppMenuSearchSystemDynamic",    s.appMenuSearchSystemDynamic    ? 1u : 0u);
     key.WriteDword(L"AppMenuSidebarEnabled",         s.appMenuSidebarEnabled         ? 1u : 0u);
     key.WriteDword(L"AppMenuSidebarWidth",           static_cast<DWORD>(s.appMenuSidebarWidth));
     key.WriteDword(L"AppMenuSidebarShowExplorer",    s.appMenuSidebarShowExplorer    ? 1u : 0u);

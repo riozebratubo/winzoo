@@ -38,18 +38,21 @@ static bool IsProcessElevated()
     return elevated;
 }
 
-// Launch through Explorer's IShellDispatch2 so the child runs at the user's
-// (medium) integrity level. Returns false if the Explorer automation object is
-// unavailable (caller should then fall back to a direct ShellExecute).
-static bool ShellExecuteViaExplorer(const wchar_t* file, const wchar_t* params,
-                                    const wchar_t* dir, const wchar_t* verb, int nShow)
+// Obtain Explorer's own IShellDispatch2 automation object by walking the desktop
+// shell view (ShellWindows → desktop browser → shell view → background folder →
+// Application). Because this object lives in explorer.exe (medium integrity),
+// any launch performed through it — ShellExecute, FolderItem::InvokeVerb — runs
+// at the user's integrity level rather than inheriting winzoo's admin token.
+// Caller owns the returned pointer (Release() when done); returns nullptr when
+// the Explorer automation object is unavailable.
+IShellDispatch2* GetExplorerShellDispatch()
 {
-    bool ok = false;
     IShellWindows* psw = nullptr;
     if (FAILED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER,
                                 IID_PPV_ARGS(&psw))))
-        return false;
+        return nullptr;
 
+    IShellDispatch2* result = nullptr;
     VARIANT vEmpty; VariantInit(&vEmpty);
     VARIANT vLoc;   vLoc.vt = VT_I4; vLoc.lVal = CSIDL_DESKTOP;
     long lhwnd = 0;
@@ -68,22 +71,7 @@ static bool ShellExecuteViaExplorer(const wchar_t* file, const wchar_t* params,
                         if (SUCCEEDED(pdispBg->QueryInterface(IID_PPV_ARGS(&psfvd)))) {
                             IDispatch* pdispShell = nullptr;
                             if (SUCCEEDED(psfvd->get_Application(&pdispShell))) {
-                                IShellDispatch2* psd = nullptr;
-                                if (SUCCEEDED(pdispShell->QueryInterface(IID_PPV_ARGS(&psd)))) {
-                                    VARIANT vArgs, vDir, vVerb, vShow;
-                                    VariantInit(&vArgs); VariantInit(&vDir);
-                                    VariantInit(&vVerb); VariantInit(&vShow);
-                                    if (params && *params) { vArgs.vt = VT_BSTR; vArgs.bstrVal = SysAllocString(params); }
-                                    if (dir && *dir)       { vDir.vt  = VT_BSTR; vDir.bstrVal  = SysAllocString(dir); }
-                                    if (verb && *verb)     { vVerb.vt = VT_BSTR; vVerb.bstrVal = SysAllocString(verb); }
-                                    vShow.vt = VT_I4; vShow.lVal = nShow;
-                                    BSTR bFile = SysAllocString(file);
-                                    if (bFile && SUCCEEDED(psd->ShellExecute(bFile, vArgs, vDir, vVerb, vShow)))
-                                        ok = true;
-                                    if (bFile) SysFreeString(bFile);
-                                    VariantClear(&vArgs); VariantClear(&vDir); VariantClear(&vVerb);
-                                    psd->Release();
-                                }
+                                pdispShell->QueryInterface(IID_PPV_ARGS(&result));
                                 pdispShell->Release();
                             }
                             psfvd->Release();
@@ -99,6 +87,32 @@ static bool ShellExecuteViaExplorer(const wchar_t* file, const wchar_t* params,
         pdisp->Release();
     }
     psw->Release();
+    return result;
+}
+
+// Launch through Explorer's IShellDispatch2 so the child runs at the user's
+// (medium) integrity level. Returns false if the Explorer automation object is
+// unavailable (caller should then fall back to a direct ShellExecute).
+static bool ShellExecuteViaExplorer(const wchar_t* file, const wchar_t* params,
+                                    const wchar_t* dir, const wchar_t* verb, int nShow)
+{
+    IShellDispatch2* psd = GetExplorerShellDispatch();
+    if (!psd) return false;
+
+    bool ok = false;
+    VARIANT vArgs, vDir, vVerb, vShow;
+    VariantInit(&vArgs); VariantInit(&vDir);
+    VariantInit(&vVerb); VariantInit(&vShow);
+    if (params && *params) { vArgs.vt = VT_BSTR; vArgs.bstrVal = SysAllocString(params); }
+    if (dir && *dir)       { vDir.vt  = VT_BSTR; vDir.bstrVal  = SysAllocString(dir); }
+    if (verb && *verb)     { vVerb.vt = VT_BSTR; vVerb.bstrVal = SysAllocString(verb); }
+    vShow.vt = VT_I4; vShow.lVal = nShow;
+    BSTR bFile = SysAllocString(file);
+    if (bFile && SUCCEEDED(psd->ShellExecute(bFile, vArgs, vDir, vVerb, vShow)))
+        ok = true;
+    if (bFile) SysFreeString(bFile);
+    VariantClear(&vArgs); VariantClear(&vDir); VariantClear(&vVerb);
+    psd->Release();
     return ok;
 }
 

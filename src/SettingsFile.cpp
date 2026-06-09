@@ -365,6 +365,7 @@ bool ExportSettingsToFile(const Settings& s)
     wBool("appMenuSearchEnabled",          s.appMenuSearchEnabled);
     wBool("appMenuSearchFuzzy",            s.appMenuSearchFuzzy);
     wBool("appMenuSearchSystem",           s.appMenuSearchSystem);
+    wBool("appMenuSearchSystemDynamic",    s.appMenuSearchSystemDynamic);
     wBool("appMenuSidebarEnabled",         s.appMenuSidebarEnabled);
     wInt("appMenuSidebarWidth",            s.appMenuSidebarWidth);
     wBool("appMenuSidebarShowExplorer",    s.appMenuSidebarShowExplorer);
@@ -644,6 +645,7 @@ bool ImportAndDeleteSettingsFile(Settings& s)
     rb("appMenuSearchEnabled",          ns.appMenuSearchEnabled);
     rb("appMenuSearchFuzzy",            ns.appMenuSearchFuzzy);
     rb("appMenuSearchSystem",           ns.appMenuSearchSystem);
+    rb("appMenuSearchSystemDynamic",    ns.appMenuSearchSystemDynamic);
     rb("appMenuSidebarEnabled",         ns.appMenuSidebarEnabled);
     ri("appMenuSidebarWidth",           ns.appMenuSidebarWidth);
     rb("appMenuSidebarShowExplorer",    ns.appMenuSidebarShowExplorer);

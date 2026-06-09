@@ -1,6 +1,7 @@
 #include "AppMenuWindow.h"
 #include "LaunchHelper.h"
 #include "SettingsSearch.h"
+#include "SystemTools.h"
 #include "PopupMenu.h"
 #include "Dpi.h"
 #include "resource.h"
@@ -12,6 +13,7 @@
 #include <wincodec.h>
 #include <dwmapi.h>
 #include <algorithm>
+#include <unordered_set>
 #include <utility>
 
 #pragma comment(lib, "PowrProf.lib")
@@ -524,6 +526,45 @@ void AppMenuWindow::ApplyFilter()
                 n.exePath  = p->uri;
                 n.icon     = settingsIcon_;
                 filteredNodes_.insert(filteredNodes_.begin(), std::move(n));
+            }
+
+            // System tools (Device Manager, Disk Management, Control Panel
+            // applets, …) — append below shortcut matches. Source is dynamic
+            // shell enumeration or the curated table per settings.
+            auto tools = SearchSystemTools(lowerQuery, settings_->appMenuSearchSystemDynamic,
+                                           fuzzy);
+            if (!tools.empty() && !sysToolIcon_) {
+                wchar_t controlExe[MAX_PATH];
+                ExpandEnvironmentStringsW(L"%windir%\\System32\\control.exe",
+                                          controlExe, MAX_PATH);
+                ExtractIconExW(controlExe, 0, nullptr, &sysToolIcon_, 1);
+                if (!sysToolIcon_)
+                    sysToolIcon_ = LoadIcon(nullptr, IDI_APPLICATION);
+            }
+            // Dedup against names already shown (shortcuts + settings pages) so
+            // e.g. "Control Panel" doesn't appear twice from different sources.
+            std::unordered_set<std::wstring> seen;
+            for (const auto& n : filteredNodes_) {
+                std::wstring key = n.name;
+                for (auto& ch : key) ch = towlower(ch);
+                seen.insert(std::move(key));
+            }
+            for (auto& t : tools) {
+                std::wstring key = t.name;
+                for (auto& ch : key) ch = towlower(ch);
+                if (!seen.insert(key).second) continue;  // already shown
+
+                AppTreeNode n;
+                n.name     = std::move(t.name);
+                n.subtitle = L"System tool";
+                n.icon     = sysToolIcon_;
+                if (t.shellItem) {
+                    n.type = AppNodeType::ShellItem;
+                } else {
+                    n.type    = AppNodeType::Executable;
+                    n.exePath = std::move(t.command);
+                }
+                filteredNodes_.push_back(std::move(n));
             }
 
             // Executable from PATH — append below shortcut matches.
@@ -1351,6 +1392,14 @@ void AppMenuWindow::ActivateNode(int idx)
             if (IsWindow(hwnd_))
                 DestroyWindow(hwnd_);
         }
+    } else if (node.type == AppNodeType::ShellItem) {
+        // Dynamic system tool: launch by display name via the shell namespace
+        // (de-elevated when possible). No same-monitor hint — these open their
+        // own MMC/Control Panel hosts.
+        LaunchSystemToolByName(node.name);
+        closeReason_ = AppMenuCloseReason::Selection;
+        done_ = true;
+        DestroyWindow(hwnd_);
     } else {
         const std::wstring& path = node.exePath.empty() ? node.iconPath : node.exePath;
         if (!path.empty())
@@ -2070,7 +2119,10 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (editBgBrush_) { DeleteObject(editBgBrush_); editBgBrush_ = nullptr; }
         if (folderIconList_) { DestroyIcon(folderIconList_); folderIconList_ = nullptr; }
         if (folderIconGrid_) { DestroyIcon(folderIconGrid_); folderIconGrid_ = nullptr; }
-        if (settingsIcon_)   { DestroyIcon(settingsIcon_);   settingsIcon_   = nullptr; }
+        // settingsIcon_/sysToolIcon_ may have fallen back to the shared
+        // IDI_APPLICATION (same handle every call) — don't DestroyIcon that.
+        if (settingsIcon_) { if (settingsIcon_ != LoadIcon(nullptr, IDI_APPLICATION)) DestroyIcon(settingsIcon_); settingsIcon_ = nullptr; }
+        if (sysToolIcon_)  { if (sysToolIcon_  != LoadIcon(nullptr, IDI_APPLICATION)) DestroyIcon(sysToolIcon_);  sysToolIcon_  = nullptr; }
         if (profilePicBmp_)  { DeleteObject(profilePicBmp_); profilePicBmp_  = nullptr; }
         for (auto& [path, icon] : exeIconCache_)
             if (icon) DestroyIcon(icon);
@@ -2124,6 +2176,12 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
     // Search: only on root menu when enabled in settings
     menu.searchEnabled_ = !isSubmenu && settings.appMenuSearchEnabled;
     menu.searchBoxH_    = menu.SearchBoxHeight();
+
+    // Warm the (background) God-Mode enumeration now so the first system-tool
+    // search returns dynamic results instead of the curated fallback.
+    if (menu.searchEnabled_ && settings.appMenuSearchSystem &&
+        settings.appMenuSearchSystemDynamic)
+        PrewarmSystemTools();
 
     int menuW = Scale(settings.appMenuWidth, dpi);
     menu.menuW_ = menuW;

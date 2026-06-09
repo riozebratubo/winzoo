@@ -9,6 +9,11 @@ public:
     bool SetPosition(TaskbarPosition position, int thicknessPx);
     void Unregister();
 
+    // Extend snapped ("arranged") windows on this monitor down to the corrected work-area
+    // edge. Snap layouts are computed against a stale work area (we update it silently,
+    // without SPIF_SENDCHANGE) so snapped windows stop short of the bar, leaving a gap.
+    void RefitArrangedWindows();
+
     RECT GetReservedRect() const { return reservedRect_; }
     bool IsRegistered()    const { return registered_; }
     UINT CallbackMessage() const { return callbackMsg_; }

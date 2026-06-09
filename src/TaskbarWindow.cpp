@@ -2708,6 +2708,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (wParam == kTimerActiveWindow) {
             tracker_.Reconcile();
             tracker_.UpdateActiveWindow();
+            // Snapped windows are laid out against a stale work area and stop short of the
+            // bar; pull them down to the corrected edge. Cheap and guarded — only resizes a
+            // window that actually fell short on our reserved edge.
+            if (settings_.position != TaskbarPosition::Floating)
+                appBar_.RefitArrangedWindows();
             if (settings_.showLangIndicator) {
                 auto [newText, newHkl] = GetCurrentInputLanguage();
                 if (newText != currentLangText_) {

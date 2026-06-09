@@ -1,5 +1,6 @@
 #include "AppBar.h"
 #include <algorithm>
+#include <dwmapi.h>
 
 UINT AppBar::EdgeForPosition(TaskbarPosition p)
 {
@@ -102,6 +103,75 @@ static void RefitMaximizedWindows(HMONITOR mon, const RECT& work)
         }
         return TRUE;
     }, reinterpret_cast<LPARAM>(&ctx));
+}
+
+// Re-fit windows that are SNAPPED (arranged) on `mon` so they reach the corrected work-area
+// edge. Maximized windows are handled above; snapped ones are NOT IsZoomed, and because we
+// update the work area without SPIF_SENDCHANGE the shell snaps them against a stale, larger
+// reservation — they stop short of the bar, leaving a gap. IsWindowArranged() is TRUE exactly
+// for snapped windows, so we never touch ordinary floating windows. We only nudge the one
+// edge we reserve, and only when the window stopped within `thickness + margin` of the
+// corrected edge — a half/full-height snap that fell short. A quadrant snap whose far edge
+// sits near mid-screen has a huge gap and is correctly left alone.
+static void RefitArrangedWindows(HMONITOR mon, const RECT& work, int margin)
+{
+    struct Ctx { HMONITOR mon; RECT work; int margin; } ctx{ mon, work, margin };
+    EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
+        auto* c = reinterpret_cast<Ctx*>(lp);
+        if (!IsWindowVisible(hwnd) || IsIconic(hwnd) || IsZoomed(hwnd) ||
+            !IsWindowArranged(hwnd) ||
+            MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) != c->mon)
+            return TRUE;
+
+        // `cur` is the outer rect we must feed back to SetWindowPos. `frame` is the VISIBLE
+        // bounds. They differ on Chromium/DWM apps, whose outer rect extends ~6-8px past the
+        // visible window (invisible resize border / drop shadow). Measure each gap against
+        // `frame`, but apply the move to `cur` — otherwise we'd align the invisible border to
+        // the work-area edge and leave the visible window short by the border width.
+        RECT cur = {};
+        if (!GetWindowRect(hwnd, &cur))
+            return TRUE;
+        RECT frame = cur;
+        DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame));
+
+        // Check ALL FOUR edges, not just the bar's edge: the shell snaps windows against a
+        // stale work area that still reserves the hidden Explorer taskbar strip (~60px), and
+        // that strip lives on the BOTTOM regardless of which edge winzoo's bar is on — so a
+        // top-docked bar leaves the gap at the bottom, the opposite edge. For each edge, a
+        // small visible gap (window fell short of the work area) is the stale reservation:
+        // snap it out to `work`. A large gap is a real snap division (the half/quarter split
+        // near mid-screen): leave it untouched.
+        const RECT& w = c->work;
+        RECT tgt = cur;
+        if (frame.left   - w.left   > 0 && frame.left   - w.left   <= c->margin) tgt.left   = w.left   - (frame.left - cur.left);
+        if (frame.top    - w.top    > 0 && frame.top    - w.top    <= c->margin) tgt.top    = w.top    - (frame.top  - cur.top);
+        if (w.right  - frame.right  > 0 && w.right  - frame.right  <= c->margin) tgt.right  = w.right  + (cur.right - frame.right);
+        if (w.bottom - frame.bottom > 0 && w.bottom - frame.bottom <= c->margin) tgt.bottom = w.bottom + (cur.bottom - frame.bottom);
+
+        // Net-change guard: skip when nothing moved — avoids re-issuing SetWindowPos every tick.
+        if (EqualRect(&cur, &tgt))
+            return TRUE;
+
+        SetWindowPos(hwnd, nullptr, tgt.left, tgt.top,
+                     tgt.right - tgt.left, tgt.bottom - tgt.top,
+                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&ctx));
+}
+
+void AppBar::RefitArrangedWindows()
+{
+    if (position_ == TaskbarPosition::Floating || !registered_)
+        return;
+
+    // desiredWA = the rect a snapped window should fill: the monitor, minus winzoo's strip on
+    // its edge. Non-bar edges stay at the monitor extent, so a window the shell shrank to fit
+    // a phantom reservation on some other edge gets pushed back out to the true monitor edge.
+    UINT edge = EdgeForPosition(position_);
+    RECT desiredWA = MonitorRectForWindow();
+    CarveWorkArea(desiredWA, edge, thicknessPx_);
+    HMONITOR hMon = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY);
+    ::RefitArrangedWindows(hMon, desiredWA, thicknessPx_ + 100);
 }
 
 bool AppBar::SetPosition(TaskbarPosition position, int thicknessPx)

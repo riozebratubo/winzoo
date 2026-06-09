@@ -138,6 +138,11 @@ static void RefitMaximizedWindowsOnMonitor(HMONITOR mon, const RECT& work)
         auto* c = reinterpret_cast<Ctx*>(lp);
         if (IsWindowVisible(hwnd) && IsZoomed(hwnd) &&
             MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) == c->mon) {
+            // Net-change guard: skip windows already at the target rect so redundant
+            // reclaim passes don't re-resize a maximized window we've already fitted.
+            RECT cur = {};
+            if (GetWindowRect(hwnd, &cur) && EqualRect(&cur, &c->work))
+                return TRUE;
             SetWindowPos(hwnd, nullptr, c->work.left, c->work.top,
                          c->work.right - c->work.left, c->work.bottom - c->work.top,
                          SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);

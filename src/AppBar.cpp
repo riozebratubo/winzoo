@@ -89,6 +89,13 @@ static void RefitMaximizedWindows(HMONITOR mon, const RECT& work)
         auto* c = reinterpret_cast<Ctx*>(lp);
         if (IsWindowVisible(hwnd) && IsZoomed(hwnd) &&
             MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) == c->mon) {
+            // Net-change guard: skip windows already at the target rect. The shell's
+            // reassertion loop fires repeated ABN_POSCHANGED passes during startup; on
+            // a pass where this window is already fitted, re-issuing SetWindowPos is what
+            // made maximized windows bounce. Only refit ones the shell actually moved.
+            RECT cur = {};
+            if (GetWindowRect(hwnd, &cur) && EqualRect(&cur, &c->work))
+                return TRUE;
             SetWindowPos(hwnd, nullptr, c->work.left, c->work.top,
                          c->work.right - c->work.left, c->work.bottom - c->work.top,
                          SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);

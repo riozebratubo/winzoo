@@ -83,11 +83,10 @@ bool App::Init(HINSTANCE hInst)
     // time the bars are created; they pick it up via TryGetLatestSystemStatus().
     StartSystemStatusPoller();
 
-    // Method B: dock Explorer's taskbar on winzoo's edge so ApplicationFrameWindow
-    // apps (Task Manager etc.) minimize toward winzoo. Runs before we hide/probe the
-    // tray, and only restarts Explorer when the edge actually needs to change.
-    if (settings_.taskbarHookMethod == TaskbarHookMethod::BeforeExplorer)
-        RelocateExplorerTaskbarToMatch(settings_.position);
+    // Dock Explorer's taskbar on winzoo's edge so ApplicationFrameWindow apps (Task
+    // Manager etc.) minimize toward winzoo. Runs before we hide/probe the tray, and
+    // only restarts Explorer when the edge actually needs to change.
+    RelocateExplorerTaskbarToMatch(settings_.position);
 
     // Hide the native Windows taskbar on every monitor and drop its appbar reservations.
     // SW_HIDE alone leaves Explorer's appbars reserving their strips (and reasserting
@@ -176,10 +175,6 @@ void App::Shutdown()
 void App::PropagateSettings(const Settings& newSettings, TaskbarWindow* origin)
 {
     bool monitorModeChanged = (newSettings.taskbarMonitorMode != settings_.taskbarMonitorMode);
-    // A hook-method change needs a winzoo restart so Init() re-runs the Explorer-
-    // taskbar relocation logic. (A later position change with Method B active simply
-    // self-heals on the next launch, when Init() re-aligns Explorer's edge.)
-    bool hookMethodChanged  = (newSettings.taskbarHookMethod != settings_.taskbarHookMethod);
     settings_ = newSettings;
 
     for (auto& tb : taskbars_) {
@@ -187,7 +182,7 @@ void App::PropagateSettings(const Settings& newSettings, TaskbarWindow* origin)
             tb->ApplySettings(settings_);
     }
 
-    if (monitorModeChanged || hookMethodChanged)
+    if (monitorModeChanged)
         RequestRestart();
 }
 

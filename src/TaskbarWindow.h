@@ -179,6 +179,11 @@ private:
     bool            trayDragging_   = false;
     bool            shutdownPending_= false;
     bool            trayPushActive_ = false;  // first WinzooTray push received → stop scraping
+    // True between WTS_SESSION_LOCK and WTS_SESSION_UNLOCK. While locked, the default
+    // desktop's windows are cloaked/hidden by the system, so they fail ShouldTrack() and
+    // the reconcile sweep would cull every button. We freeze the sweep while locked and
+    // re-seed on unlock so the buttons survive a lock/sleep cycle.
+    bool            sessionLocked_  = false;
 
     // Generation counters to discard stale background-thread results
     unsigned        scanGen_        = 0;

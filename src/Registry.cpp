@@ -213,8 +213,6 @@ Settings LoadSettings()
 
     if (key.ReadDword(L"TaskbarMonitorMode", val) && val <= 1)
         s.taskbarMonitorMode = static_cast<TaskbarMonitorMode>(val);
-    if (key.ReadDword(L"TaskbarHookMethod", val) && val <= 1)
-        s.taskbarHookMethod = static_cast<TaskbarHookMethod>(val);  // 2 = reserved "After Explorer" (unimplemented)
     if (key.ReadDword(L"ShowAppMenuOnAllMonitors",   val)) s.showAppMenuOnAllMonitors   = val != 0;
     if (key.ReadDword(L"ShowCurrentMonitorAppsOnly", val)) s.showCurrentMonitorAppsOnly = val != 0;
 
@@ -409,7 +407,6 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"FloatY",     static_cast<DWORD>(s.floatY));
     key.WriteDword(L"FloatWidth", static_cast<DWORD>(s.floatWidth));
     key.WriteDword(L"TaskbarMonitorMode",        static_cast<DWORD>(s.taskbarMonitorMode));
-    key.WriteDword(L"TaskbarHookMethod",         static_cast<DWORD>(s.taskbarHookMethod));
     key.WriteDword(L"ShowAppMenuOnAllMonitors",   s.showAppMenuOnAllMonitors   ? 1u : 0u);
     key.WriteDword(L"ShowCurrentMonitorAppsOnly", s.showCurrentMonitorAppsOnly ? 1u : 0u);
     key.WriteDword(L"MaxButtonWidth",    static_cast<DWORD>(s.maxButtonWidth));

@@ -19,6 +19,9 @@
 #include <objbase.h>
 #include <initguid.h>
 #include <msctf.h>
+#include <wtsapi32.h>
+
+#pragma comment(lib, "wtsapi32.lib")
 
 // Find the live HMONITOR whose device name matches `name` (e.g. "DISPLAY1"). Monitor
 // HANDLES are invalidated whenever the display topology changes (a monitor dropping and
@@ -2263,6 +2266,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         SetTimer(hwnd, kTimerTrayFirst, 50, nullptr);
         LayoutButtons();
 
+        // Lock/unlock notifications: while the session is locked the default desktop's
+        // windows are cloaked, so we must freeze the reconcile sweep (see WM_WTSSESSION_CHANGE)
+        // or it would cull every button during the lock and they'd never come back.
+        WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION);
+
         // Register relay message on all windows; install proxy (COM registration) on primary only.
         progressRelayMsg_ = RegisterWindowMessageW(L"WinzooProgress");
         if (isPrimary_)
@@ -2859,7 +2867,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_TIMER:
         if (wParam == kTimerActiveWindow) {
-            tracker_.Reconcile();
+            // While locked, every default-desktop window is cloaked and fails ShouldTrack();
+            // reconciling now would drop all the buttons. Skip the sweep until unlock, which
+            // re-seeds from a clean state (see WM_WTSSESSION_CHANGE).
+            if (!sessionLocked_)
+                tracker_.Reconcile();
             tracker_.UpdateActiveWindow();
             // Snapped windows are laid out against a stale work area and stop short of the
             // bar; pull them down to the corrected edge. Cheap and guarded — only resizes a
@@ -3124,8 +3136,22 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         }
         break;
 
+    case WM_WTSSESSION_CHANGE:
+        if (wParam == WTS_SESSION_LOCK) {
+            sessionLocked_ = true;
+        } else if (wParam == WTS_SESSION_UNLOCK) {
+            sessionLocked_ = false;
+            // Re-seed immediately: windows are uncloaked again, so this re-adds any button
+            // that was missed and resets the stale-tick counters, rather than waiting for
+            // the next sweep. LayoutButtons + repaint happen via the tracker's change cb.
+            tracker_.Reconcile();
+            tracker_.UpdateActiveWindow();
+        }
+        return 0;
+
     case WM_DESTROY:
         shutdownPending_ = true;
+        WTSUnRegisterSessionNotification(hwnd);
         KillTimer(hwnd, kTimerActiveWindow);
         KillTimer(hwnd, kTimerAppScanFirst);
         KillTimer(hwnd, kTimerAppScan);

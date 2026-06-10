@@ -1398,11 +1398,12 @@ bool TaskbarWindow::HitTestStartButton(POINT pt) const
 
 void TaskbarWindow::LaunchApp(const wchar_t* exe, const wchar_t* args, int nShow)
 {
-    if (settings_.openAppsOnSameMonitor && hMonitor_) {
-        LaunchOnMonitor(hInst_, hMonitor_, exe, args, nShow);
-        return;
-    }
-    ShellExecuteUser(nullptr, L"open", exe, args, nullptr, nShow);
+    // Always route through LaunchOnMonitor so the launched window is tracked and
+    // brought to the foreground (a window launched via Explorer's de-elevating
+    // automation object can otherwise open unfocused). A null monitor skips the
+    // move step but still performs the activation.
+    HMONITOR hMon = (settings_.openAppsOnSameMonitor && hMonitor_) ? hMonitor_ : nullptr;
+    LaunchOnMonitor(hInst_, hMon, exe, args, nShow);
 }
 
 RECT TaskbarWindow::ClockHitRect() const

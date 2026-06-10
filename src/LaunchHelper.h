@@ -12,8 +12,10 @@ void RegisterLaunchHelperClass(HINSTANCE hInst);
 // Returns nullptr if the Explorer automation object is unavailable.
 IShellDispatch2* GetExplorerShellDispatch();
 
-// Launches exe via ShellExecuteExW and, in a background thread, moves the
-// app's first visible top-level window to the center of hMon.
+// Launches exe (de-elevating via Explorer when winzoo is admin) and, in a
+// background thread, finds the app's first visible top-level window, brings it to
+// the foreground, and — when hMon is non-null — moves it to the center of hMon.
+// Pass a null hMon to activate without relocating.
 void LaunchOnMonitor(HINSTANCE hInst, HMONITOR hMon,
                      const wchar_t* exe, const wchar_t* args, int nShow);
 

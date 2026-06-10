@@ -11,6 +11,7 @@
 void RegisterLaunchHelperClass(HINSTANCE /*hInst*/) {}
 
 static void MoveWindowToMonitor(HWND hwnd, HMONITOR hMon);
+static void ForceForegroundWindow(HWND hwnd);
 static bool IsRealAppWindow(HWND h);
 static HWND FindWindowByProcessName(const wchar_t* exeName);
 static bool ForegroundIsTarget(HWND fg, const wchar_t* exeName);
@@ -211,7 +212,8 @@ static DWORD WINAPI MoveToMonitorThread(LPVOID pv)
 
     if (!best) return 0;
 
-    MoveWindowToMonitor(best, hMon);
+    MoveWindowToMonitor(best, hMon);  // no-op when hMon is null
+    ForceForegroundWindow(best);
     return 0;
 }
 
@@ -313,6 +315,18 @@ static void MoveWindowToMonitor(HWND hwnd, HMONITOR hMon)
     }
 }
 
+// Bring a freshly-launched window to the foreground. When winzoo is elevated it
+// launches apps through Explorer's automation object so they de-elevate, which
+// means the new window is created by explorer.exe — a process that didn't
+// receive the click — so Windows' foreground-steal lock intermittently leaves
+// the window open but unfocused. SwitchToThisWindow brings it forward across
+// UAC integrity levels and bypasses that lock, mirroring how the taskbar
+// activates existing app windows on click.
+static void ForceForegroundWindow(HWND hwnd)
+{
+    if (hwnd && IsWindow(hwnd)) SwitchToThisWindow(hwnd, TRUE);
+}
+
 // Check if a window is a real app window (not desktop, shell, or tool window).
 static bool IsRealAppWindow(HWND h)
 {
@@ -410,6 +424,7 @@ static DWORD WINAPI WaitAndMoveThread(LPVOID pv)
         if (!IsRealAppWindow(fg)) continue;
         // Foreground changed to a real app window — this is our target.
         MoveWindowToMonitor(fg, ctx->hMon);
+        ForceForegroundWindow(fg);
         return 0;
     }
 
@@ -418,6 +433,7 @@ static DWORD WINAPI WaitAndMoveThread(LPVOID pv)
     HWND target = FindWindowByProcessName(ctx->exeName);
     if (target) {
         MoveWindowToMonitor(target, ctx->hMon);
+        ForceForegroundWindow(target);
         return 0;
     }
 
@@ -427,8 +443,10 @@ static DWORD WINAPI WaitAndMoveThread(LPVOID pv)
     // unrelated window the user may have switched to.
     HWND fg = GetForegroundWindow();
     if (fg && fg != ctx->hwndCaller && fg != ctx->hwndBefore &&
-        ForegroundIsTarget(fg, ctx->exeName))
+        ForegroundIsTarget(fg, ctx->exeName)) {
         MoveWindowToMonitor(fg, ctx->hMon);
+        ForceForegroundWindow(fg);
+    }
 
     return 0;
 }

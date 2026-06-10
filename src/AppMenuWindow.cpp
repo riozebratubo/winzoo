@@ -27,15 +27,17 @@ static constexpr UINT WM_CLASSIC_POWER = WM_APP + 1;
 // section refreshes live (the root's own message loop is paused while a submenu is open).
 static constexpr UINT WM_PINS_CHANGED  = WM_APP + 2;
 
-// Helper to launch an app with optional same-monitor hint
+// Helper to launch an app with optional same-monitor hint. Always routes through
+// LaunchOnMonitor (passing a null monitor when no hint) so the launched window is
+// tracked and brought to the foreground — without this, a window launched via
+// Explorer's de-elevating automation object can open unfocused. The monitor hint
+// only adds the move-to-taskbar-monitor step on top.
 static void LaunchMenuApp(HWND hwndHint, bool useHint, const wchar_t* exe, const wchar_t* args = nullptr, int nShow = SW_SHOWNORMAL)
 {
-    if (useHint && hwndHint) {
-        HMONITOR hMon = MonitorFromWindow(hwndHint, MONITOR_DEFAULTTONEAREST);
-        LaunchOnMonitor(GetModuleHandleW(nullptr), hMon, exe, args, nShow);
-        return;
-    }
-    ShellExecuteUser(nullptr, L"open", exe, args, nullptr, nShow);
+    HMONITOR hMon = (useHint && hwndHint)
+        ? MonitorFromWindow(hwndHint, MONITOR_DEFAULTTONEAREST)
+        : nullptr;
+    LaunchOnMonitor(GetModuleHandleW(nullptr), hMon, exe, args, nShow);
 }
 
 // ---------- cached power options ----------

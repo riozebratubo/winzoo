@@ -11,6 +11,7 @@
 #include "winzoo_version.h"
 #include <algorithm>
 #include <atomic>
+#include <climits>
 #include <memory>
 #include <unordered_set>
 #include <utility>
@@ -1385,6 +1386,110 @@ int TaskbarWindow::HitTestButton(POINT pt) const
     return -1;
 }
 
+int TaskbarWindow::HitTestInsertIndex(POINT pt, int zoneStart, int zoneEnd) const
+{
+    bool isHoriz = (settings_.position != TaskbarPosition::Left &&
+                    settings_.position != TaskbarPosition::Right);
+
+    // Walk the zone's buttons; advance the insertion slot past every button
+    // whose midpoint the cursor has crossed. Hidden buttons (empty rect) don't
+    // move the slot but still occupy an index, so the result stays in-zone.
+    int ins = zoneStart;
+    int cursor = isHoriz ? pt.x : pt.y;
+    for (int i = zoneStart; i < zoneEnd; ++i) {
+        const TaskButton& btn = GetButtonByIdx(i);
+        if (IsRectEmpty(&btn.rect)) continue;  // hidden: doesn't move the gap
+        int mid = isHoriz ? (btn.rect.left + btn.rect.right) / 2
+                          : (btn.rect.top  + btn.rect.bottom) / 2;
+        if (cursor >= mid) ins = i + 1;
+    }
+    if (ins < zoneStart) ins = zoneStart;
+    if (ins > zoneEnd)   ins = zoneEnd;
+    return ins;
+}
+
+// Move element at `from` so it lands at insertion slot `ins` (in [0,size]).
+// Returns the moved element's new index, or -1 if nothing changed.
+template <class Vec>
+static int MoveVecItem(Vec& v, int from, int ins)
+{
+    if (from < 0 || std::cmp_greater_equal(from, v.size())) return -1;
+    if (ins > from) --ins;                                  // erasing shifts later items left
+    if (ins < 0) ins = 0;
+    if (std::cmp_greater_equal(ins, v.size())) ins = (int)v.size() - 1;
+    if (ins == from) return -1;
+    auto item = std::move(v[from]);
+    v.erase(v.begin() + from);
+    v.insert(v.begin() + ins, std::move(item));
+    return ins;
+}
+
+bool TaskbarWindow::DragReorderTo(POINT pt)
+{
+    int cur = drag_.DragIndex();
+    if (cur < 0) return false;
+    int pinnedCount = (int)pinnedButtons_.size();
+    int total       = pinnedCount + (int)tracker_.Buttons().size();
+
+    if (IsPinnedIdx(cur) && pinnedCount > 0) {
+        int ins = HitTestInsertIndex(pt, 0, pinnedCount);
+        int n = MoveVecItem(pinnedButtons_, cur, ins);
+        if (n < 0) return false;
+        drag_.SetDragIndex(n);
+        LayoutButtons();
+        return true;
+    }
+    if (!IsPinnedIdx(cur) && cur < total) {
+        // Guard against the tracker vector changing under us (reconcile/shell-hook
+        // timers can fire during capture): MoveVecItem bounds-checks `from`.
+        int from = cur - pinnedCount;
+        int ins  = HitTestInsertIndex(pt, pinnedCount, total) - pinnedCount;
+        int n = MoveVecItem(tracker_.MutableButtons(), from, ins);
+        if (n < 0) return false;
+        drag_.SetDragIndex(pinnedCount + n);
+        LayoutButtons();
+        return true;
+    }
+    return false;
+}
+
+void TaskbarWindow::PersistPinnedOrder()
+{
+    // New display order of exe paths.
+    std::vector<std::wstring> newOrder;
+    newOrder.reserve(pinnedButtons_.size());
+    for (const auto& b : pinnedButtons_) newOrder.push_back(b.exePath);
+
+    auto rankOf = [&](const std::wstring& p) -> int {
+        for (int i = 0; std::cmp_less(i, newOrder.size()); ++i)
+            if (_wcsicmp(newOrder[i].c_str(), p.c_str()) == 0) return i;
+        return INT_MAX;  // not in the merged view: keep relative order, at end
+    };
+    auto reorderList = [&](std::vector<std::wstring>& v) {
+        std::stable_sort(v.begin(), v.end(),
+            [&](const std::wstring& a, const std::wstring& b) {
+                return rankOf(a) < rankOf(b);
+            });
+    };
+
+    // In floating mode pinnedButtons_ is a *merged* view over every monitor's list,
+    // so reorder each sublist to follow the merged ranking; otherwise reorder the
+    // single list that built pinnedButtons_.
+    if (settings_.pinnedAppsPerMonitor) {
+        if (settings_.position == TaskbarPosition::Floating) {
+            for (auto& [mon, vec] : settings_.pinnedExePathsPerMonitor)
+                reorderList(vec);
+        } else if (!monitorDeviceName_.empty()) {
+            auto it = settings_.pinnedExePathsPerMonitor.find(monitorDeviceName_);
+            if (it != settings_.pinnedExePathsPerMonitor.end())
+                reorderList(it->second);
+        }
+    } else {
+        reorderList(settings_.pinnedExePaths);
+    }
+    SaveSettings(settings_);
+}
+
 bool TaskbarWindow::HitTestStartButton(POINT pt) const
 {
     if (!showStartButton_ || IsRectEmpty(&startBtnRect_)) return false;
@@ -2535,6 +2640,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             POINT screenPt = pt;
             ClientToScreen(hwnd, &screenPt);
             drag_.OnMouseMove(screenPt);
+            // Live reorder: once past the drag threshold, slide neighbours aside so the
+            // gap follows the cursor and the button lands exactly where it's shown.
+            if (drag_.State() == DragState::Dragging)
+                DragReorderTo(pt);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
 
@@ -2689,60 +2798,12 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         }
 
         if (wasDragging) {
-            // Perform the drop — only swap within the same zone
-            int dropIdx = HitTestButton(pt);
-            if (dropIdx >= 0 && dropIdx != origIdx) {
-                bool origPinned = IsPinnedIdx(origIdx);
-                bool dropPinned = IsPinnedIdx(dropIdx);
-                if (origPinned && dropPinned) {
-                    // Capture exe paths before the swap so the new order is persisted
-                    // by identity, not by combined index. In floating mode pinnedButtons_
-                    // is built from a *merged* per-monitor list, so combined indices do
-                    // not line up with any single persisted list — matching by path does.
-                    std::wstring pathA = pinnedButtons_[origIdx].exePath;
-                    std::wstring pathB = pinnedButtons_[dropIdx].exePath;
-                    std::swap(pinnedButtons_[origIdx], pinnedButtons_[dropIdx]);
-
-                    auto swapInList = [&](std::vector<std::wstring>& v) {
-                        auto ia = std::find_if(v.begin(), v.end(), [&](const std::wstring& p) {
-                            return _wcsicmp(p.c_str(), pathA.c_str()) == 0; });
-                        auto ib = std::find_if(v.begin(), v.end(), [&](const std::wstring& p) {
-                            return _wcsicmp(p.c_str(), pathB.c_str()) == 0; });
-                        if (ia != v.end() && ib != v.end()) std::iter_swap(ia, ib);
-                    };
-
-                    if (settings_.pinnedAppsPerMonitor) {
-                        if (settings_.position == TaskbarPosition::Floating) {
-                            // Merged view spans every monitor's list; reorder the pair
-                            // in whichever list(s) contain both paths.
-                            for (auto& [mon, vec] : settings_.pinnedExePathsPerMonitor)
-                                swapInList(vec);
-                        } else if (!monitorDeviceName_.empty()) {
-                            auto it = settings_.pinnedExePathsPerMonitor.find(monitorDeviceName_);
-                            if (it != settings_.pinnedExePathsPerMonitor.end())
-                                swapInList(it->second);
-                        }
-                    } else {
-                        swapInList(settings_.pinnedExePaths);
-                    }
-                    SaveSettings(settings_);
-                    LayoutButtons();
-                } else if (!origPinned && !dropPinned) {
-                    // Swap within task zone (guard against stale indices: the tracker
-                    // vector can change between button-down and button-up via the
-                    // reconcile/shell-hook timers firing during capture).
-                    int pi = origIdx - (int)pinnedButtons_.size();
-                    int pj = dropIdx - (int)pinnedButtons_.size();
-                    auto& buttons = tracker_.MutableButtons();
-                    if (pi >= 0 && pj >= 0 &&
-                        std::cmp_less(pi, buttons.size()) &&
-                        std::cmp_less(pj, buttons.size())) {
-                        std::swap(buttons[pi], buttons[pj]);
-                        LayoutButtons();
-                    }
-                }
-                // Cross-zone drops are silently ignored
-            }
+            // The reorder already happened live during WM_MOUSEMOVE; on drop we only
+            // persist. `origIdx` is the dragged button's final (post-live-move) slot,
+            // so its zone tells us whether the pinned order needs saving.
+            if (IsPinnedIdx(origIdx))
+                PersistPinnedOrder();
+            // Task-zone order is in-memory only (running windows) — nothing to save.
         }
 
         drag_.OnButtonUp();

@@ -48,6 +48,18 @@ private:
     // that winzoo hides Explorer's taskbar. Called at the end of LayoutButtons.
     void UpdateMinimizeTargets();
     int  HitTestButton(POINT pt) const;
+    // Insertion slot (gap index) nearest the cursor, restricted to the
+    // combined-index range [zoneStart, zoneEnd]. Mirrors the drop-indicator
+    // line so a drag always lands where the line is shown. Returns a value in
+    // [zoneStart, zoneEnd] (clamped), so a drop near a zone edge is never lost.
+    int  HitTestInsertIndex(POINT pt, int zoneStart, int zoneEnd) const;
+    // Live-reorder the currently-dragged button to the insertion slot nearest
+    // `pt` (client coords) within its own zone. Updates the drag index and
+    // relayouts; returns true if the order changed. Does not persist.
+    bool DragReorderTo(POINT pt);
+    // Rebuild the persisted pinned-app path list(s) to match the current
+    // pinnedButtons_ order, then save. Called once on drop.
+    void PersistPinnedOrder();
     bool HitTestStartButton(POINT pt) const;
     void ActivateButton(int combinedIdx);
     void ShowButtonMenu(int combinedIdx, POINT ptScreen);

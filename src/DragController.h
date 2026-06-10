@@ -14,6 +14,10 @@ public:
     int       DragIndex()    const { return dragIndex_; }
     POINT     CurrentPoint() const { return currentPt_; }
 
+    // Live reordering moves the dragged button within its zone mid-drag; keep the
+    // tracked index pointing at the button's new slot so the ghost follows it.
+    void      SetDragIndex(int i)  { dragIndex_ = i; }
+
 private:
     static constexpr int kThresholdPx = 6;
 

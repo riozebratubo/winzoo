@@ -415,29 +415,9 @@ void Renderer::Paint(HDC hdcTarget, int w, int h,
             ghostPt.x + bw / 2, ghostPt.y + bh / 2
         };
         ghost.Draw(hdcMem_, colors, false, false, true, dpi, indicator, progressBar, buttonBorderRadius, showPinnedAsButtons);
-
-        // Drop indicator line — skip hidden buttons (rect={})
-        for (int i = 0; std::cmp_less_equal(i, buttons.size()); ++i) {
-            int cx = 0;
-            if (std::cmp_less(i, buttons.size())) {
-                const RECT& r = buttons[i].rect;
-                if (r.left == 0 && r.right == 0 && r.top == 0 && r.bottom == 0) continue;
-                cx = r.left;
-            } else {
-                const RECT& r = buttons[i - 1].rect;
-                if (r.left == 0 && r.right == 0 && r.top == 0 && r.bottom == 0) continue;
-                cx = r.right;
-            }
-            if (std::abs(cx - ghostPt.x) < bw / 2) {
-                HPEN linePen = CreatePen(PS_SOLID, Scale(2, dpi), colors.buttonActive);
-                HPEN old = static_cast<HPEN>(SelectObject(hdcMem_, linePen));
-                MoveToEx(hdcMem_, cx, 0, nullptr);
-                LineTo(hdcMem_, cx, h);
-                SelectObject(hdcMem_, old);
-                DeleteObject(linePen);
-                break;
-            }
-        }
+        // No separate drop-indicator line: the dragged button's slot is skipped
+        // above and reorders live as the cursor moves, so the parting gap itself
+        // shows exactly where the button will land.
     }
 
     // Scroll arrows

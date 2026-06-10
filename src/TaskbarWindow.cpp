@@ -1945,14 +1945,46 @@ void TaskbarWindow::StartScanThread(bool isFirstScan)
     HWND hwnd = hwnd_;
     unsigned gen = ++scanGen_;
     WPARAM wp = MAKEWPARAM(isFirstScan ? 0 : 1, static_cast<WORD>(gen));
-    std::thread([hwnd, wp]() {
+    SpawnTracked([hwnd, wp]() {
         auto pEntries = std::make_unique<std::vector<AppEntry>>(AppScanner::Scan());
         if (!IsWindow(hwnd) ||
             !PostMessageW(hwnd, WM_APP_SCAN_DONE, wp,
                           reinterpret_cast<LPARAM>(pEntries.get())))
             return;  // on failure, unique_ptr auto-deletes
         pEntries.release();  // ownership transferred to WM_APP_SCAN_DONE handler
-    }).detach();
+    });
+}
+
+// Reap any finished workers, then launch `work` on a tracked thread. The thread
+// sets its `done` flag on exit so the next call can join+erase it. All access is
+// on the UI thread, so asyncWorkers_ needs no locking.
+void TaskbarWindow::SpawnTracked(std::function<void()> work)
+{
+    for (auto it = asyncWorkers_.begin(); it != asyncWorkers_.end(); ) {
+        if (it->done->load(std::memory_order_acquire)) {
+            if (it->thread.joinable()) it->thread.join();
+            it = asyncWorkers_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    auto done = std::make_shared<std::atomic<bool>>(false);
+    std::thread t([work = std::move(work), done]() mutable {
+        work();
+        done->store(true, std::memory_order_release);
+    });
+    asyncWorkers_.push_back({ std::move(t), std::move(done) });
+}
+
+// Block until every tracked worker has finished. Called once at shutdown (after
+// shutdownPending_ is set) so no worker can still be running when the window is
+// destroyed; their posted results are then drained from the message queue.
+void TaskbarWindow::JoinAllWorkers()
+{
+    for (auto& w : asyncWorkers_)
+        if (w.thread.joinable()) w.thread.join();
+    asyncWorkers_.clear();
 }
 
 void TaskbarWindow::StartIconLoadThread()
@@ -1998,7 +2030,7 @@ void TaskbarWindow::StartIconLoadThread()
             paths.push_back(p);
     }
     WPARAM wp = MAKEWPARAM(static_cast<WORD>(sizePx), static_cast<WORD>(gen));
-    std::thread([hwnd, wp, paths = std::move(paths)]() {
+    SpawnTracked([hwnd, wp, paths = std::move(paths)]() {
         int sizePx = LOWORD(wp);
         using Pair = std::pair<std::wstring, HICON>;
         auto pResults = std::make_unique<std::vector<Pair>>(paths.size());
@@ -2032,7 +2064,7 @@ void TaskbarWindow::StartIconLoadThread()
             return;  // unique_ptr auto-deletes
         }
         pResults.release();  // ownership transferred to WM_APP_ICONS_DONE handler
-    }).detach();
+    });
 }
 
 LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -2874,7 +2906,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         auto pEntries = std::unique_ptr<std::vector<AppEntry>>(
             reinterpret_cast<std::vector<AppEntry>*>(lParam));
         unsigned gen = HIWORD(wParam);
-        if (!shutdownPending_ && gen == scanGen_) {
+        // scanGen_ is compared truncated to 16 bits because only its low word
+        // survives the MAKEWPARAM packing in StartScanThread (so the match keeps
+        // working past 65535 generations rather than discarding every result).
+        if (!shutdownPending_ && gen == static_cast<WORD>(scanGen_)) {
             int iconSz = Scale(48, dpi_);
             bool isFirst = (LOWORD(wParam) == 0);
             if (isFirst) {
@@ -2897,7 +2932,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         auto pIcons = std::unique_ptr<std::vector<std::pair<std::wstring, HICON>>>(
             reinterpret_cast<std::vector<std::pair<std::wstring, HICON>>*>(lParam));
         unsigned gen = HIWORD(wParam);
-        if (!shutdownPending_ && gen == iconGen_) {
+        // iconGen_ truncated to 16 bits to match the MAKEWPARAM packing (see WM_APP_SCAN_DONE).
+        if (!shutdownPending_ && gen == static_cast<WORD>(iconGen_)) {
             int iconSz = LOWORD(wParam);
             for (auto& [path, icon] : *pIcons)
                 appIconCache_.Store(path, iconSz, icon);
@@ -3068,6 +3104,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         KillTimer(hwnd, kTimerTrayFirst);
         // Join the icon workers first so no further WM_APP_WIN_ICON is posted.
         iconCache_.Stop();
+        // Join the app-scan / icon-load workers too. The window is still alive here
+        // (WM_DESTROY), so any worker finishing now posts its result successfully and
+        // we drain it below — rather than racing window teardown and leaking the
+        // result (or posting to a reused HWND) after we're gone.
+        JoinAllWorkers();
         // Drain any pending thread-posted messages to prevent heap/icon leaks.
         {
             MSG pendingMsg;

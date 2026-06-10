@@ -1,6 +1,9 @@
 #pragma once
 #include <windows.h>
 #include <thread>
+#include <atomic>
+#include <memory>
+#include <functional>
 #include "Settings.h"
 #include "Theme.h"
 #include "AppBar.h"
@@ -54,6 +57,14 @@ private:
     void ShowAppMenu();
     void StartScanThread(bool isFirstScan);
     void StartIconLoadThread();
+
+    // Background workers (app scan / icon load) that PostMessage results back to
+    // hwnd_. Tracked rather than detached so they can be joined at shutdown —
+    // otherwise an in-flight worker could post to (or leak its result against) a
+    // destroyed/reused window. SpawnTracked reaps finished workers on each call to
+    // keep the list bounded; JoinAllWorkers blocks until all have finished.
+    void SpawnTracked(std::function<void()> work);
+    void JoinAllWorkers();
     void LaunchApp(const wchar_t* exe, const wchar_t* args = nullptr, int nShow = SW_SHOWNORMAL);
     void OpenCalendarFlyout();   // Win+N → Win11 Notification Center + Calendar flyout
     RECT ClockHitRect() const;   // clockRect_ grown to full thickness + trailing padding
@@ -102,6 +113,13 @@ private:
     std::vector<TrayIconEntry>     trayIcons_;       // owns the HICONs (visible only)
     std::vector<TrayIconEntry>     hiddenTrayIcons_; // NIS_HIDDEN icons (tracked for state transitions)
     std::vector<RECT>              trayIconRects_;
+    // In-flight background workers (UI-thread access only). Each carries a `done`
+    // flag it sets on exit so SpawnTracked() can reap completed ones cheaply.
+    struct AsyncWorker {
+        std::thread                        thread;
+        std::shared_ptr<std::atomic<bool>> done;
+    };
+    std::vector<AsyncWorker>       asyncWorkers_;
     std::wstring    monitorDeviceName_;
     std::wstring    currentLangText_;    // e.g. "EN-US" — updated by kTimerActiveWindow
     std::wstring    clockFitTimeFmt_;

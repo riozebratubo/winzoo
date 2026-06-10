@@ -285,11 +285,17 @@ static void RelayTrayRecord(const SHELLTRAYDATA* st, SIZE_T cbData) {
         rec.dwStateMask = nid.dwStateMask;
     }
 
-    // Tooltip (szTip) — bounded, NUL-clamped.
+    // Tooltip (szTip) — bounded by both the field size AND how much of the blob is
+    // actually present, then NUL-clamped. A truncated record could otherwise make us
+    // walk szTip past the end of the marshaled buffer (caught by the caller's
+    // __except, but a garbage tooltip is still better avoided).
     std::vector<wchar_t> tip;
-    if (nid.uFlags & NIF_TIP) {
+    constexpr SIZE_T kTipStart = offsetof(SHELLTRAYDATA, nid) + offsetof(WireNID, szTip);
+    if ((nid.uFlags & NIF_TIP) && cbData > kTipStart) {
         const wchar_t* p = nid.szTip;
         size_t maxChars = sizeof(nid.szTip) / sizeof(wchar_t);
+        size_t avail    = (cbData - kTipStart) / sizeof(wchar_t);
+        if (avail < maxChars) maxChars = avail;
         size_t n = 0;
         while (n < maxChars && p[n]) ++n;
         tip.assign(p, p + n);

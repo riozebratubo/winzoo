@@ -29,3 +29,11 @@ void LaunchOrActivateOnMonitor(HWND hwndCaller, HMONITOR hMon,
 // back to a direct ShellExecute when not elevated. Returns true on success.
 bool ShellExecuteUser(HWND hwnd, const wchar_t* verb, const wchar_t* file,
                       const wchar_t* params, const wchar_t* dir, int nShow);
+
+// Shows the Windows "Run" dialog via Explorer's IShellDispatch::FileRun. Routing
+// through Explorer (medium integrity) means the dialog — and whatever it launches
+// — runs at the user's integrity level instead of inheriting winzoo's admin
+// token, and yields the genuine "Run" dialog rather than the rundll32-hosted
+// variant (which titles itself "Run DLL"). Falls back to rundll32 shell32.dll,#61
+// when the Explorer automation object is unavailable.
+void ShowRunDialog(HWND hwnd);

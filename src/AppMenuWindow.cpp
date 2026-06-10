@@ -1312,7 +1312,7 @@ void AppMenuWindow::ActivateClassicRight(int linkIdx)
     case 6: launch(L"explorer.exe", L"shell:::{26EE0668-A00A-44D7-9371-BEB064C98683}"); break;  // Control Panel
     case 7: launch(L"ms-settings:");       break;
     case 8:
-        ShellExecuteW(nullptr, L"open", L"rundll32.exe", L"shell32.dll,#61", nullptr, SW_SHOWNORMAL);
+        ShowRunDialog(hwnd_);
         closeReason_ = AppMenuCloseReason::Selection;
         done_ = true;
         DestroyWindow(hwnd_);
@@ -1660,7 +1660,7 @@ void AppMenuWindow::ActivateSidebarBtn(int idx)
         }
     } else if (idx == 5) {
         // Open Windows Run dialog
-        ShellExecuteW(nullptr, L"open", L"rundll32.exe", L"shell32.dll,#61", nullptr, SW_SHOWNORMAL);
+        ShowRunDialog(hwnd_);
         closeReason_ = AppMenuCloseReason::Selection;
         done_ = true;
         DestroyWindow(hwnd_);

@@ -131,6 +131,26 @@ bool ShellExecuteUser(HWND hwnd, const wchar_t* verb, const wchar_t* file,
     return reinterpret_cast<INT_PTR>(rc) > 32;
 }
 
+void ShowRunDialog(HWND hwnd)
+{
+    // Prefer Explorer's IShellDispatch::FileRun. The rundll32 shell32.dll,#61
+    // route hosts the dialog inside rundll32 (titled "Run DLL") and, when winzoo
+    // is elevated, launches its targets elevated too. FileRun runs in Explorer's
+    // medium-integrity process, so we get the genuine "Run" dialog and anything
+    // started from it de-elevates.
+    IShellDispatch2* psd = GetExplorerShellDispatch();
+    if (psd) {
+        HRESULT hr = psd->FileRun();
+        psd->Release();
+        if (SUCCEEDED(hr)) return;
+    }
+
+    // Explorer automation object unavailable — fall back to rundll32 (the dialog
+    // inherits winzoo's token in this case).
+    ShellExecuteW(hwnd, L"open", L"rundll32.exe", L"shell32.dll,#61",
+                  nullptr, SW_SHOWNORMAL);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Background thread: wait for the launched app to create its main window,
 // then move it to the target monitor.

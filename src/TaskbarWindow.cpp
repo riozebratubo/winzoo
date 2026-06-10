@@ -1743,7 +1743,7 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
 
     switch (id) {
     case IDM_RUN_DIALOG:
-        ShellExecuteW(hwnd_, L"open", L"rundll32.exe", L"shell32.dll,#61", nullptr, SW_SHOWNORMAL);
+        ShowRunDialog(hwnd_);
         break;
 
     case IDM_TASK_MANAGER:

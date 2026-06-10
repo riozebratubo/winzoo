@@ -4,6 +4,7 @@
 #include "AppMenuWindow.h"
 #include "LaunchHelper.h"
 #include "TaskbarRelocate.h"
+#include "SystemStatus.h"
 #include <objbase.h>
 
 struct MonitorEnumData {
@@ -78,6 +79,10 @@ bool App::Init(HINSTANCE hInst)
     AppMenuWindow::CachePowerOptions();
     RegisterLaunchHelperClass(hInst);
 
+    // Start the status poller early so its first snapshot is often ready by the
+    // time the bars are created; they pick it up via TryGetLatestSystemStatus().
+    StartSystemStatusPoller();
+
     // Method B: dock Explorer's taskbar on winzoo's edge so ApplicationFrameWindow
     // apps (Task Manager etc.) minimize toward winzoo. Runs before we hide/probe the
     // tray, and only restarts Explorer when the edge actually needs to change.
@@ -136,6 +141,8 @@ bool App::Init(HINSTANCE hInst)
 
 void App::Shutdown()
 {
+    StopSystemStatusPoller();
+
     for (auto& tb : taskbars_)
         tb->Destroy();
     taskbars_.clear();

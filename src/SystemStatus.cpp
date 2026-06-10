@@ -6,6 +6,8 @@
 #define INITGUID
 #include <initguid.h>
 #include <netlistmgr.h>
+#include <mutex>
+#include <thread>
 
 SystemStatusData PollSystemStatus()
 {
@@ -117,4 +119,56 @@ SystemStatusData PollSystemStatus()
     }
 
     return s;
+}
+
+// ── Background poller ────────────────────────────────────────────────────────
+
+static std::mutex       g_statusMx;
+static SystemStatusData g_latestStatus;
+static bool             g_statusValid = false;
+static HANDLE           g_statusStop  = nullptr;   // manual-reset stop event
+static std::thread      g_statusThread;
+
+bool TryGetLatestSystemStatus(SystemStatusData& out)
+{
+    std::lock_guard<std::mutex> lock(g_statusMx);
+    if (!g_statusValid) return false;
+    out = g_latestStatus;
+    return true;
+}
+
+void StartSystemStatusPoller()
+{
+    if (g_statusThread.joinable()) return;
+
+    g_statusStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!g_statusStop) return;
+
+    g_statusThread = std::thread([]() {
+        HRESULT hrCom = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        const UINT updateMsg = RegisterWindowMessageW(L"WinzooStatusUpdate");
+        do {
+            SystemStatusData fresh = PollSystemStatus();
+            {
+                std::lock_guard<std::mutex> lock(g_statusMx);
+                g_latestStatus = fresh;
+                g_statusValid  = true;
+            }
+            if (updateMsg) {
+                for (HWND h = FindWindowExW(nullptr, nullptr, L"WinzooTaskbar", nullptr); h;
+                     h = FindWindowExW(nullptr, h, L"WinzooTaskbar", nullptr))
+                    PostMessageW(h, updateMsg, 0, 0);
+            }
+        } while (WaitForSingleObject(g_statusStop, 1000) == WAIT_TIMEOUT);
+        if (SUCCEEDED(hrCom)) CoUninitialize();
+    });
+}
+
+void StopSystemStatusPoller()
+{
+    if (!g_statusThread.joinable()) return;
+    SetEvent(g_statusStop);
+    g_statusThread.join();
+    CloseHandle(g_statusStop);
+    g_statusStop = nullptr;
 }

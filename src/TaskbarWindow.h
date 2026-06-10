@@ -155,6 +155,7 @@ private:
     UINT            taskbarCreatedMsg_ = 0;
     UINT            appBarCallbackMsg_ = 0;
     UINT            progressRelayMsg_  = 0;
+    UINT            statusUpdateMsg_   = 0;  // "WinzooStatusUpdate" from the status poller thread
     DWORD           menuLastClosedTick_= 0;
     int             hoveredTrayIdx_ = -1;
     int             trayDragStart_  = -1;  // index pressed

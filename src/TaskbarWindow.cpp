@@ -1946,6 +1946,9 @@ void TaskbarWindow::StartScanThread(bool isFirstScan)
     unsigned gen = ++scanGen_;
     WPARAM wp = MAKEWPARAM(isFirstScan ? 0 : 1, static_cast<WORD>(gen));
     SpawnTracked([hwnd, wp]() {
+        // The Start Menu walk is pure background work (and runs once per bar);
+        // don't let it compete with the UI thread during startup.
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
         auto pEntries = std::make_unique<std::vector<AppEntry>>(AppScanner::Scan());
         if (!IsWindow(hwnd) ||
             !PostMessageW(hwnd, WM_APP_SCAN_DONE, wp,
@@ -2129,6 +2132,22 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         }
         return 0;
     }
+    if (statusUpdateMsg_ && uMsg == statusUpdateMsg_) {
+        // Fresh snapshot from the status poller thread.
+        SystemStatusData fresh;
+        if (TryGetLatestSystemStatus(fresh)) {
+            bool availChanged = (fresh.volAvailable != statusData_.volAvailable ||
+                                 fresh.netAvailable != statusData_.netAvailable ||
+                                 fresh.batAvailable != statusData_.batAvailable);
+            statusData_ = fresh;
+            if (availChanged) {
+                LayoutButtons();
+                EnsureNetworkTrayIcon();  // synthetic net icon keys off netAvailable
+            }
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
+        return 0;
+    }
 
     // Tray-icon push from winzoo_com.dll (intercepted Shell_NotifyIcon in Explorer).
     if (uMsg == WM_COPYDATA) {
@@ -2213,13 +2232,26 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                             });
 
         RebuildPinnedButtons();
+        // The pins' icons aren't cached yet (TryGet above missed) — kick a
+        // pinned-only load now instead of leaving the buttons blank until the
+        // first app scan (+500ms) and its full all-apps icon batch complete.
+        // appEntries_ is still empty here, so this batch is just the pins; if it
+        // loses the generation race with the post-scan batch, that batch covers
+        // the pins anyway.
+        if (!pinnedButtons_.empty())
+            StartIconLoadThread();
         LayoutButtons();
         SetTimer(hwnd, kTimerActiveWindow, kTimerIntervalMs, nullptr);
         SetTimer(hwnd, kTimerAppScanFirst, 500, nullptr);
         SetTimer(hwnd, kTimerStatus, kTimerStatusMs, nullptr);
         SetTimer(hwnd, kTimerTray, kTimerTrayMs, nullptr);
-        // Immediately prime status/lang data so layout includes them on first paint
-        statusData_ = PollSystemStatus();
+        // Status data comes from the background poller (started in App::Init) —
+        // polling here would block first paint on cold NLM/WLAN/MMDevice COM
+        // activations, per monitor. Adopt the latest snapshot if one is already
+        // available; otherwise the WinzooStatusUpdate handler below fills it in
+        // within a poll cycle and relayouts.
+        statusUpdateMsg_ = RegisterWindowMessageW(L"WinzooStatusUpdate");
+        TryGetLatestSystemStatus(statusData_);
         auto [lt, lh]    = GetCurrentInputLanguage();
         currentLangText_ = lt;
         currentHkl_      = lh;
@@ -2882,12 +2914,8 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             // appbar/window itself, so this only re-corrects the work area when it drifted.
             if (settings_.position != TaskbarPosition::Floating)
                 appBar_.SetPosition(settings_.position, EffectiveThicknessPx());
-            SystemStatusData fresh = PollSystemStatus();
-            bool availChanged = (fresh.volAvailable != statusData_.volAvailable ||
-                                 fresh.netAvailable != statusData_.netAvailable ||
-                                 fresh.batAvailable != statusData_.batAvailable);
-            statusData_ = fresh;
-            if (availChanged) LayoutButtons();
+            // Status data arrives via WinzooStatusUpdate from the poller thread;
+            // this tick only drives the clock repaint now.
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (wParam == kTimerTray) {
             // Push model (winzoo_com.dll) is authoritative once active — just prune

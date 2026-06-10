@@ -402,6 +402,8 @@ bool ExportSettingsToFile(const Settings& s)
     wInt("progressBarHeight",         s.progressBarHeight);
     wBool("useCustomTaskbarColor",    s.useCustomTaskbarColor);
     wUInt("customTaskbarColor",       static_cast<unsigned int>(s.customTaskbarColor));
+    wUInt("customThemeTaskbar",       static_cast<unsigned int>(s.customThemeTaskbar));
+    wUInt("customThemeAccent",        static_cast<unsigned int>(s.customThemeAccent));
 
     // pinnedExePaths
     j += "  \"pinnedExePaths\": [";
@@ -691,6 +693,14 @@ bool ImportAndDeleteSettingsFile(Settings& s)
       unsigned int v = 0;
       if (p != std::string::npos && ParseUInt(content, p, v))
           ns.customTaskbarColor = static_cast<COLORREF>(v); }
+    { size_t p = FindValue(content, "customThemeTaskbar");
+      unsigned int v = 0;
+      if (p != std::string::npos && ParseUInt(content, p, v))
+          ns.customThemeTaskbar = static_cast<COLORREF>(v); }
+    { size_t p = FindValue(content, "customThemeAccent");
+      unsigned int v = 0;
+      if (p != std::string::npos && ParseUInt(content, p, v))
+          ns.customThemeAccent = static_cast<COLORREF>(v); }
 
     { size_t p = FindValue(content, "pinnedExePaths");
       if (p != std::string::npos) ParseStringArray(content, p, ns.pinnedExePaths); }

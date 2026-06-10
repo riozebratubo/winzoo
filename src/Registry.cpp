@@ -363,6 +363,8 @@ Settings LoadSettings()
     if (key.ReadDword(L"SeparatorColor",          val)) s.separatorColor          = static_cast<COLORREF>(val);
     if (key.ReadDword(L"UseCustomTaskbarColor", val)) s.useCustomTaskbarColor = val != 0;
     if (key.ReadDword(L"CustomTaskbarColor",    val)) s.customTaskbarColor    = static_cast<COLORREF>(val);
+    if (key.ReadDword(L"CustomThemeTaskbar",    val)) s.customThemeTaskbar    = static_cast<COLORREF>(val);
+    if (key.ReadDword(L"CustomThemeAccent",     val)) s.customThemeAccent     = static_cast<COLORREF>(val);
     if (key.ReadDword(L"ShowTitlesOnVertical",  val)) s.showTitlesOnVertical  = val != 0;
     if (key.ReadDword(L"LeftRightHeight",       val)) {
         s.leftRightHeight = static_cast<int>(val);
@@ -496,6 +498,8 @@ void SaveSettings(const Settings& s)
     key.WriteDword(L"SeparatorColor",           static_cast<DWORD>(s.separatorColor));
     key.WriteDword(L"UseCustomTaskbarColor", s.useCustomTaskbarColor ? 1u : 0u);
     key.WriteDword(L"CustomTaskbarColor",    static_cast<DWORD>(s.customTaskbarColor));
+    key.WriteDword(L"CustomThemeTaskbar",    static_cast<DWORD>(s.customThemeTaskbar));
+    key.WriteDword(L"CustomThemeAccent",     static_cast<DWORD>(s.customThemeAccent));
     key.WriteDword(L"ShowTitlesOnVertical",  s.showTitlesOnVertical ? 1u : 0u);
     key.WriteDword(L"LeftRightHeight",       static_cast<DWORD>(s.leftRightHeight));
 }

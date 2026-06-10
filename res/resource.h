@@ -223,8 +223,16 @@
 #define IDC_CHECK_CUSTOM_TASKBAR_COLOR      1200
 #define IDC_BTN_CUSTOM_TASKBAR_COLOR        1201
 
-// Visual tab — theme swatch buttons (IDC_THEME_SWATCH_BASE + themeIndex, 0..9)
-#define IDC_THEME_SWATCH_BASE               1300
+// Visual tab — "Custom" theme base color pickers (shown when the Custom theme is selected)
+#define IDC_LBL_CUSTOM_THEME_BG             1327
+#define IDC_BTN_CUSTOM_THEME_BG             1328
+#define IDC_LBL_CUSTOM_THEME_ACCENT         1329
+#define IDC_BTN_CUSTOM_THEME_ACCENT         1330
+
+// Visual tab — theme swatch buttons (IDC_THEME_SWATCH_BASE + themeIndex, one per preset).
+// Reserve a generous contiguous range (1400..1430) so it never collides with the
+// numeric IDs above as more presets are added.
+#define IDC_THEME_SWATCH_BASE               1400
 
 // Classic (Vista/7) layout settings (App Menu tab)
 #define IDC_LBL_APPMENU_CLASSIC_PW         1310

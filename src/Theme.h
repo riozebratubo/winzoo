@@ -1,11 +1,11 @@
 #pragma once
 #include <windows.h>
 
-static constexpr int kThemePresetCount = 10;
+static constexpr int kThemePresetCount = 11;
 
 enum class ThemePreset {
     Default = 0, Light, Ocean, Forest, Sunset,
-    Midnight, Rose, Nord, Slate, Mocha
+    Midnight, Rose, Nord, Slate, Mocha, Custom
 };
 
 struct ThemeColors {
@@ -79,6 +79,9 @@ inline const ThemeBase& GetThemeBase(ThemePreset p)
         { RGB( 46, 52, 64),   RGB(136,192,208), L"Nord"     },
         { RGB( 22, 28, 36),   RGB( 38,166,154), L"Slate"    },
         { RGB( 28, 20, 14),   RGB(180,130, 85), L"Mocha"    },
+        // "Custom": these are only fallback defaults — the live values come from
+        // Settings::customThemeTaskbar / customThemeAccent via GetThemeColorsEx().
+        { RGB( 40, 40, 55),   RGB(120, 90,200), L"Custom"   },
     };
     return kBases[static_cast<int>(p)];
 }
@@ -89,10 +92,17 @@ inline ThemeColors GetThemeColors(ThemePreset p)
     return ThemeDetail::Derive(b.taskbar, b.accent, b.name);
 }
 
-// Applies optional user taskbar color override on top of the chosen preset.
-inline ThemeColors GetThemeColorsEx(ThemePreset p, bool useCustom, COLORREF customTaskbar)
+// Resolves the chosen preset to its two base colors, honoring the user-selectable
+// "Custom" theme, then applies the optional user taskbar color override on top.
+//   customThemeTaskbar / customThemeAccent — used only when p == ThemePreset::Custom.
+inline ThemeColors GetThemeColorsEx(ThemePreset p, bool useCustom, COLORREF customTaskbar,
+                                    COLORREF customThemeTaskbar = RGB(40, 40, 55),
+                                    COLORREF customThemeAccent  = RGB(120, 90, 200))
 {
     const auto& b = GetThemeBase(p);
-    COLORREF taskbar = useCustom ? customTaskbar : b.taskbar;
-    return ThemeDetail::Derive(taskbar, b.accent, b.name);
+    bool isCustom = (p == ThemePreset::Custom);
+    COLORREF baseTaskbar = isCustom ? customThemeTaskbar : b.taskbar;
+    COLORREF accent      = isCustom ? customThemeAccent  : b.accent;
+    COLORREF taskbar = useCustom ? customTaskbar : baseTaskbar;
+    return ThemeDetail::Derive(taskbar, accent, b.name);
 }

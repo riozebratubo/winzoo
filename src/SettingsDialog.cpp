@@ -419,6 +419,15 @@ static void SetProgressBarControlsEnabled(HWND hwnd, bool pbEnabled, bool useThe
     EnableWindow(GetDlgItem(hwnd, IDC_SPIN_PROGRESSBAR_HEIGHT),pbEnabled ? TRUE : FALSE);
 }
 
+// Enables the "Custom" theme base-color pickers only while that theme is selected.
+static void SetCustomThemeControlsEnabled(HWND hPanel, bool isCustom)
+{
+    EnableWindow(GetDlgItem(hPanel, IDC_LBL_CUSTOM_THEME_BG),     isCustom ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(hPanel, IDC_BTN_CUSTOM_THEME_BG),     isCustom ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(hPanel, IDC_LBL_CUSTOM_THEME_ACCENT), isCustom ? TRUE : FALSE);
+    EnableWindow(GetDlgItem(hPanel, IDC_BTN_CUSTOM_THEME_ACCENT), isCustom ? TRUE : FALSE);
+}
+
 static void SetVerticalTitleControlsEnabled(HWND hwnd, bool enabled)
 {
     EnableWindow(GetDlgItem(hwnd, IDC_LBL_VERTICAL_BTN_H),  enabled ? TRUE : FALSE);
@@ -480,6 +489,40 @@ static void SetupVisualTab(HWND hwndDlg, DlgData* data, int panelW, int panelH)
     y += nRows * swH + (nRows - 1) * swGap;
     y += px(14);
 
+    // "Custom" theme base-color pickers (Background + Accent). Enabled only while the
+    // Custom theme is the selected swatch; the chosen colors feed ThemePreset::Custom.
+    {
+        int rowH      = px(16);
+        int lblCW     = px(110);
+        int colorBtnW = px(32);
+
+        HWND hLblBg = CreateWindowExW(0, L"STATIC", L"Custom background:",
+            WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+            mgn, y, lblCW, rowH,
+            hPanel, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LBL_CUSTOM_THEME_BG)),
+            hInst, nullptr);
+        if (hFont && hLblBg) SendMessageW(hLblBg, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), FALSE);
+        CreateWindowExW(0, L"BUTTON", L"",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+            mgn + lblCW + px(4), y, colorBtnW, rowH,
+            hPanel, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_CUSTOM_THEME_BG)),
+            hInst, nullptr);
+        y += rowH + px(5);
+
+        HWND hLblAc = CreateWindowExW(0, L"STATIC", L"Custom accent:",
+            WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
+            mgn, y, lblCW, rowH,
+            hPanel, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LBL_CUSTOM_THEME_ACCENT)),
+            hInst, nullptr);
+        if (hFont && hLblAc) SendMessageW(hLblAc, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), FALSE);
+        CreateWindowExW(0, L"BUTTON", L"",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+            mgn + lblCW + px(4), y, colorBtnW, rowH,
+            hPanel, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_CUSTOM_THEME_ACCENT)),
+            hInst, nullptr);
+        y += rowH + px(14);
+    }
+
     // Checkbox: "Override taskbar color"
     int chkH = px(13);
     HWND hChk = CreateWindowExW(0, L"BUTTON", L"Override taskbar color",
@@ -517,6 +560,8 @@ static void SetupVisualTab(HWND hwndDlg, DlgData* data, int panelW, int panelH)
                    data->settings->useCustomTaskbarColor ? BST_CHECKED : BST_UNCHECKED);
     EnableWindow(GetDlgItem(hPanel, IDC_BTN_CUSTOM_TASKBAR_COLOR),
                  data->settings->useCustomTaskbarColor ? TRUE : FALSE);
+    SetCustomThemeControlsEnabled(hPanel,
+                 data->settings->theme == ThemePreset::Custom);
 
     // Set up scroll info based on content height
     SCROLLINFO si = {};
@@ -573,6 +618,9 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
         InvalidateRect(GetDlgItem(hVis, IDC_BTN_CUSTOM_TASKBAR_COLOR), nullptr, FALSE);
         EnableWindow(GetDlgItem(hVis, IDC_BTN_CUSTOM_TASKBAR_COLOR),
                      s.useCustomTaskbarColor ? TRUE : FALSE);
+        SetCustomThemeControlsEnabled(hVis, s.theme == ThemePreset::Custom);
+        InvalidateRect(GetDlgItem(hVis, IDC_BTN_CUSTOM_THEME_BG),     nullptr, FALSE);
+        InvalidateRect(GetDlgItem(hVis, IDC_BTN_CUSTOM_THEME_ACCENT), nullptr, FALSE);
     }
 
     // System Tray tab
@@ -1256,6 +1304,10 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             bool hot      = (di->itemState & ODS_HOTLIGHT) != 0;
 
             const ThemeBase& tb = GetThemeBase(static_cast<ThemePreset>(idx));
+            // The "Custom" swatch previews the user's live picked colors, not the table fallback.
+            bool isCustom    = (static_cast<ThemePreset>(idx) == ThemePreset::Custom);
+            COLORREF swTaskbar = isCustom ? data->settings->customThemeTaskbar : tb.taskbar;
+            COLORREF swAccent  = isCustom ? data->settings->customThemeAccent  : tb.accent;
             RECT rc = di->rcItem;
             // int  w  = rc.right  - rc.left;
             int  h  = rc.bottom - rc.top;
@@ -1266,13 +1318,13 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 
             // Top 2/3 of color block = taskbar color
             RECT topR = { rc.left, rc.top, rc.right, rc.top + colorH * 2 / 3 };
-            HBRUSH brTop = CreateSolidBrush(tb.taskbar);
+            HBRUSH brTop = CreateSolidBrush(swTaskbar);
             FillRect(di->hDC, &topR, brTop);
             DeleteObject(brTop);
 
             // Bottom 1/3 of color block = accent color
             RECT accR = { rc.left, topR.bottom, rc.right, rc.top + colorH };
-            HBRUSH brAcc = CreateSolidBrush(tb.accent);
+            HBRUSH brAcc = CreateSolidBrush(swAccent);
             FillRect(di->hDC, &accR, brAcc);
             DeleteObject(brAcc);
 
@@ -1320,9 +1372,10 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             return TRUE;
         }
 
-        // Other color picker buttons (clock, progress bar, separator)
+        // Other color picker buttons (clock, progress bar, separator, custom theme)
         if (di->CtlID == IDC_BTN_TIMECOLOR || di->CtlID == IDC_BTN_DATECOLOR
-            || di->CtlID == IDC_BTN_PROGRESSBAR_COLOR || di->CtlID == IDC_BTN_SEPARATOR_COLOR)
+            || di->CtlID == IDC_BTN_PROGRESSBAR_COLOR || di->CtlID == IDC_BTN_SEPARATOR_COLOR
+            || di->CtlID == IDC_BTN_CUSTOM_THEME_BG || di->CtlID == IDC_BTN_CUSTOM_THEME_ACCENT)
         {
             COLORREF color;
             if (di->CtlID == IDC_BTN_TIMECOLOR)
@@ -1331,6 +1384,10 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 color = data->settings->clockDateColor;
             else if (di->CtlID == IDC_BTN_PROGRESSBAR_COLOR)
                 color = data->settings->progressBarColor;
+            else if (di->CtlID == IDC_BTN_CUSTOM_THEME_BG)
+                color = data->settings->customThemeTaskbar;
+            else if (di->CtlID == IDC_BTN_CUSTOM_THEME_ACCENT)
+                color = data->settings->customThemeAccent;
             else
                 color = data->settings->separatorColor;
             HBRUSH br = CreateSolidBrush(color);
@@ -1354,7 +1411,10 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             LOWORD(wParam) <  IDC_THEME_SWATCH_BASE + kThemePresetCount && data)
         {
             data->selectedTheme = LOWORD(wParam) - IDC_THEME_SWATCH_BASE;
-            InvalidateRect(TabHost(data, 1, hwnd), nullptr, TRUE);
+            HWND hVis = TabHost(data, 1, hwnd);
+            SetCustomThemeControlsEnabled(hVis,
+                static_cast<ThemePreset>(data->selectedTheme) == ThemePreset::Custom);
+            InvalidateRect(hVis, nullptr, TRUE);
             return TRUE;
         }
         // Custom taskbar color: checkbox toggle
@@ -1381,7 +1441,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             return TRUE;
         }
         if ((LOWORD(wParam) == IDC_BTN_TIMECOLOR || LOWORD(wParam) == IDC_BTN_DATECOLOR
-             || LOWORD(wParam) == IDC_BTN_PROGRESSBAR_COLOR || LOWORD(wParam) == IDC_BTN_SEPARATOR_COLOR)
+             || LOWORD(wParam) == IDC_BTN_PROGRESSBAR_COLOR || LOWORD(wParam) == IDC_BTN_SEPARATOR_COLOR
+             || LOWORD(wParam) == IDC_BTN_CUSTOM_THEME_BG || LOWORD(wParam) == IDC_BTN_CUSTOM_THEME_ACCENT)
             && data)
         {
             COLORREF* colorField;
@@ -1395,6 +1456,12 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             } else if (LOWORD(wParam) == IDC_BTN_PROGRESSBAR_COLOR) {
                 colorField = &data->settings->progressBarColor;
                 hTab = TabHost(data, 2, hwnd);
+            } else if (LOWORD(wParam) == IDC_BTN_CUSTOM_THEME_BG) {
+                colorField = &data->settings->customThemeTaskbar;
+                hTab = TabHost(data, 1, hwnd);
+            } else if (LOWORD(wParam) == IDC_BTN_CUSTOM_THEME_ACCENT) {
+                colorField = &data->settings->customThemeAccent;
+                hTab = TabHost(data, 1, hwnd);
             } else {
                 colorField = &data->settings->separatorColor;
                 hTab = TabHost(data, 2, hwnd);
@@ -1409,6 +1476,11 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
             if (ChooseColorW(&cc)) {
                 *colorField = cc.rgbResult;
                 InvalidateRect(GetDlgItem(hTab, LOWORD(wParam)), nullptr, FALSE);
+                // Custom-theme colors also drive the live "Custom" swatch preview.
+                if (LOWORD(wParam) == IDC_BTN_CUSTOM_THEME_BG ||
+                    LOWORD(wParam) == IDC_BTN_CUSTOM_THEME_ACCENT)
+                    InvalidateRect(GetDlgItem(hTab, IDC_THEME_SWATCH_BASE +
+                                   static_cast<int>(ThemePreset::Custom)), nullptr, FALSE);
             }
             return TRUE;
         }

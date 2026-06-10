@@ -153,6 +153,10 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     bool     useCustomTaskbarColor = false;
     COLORREF customTaskbarColor    = RGB(30, 30, 30);
 
+    // Visual — user-defined "Custom" theme base colors (used when theme == ThemePreset::Custom)
+    COLORREF customThemeTaskbar = RGB(40, 40, 55);
+    COLORREF customThemeAccent  = RGB(120, 90, 200);
+
     // Settings dialog geometry (0 = not yet saved, use default centering)
     int settingsDlgX = 0;
     int settingsDlgY = 0;

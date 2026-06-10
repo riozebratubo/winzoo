@@ -172,7 +172,8 @@ bool TaskbarWindow::Create(HINSTANCE hInst, const Settings& settings,
 {
     hInst_    = hInst;
     settings_ = settings;
-    colors_   = GetThemeColorsEx(settings.theme, settings.useCustomTaskbarColor, settings.customTaskbarColor);
+    colors_   = GetThemeColorsEx(settings.theme, settings.useCustomTaskbarColor, settings.customTaskbarColor,
+                                 settings.customThemeTaskbar, settings.customThemeAccent);
     dpi_      = GetWindowDpi(nullptr);
     hMonitor_ = hMonitor;
     isPrimary_= isPrimary;
@@ -272,7 +273,8 @@ void TaskbarWindow::ApplySettings(const Settings& s)
                            || (s.pinnedAppsPerMonitor != settings_.pinnedAppsPerMonitor);
 
     settings_ = s;
-    colors_   = GetThemeColorsEx(s.theme, s.useCustomTaskbarColor, s.customTaskbarColor);
+    colors_   = GetThemeColorsEx(s.theme, s.useCustomTaskbarColor, s.customTaskbarColor,
+                                 s.customThemeTaskbar, s.customThemeAccent);
     showStartButton_ = isPrimary_
                      || settings_.showAppMenuOnAllMonitors
                      || settings_.taskbarMonitorMode == TaskbarMonitorMode::Primary;

@@ -1932,7 +1932,13 @@ void TaskbarWindow::ActivateButton(int combinedIdx)
         // ptMinPosition before the window processes SC_MINIMIZE. This overrides
         // whatever Explorer's (hidden) taskbar last wrote there. PostMessage is
         // async, so SetWindowPlacement (sync) runs first.
-        if (!IsRectEmpty(&btn.rect)) {
+        //
+        // Skip this for SNAPPED (arranged) windows: GetWindowPlacement reports
+        // showCmd == SW_SHOWNORMAL with rcNormalPosition holding the *floating*
+        // restore rect, so SetWindowPlacement would yank the window out of its
+        // snapped position before minimizing — it comes back floating. Preserving
+        // the snap is worth more than aiming the minimize animation precisely.
+        if (!IsRectEmpty(&btn.rect) && !IsWindowArranged(btn.hwnd)) {
             POINT origin = {};
             ClientToScreen(hwnd_, &origin);
             WINDOWPLACEMENT wp = {};

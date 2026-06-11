@@ -37,6 +37,21 @@ public:
                      const std::wstring& monitorDeviceName = L"",
                      std::function<void(const Settings&)> onSettingsChanged = {});
 
+    // Standalone grid popup of the given app leaves (used for taskbar pinned
+    // folders). Anchored off the taskbar edge like the root menu, but forced to a
+    // grid with no sidebar/search. onRemoveFromFolder is invoked when the user
+    // picks "Move out of folder" on an app inside.
+    static void ShowFolder(HWND hwndOwner, RECT anchorScreenRect,
+                           TaskbarPosition position,
+                           const std::wstring& folderName,
+                           std::vector<AppTreeNode> appNodes,
+                           const Settings& settings,
+                           const ThemeColors& colors, int dpi,
+                           const std::wstring& monitorDeviceName,
+                           std::function<void(const Settings&)> onSettingsChanged,
+                           std::function<void(const std::wstring&)> onRemoveFromFolder,
+                           std::function<void(const std::wstring&)> onSetFolderCover);
+
 private:
     // Internal Show used for both the root menu and recursive submenus.
     // anchorRect: screen rect of the element the menu should attach to.
@@ -57,7 +72,13 @@ private:
         const std::wstring& monitorDeviceName = L"",
         std::function<void(const Settings&)> onSettingsChanged = {},
         Settings* pinSettings = nullptr,
-        HWND rootHwnd = nullptr);
+        HWND rootHwnd = nullptr,
+        // Taskbar pinned-folder popup: shows "Move out of folder" / "Use this icon
+        // as the folder cover" context items (instead of "Pin to Apps Menu") that
+        // invoke onRemoveFromFolder / onSetFolderCover.
+        bool taskbarFolder = false,
+        std::function<void(const std::wstring&)> onRemoveFromFolder = {},
+        std::function<void(const std::wstring&)> onSetFolderCover = {});
 
     static bool RegisterWndClass(HINSTANCE hInst);
     static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -105,6 +126,10 @@ private:
     // menu's ownedSettings_ so submenus mutate the same shared list.
     Settings*                            pinSettings_ = nullptr;
     HWND                                 rootHwnd_    = nullptr; // root menu window (for live refresh)
+    // Taskbar pinned-folder popup context (see ShowFolder).
+    bool                                     isTaskbarFolder_ = false;
+    std::function<void(const std::wstring&)> onRemoveFromFolder_;
+    std::function<void(const std::wstring&)> onSetFolderCover_;
     int                                  pinnedCount_ = 0;    // # pinned nodes at front of ownedNodes_
     DragController                       drag_;
     int                                  dropIndex_ = -1;     // current drag insertion index

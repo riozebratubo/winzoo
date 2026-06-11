@@ -8,6 +8,11 @@
 
 // Dialogs
 #define IDD_SETTINGS            201
+#define IDD_INPUT               202
+
+// Input dialog controls
+#define IDC_INPUT_PROMPT        1500
+#define IDC_INPUT_EDIT          1501
 
 // Settings dialog controls
 #define IDC_TAB_SETTINGS        1000
@@ -81,6 +86,17 @@
 
 // Apps Menu entry right-click menu item ID
 #define IDM_APPMENU_PIN_TOGGLE  404
+// Folder popup: move the app back out to the top-level pinned row
+#define IDM_APPMENU_FOLDER_MOVE_OUT 405
+// Folder popup: use this app's icon as the folder's cover icon
+#define IDM_APPMENU_FOLDER_SET_COVER 406
+
+// Taskbar pinned-folder menu item IDs
+#define IDM_NEW_PINNED_FOLDER   410
+#define IDM_DELETE_FOLDER       411
+#define IDM_RENAME_FOLDER       412
+#define IDM_OPEN_FOLDER         413
+#define IDM_RESET_FOLDER_ICON   414
 
 // Jump List items (dynamic range: 600..699)
 #define IDM_JUMPLIST_BASE       600

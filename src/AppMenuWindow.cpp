@@ -1457,6 +1457,31 @@ void AppMenuWindow::ShowEntryContextMenu(int idx, POINT ptScreen)
     const std::wstring path = node.exePath.empty() ? node.iconPath : node.exePath;
     if (path.empty()) return;
 
+    // Taskbar pinned-folder popup: offer folder actions instead of pinning.
+    if (isTaskbarFolder_) {
+        std::vector<MenuItem> items;
+        items.push_back({ L"Use this icon as the folder cover", IDM_APPMENU_FOLDER_SET_COVER,
+                          false, false, false, false });
+        items.push_back({ L"Move out of folder", IDM_APPMENU_FOLDER_MOVE_OUT,
+                          false, false, false, false });
+        suppressKillFocus_ = true;
+        UINT cmd = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
+        suppressKillFocus_ = false;
+        if (cmd == IDM_APPMENU_FOLDER_SET_COVER) {
+            if (onSetFolderCover_) onSetFolderCover_(path);  // taskbar rebuilds the folder icon
+            // The folder contents are unchanged, so keep the popup open.
+            if (IsWindow(hwnd_)) SetForegroundWindow(hwnd_);
+        } else if (cmd == IDM_APPMENU_FOLDER_MOVE_OUT) {
+            if (onRemoveFromFolder_) onRemoveFromFolder_(path);  // taskbar rebuilds its pins
+            closeReason_ = AppMenuCloseReason::Selection;        // close so the change shows
+            done_ = true;
+            if (IsWindow(hwnd_)) DestroyWindow(hwnd_);
+        } else if (IsWindow(hwnd_)) {
+            SetForegroundWindow(hwnd_);
+        }
+        return;
+    }
+
     if (!pinSettings_) return;
     const std::vector<std::wstring>& pins = ActivePins(*pinSettings_, monitorDeviceName_);
     bool isPinned = std::any_of(pins.begin(), pins.end(),
@@ -2150,7 +2175,10 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
     const std::wstring& monitorDeviceName,
     std::function<void(const Settings&)> onSettingsChanged,
     Settings* pinSettings,
-    HWND rootHwnd)
+    HWND rootHwnd,
+    bool taskbarFolder,
+    std::function<void(const std::wstring&)> onRemoveFromFolder,
+    std::function<void(const std::wstring&)> onSetFolderCover)
 {
     if (nodes.empty()) return AppMenuCloseReason::ClickedOutside;
 
@@ -2174,6 +2202,9 @@ AppMenuCloseReason AppMenuWindow::ShowNodes(
     menu.monitorDeviceName_ = monitorDeviceName;
     menu.onSettingsChanged_ = std::move(onSettingsChanged);
     menu.pinSettings_       = pinSettings ? pinSettings : &menu.ownedSettings_;
+    menu.isTaskbarFolder_   = taskbarFolder;
+    menu.onRemoveFromFolder_= std::move(onRemoveFromFolder);
+    menu.onSetFolderCover_  = std::move(onSetFolderCover);
 
     // Search: only on root menu when enabled in settings
     menu.searchEnabled_ = !isSubmenu && settings.appMenuSearchEnabled;
@@ -2359,5 +2390,36 @@ void AppMenuWindow::Show(HWND hwndOwner, RECT startBtnScreenRect,
               std::move(tree), settings, colors, dpi,
               /*pChildHwnd=*/nullptr, pinnedCount, std::move(entries),
               monitorDeviceName, std::move(onSettingsChanged));
+}
+
+void AppMenuWindow::ShowFolder(HWND hwndOwner, RECT anchorScreenRect,
+                               TaskbarPosition position,
+                               const std::wstring& folderName,
+                               std::vector<AppTreeNode> appNodes,
+                               const Settings& settings,
+                               const ThemeColors& colors, int dpi,
+                               const std::wstring& monitorDeviceName,
+                               std::function<void(const Settings&)> onSettingsChanged,
+                               std::function<void(const std::wstring&)> onRemoveFromFolder,
+                               std::function<void(const std::wstring&)> onSetFolderCover)
+{
+    (void)folderName;  // no title chrome on the bare grid popup
+    if (appNodes.empty()) return;
+
+    // Force a clean grid popup. isSubmenu=false selects ShowNodes' taskbar-edge
+    // anchoring; disabling the root-only chrome (search/sidebar/classic) means none
+    // of it renders, leaving a bare grid that pops off the taskbar edge.
+    Settings s = settings;
+    s.appMenuLayout         = AppMenuLayout::Grid;
+    s.appMenuSearchEnabled  = false;
+    s.appMenuSidebarEnabled = false;
+
+    ShowNodes(hwndOwner, anchorScreenRect, /*isSubmenu=*/false, position,
+              std::move(appNodes), s, colors, dpi,
+              /*pChildHwnd=*/nullptr, /*pinnedCount=*/0, /*entries=*/{},
+              monitorDeviceName, std::move(onSettingsChanged),
+              /*pinSettings=*/nullptr, /*rootHwnd=*/nullptr,
+              /*taskbarFolder=*/true, std::move(onRemoveFromFolder),
+              std::move(onSetFolderCover));
 }
 

@@ -87,6 +87,22 @@ private:
     void RebuildPinnedButtons();
     void UpdateMonitorDeviceName();
 
+    // Pinned folders
+    void ShowFolderMenu(int combinedIdx, POINT ptScreen);   // right-click menu for a folder button
+    void ShowFolderPopup(int combinedIdx);                  // open the folder's grid popup
+    void CreatePinnedFolder(POINT ptScreen);                // prompt for a name + add an empty folder
+    void MoveAppIntoFolder(int appIdx, int folderIdx);      // drag-drop an app into a folder
+    void DeletePinnedFolder(int folderIdx, bool keepChildren);
+    void RemoveAppFromFolder(const std::wstring& folderToken, const std::wstring& appPath);
+    void SetFolderCover(const std::wstring& folderToken, const std::wstring& appPath); // cover = app's icon
+    void ResetFolderIcon(int folderIdx);                                               // back to default icon
+    // Combined index of a pinned *folder* button under `pt` (excluding draggedIdx),
+    // only when the dragged button is an app; otherwise -1.
+    int  HitTestFolderTarget(POINT pt, int draggedIdx) const;
+    // Pointers to the pin list(s) this taskbar currently draws from (global, the
+    // current monitor's list, or — in floating mode — every per-monitor list).
+    std::vector<std::vector<std::wstring>*> ActivePinLists(Settings& s) const;
+
     // Tray icon management
     void RefreshTrayIcons();                       // legacy cross-process scrape (fallback)
     void OnTrayPush(const struct WinzooTrayRecord& rec, const wchar_t* tip,
@@ -137,6 +153,7 @@ private:
     std::wstring    clockFitTimeFmt_;
     std::wstring    clockFitDateFmt_;
     HKL             currentHkl_      = nullptr;
+    HICON           folderIcon_      = nullptr;  // cached stock folder icon (owned; DestroyIcon on close)
     ThemeColors     colors_         = {};
     Renderer        renderer_;
     IconCache       iconCache_;
@@ -158,6 +175,7 @@ private:
     int             clockFitTimePt_ = 0;
     int             clockFitDatePt_ = 0;
     int             hoveredIdx_     = -1;  // combined index
+    int             dropFolderIdx_  = -1;  // combined index of folder under cursor during a drag
     int             hoveredScroll_  = 0;
     int             hoveredStatus_  = 0;   // 0=none 1=vol 2=net 3=bat
     int             scrollOffset_   = 0;

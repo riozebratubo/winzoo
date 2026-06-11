@@ -8,6 +8,9 @@
 #include "JumpList.h"
 #include "TaskbarRelocate.h"
 #include "WinzooTrayIpc.h"
+#include "PinnedFolder.h"
+#include "InputDialog.h"
+#include "AppTreeNode.h"
 #include "winzoo_version.h"
 #include <algorithm>
 #include <atomic>
@@ -21,6 +24,7 @@
 #include <initguid.h>
 #include <msctf.h>
 #include <wtsapi32.h>
+#include <shlobj.h>
 
 #pragma comment(lib, "wtsapi32.lib")
 
@@ -386,9 +390,22 @@ void TaskbarWindow::UpdateMonitorDeviceName()
     }
 }
 
+// Windows stock folder icon (same one the rounded-classic apps menu uses), at the
+// large size. Caller owns the HICON (DestroyIcon).
+static HICON LoadStockFolderIcon()
+{
+    SHSTOCKICONINFO sii = {};
+    sii.cbSize = sizeof(sii);
+    if (SUCCEEDED(SHGetStockIconInfo(SIID_FOLDER, SHGSI_ICON | SHGSI_LARGEICON, &sii)))
+        return sii.hIcon;
+    return nullptr;
+}
+
 void TaskbarWindow::RebuildPinnedButtons()
 {
     int iconSz = Scale(48, dpi_);
+
+    if (!folderIcon_) folderIcon_ = LoadStockFolderIcon();
 
     const std::vector<std::wstring>* paths = nullptr;
     static const std::vector<std::wstring> kEmpty;
@@ -414,13 +431,28 @@ void TaskbarWindow::RebuildPinnedButtons()
 
     std::vector<TaskButton> newPinned;
     newPinned.reserve(paths->size());
-    for (const auto& path : *paths) {
+    for (const auto& entry : *paths) {
         TaskButton btn;
-        btn.exePath  = path;
         btn.isPinned = true;
         btn.iconOnly = true;
-        btn.title    = ExeBaseName(path);
-        btn.icon     = appIconCache_.TryGet(path, iconSz);
+        btn.pinToken = entry;
+
+        std::wstring name, cover;
+        std::vector<std::wstring> children;
+        if (pinfolder::ParseFolderToken(entry, name, children, cover)) {
+            btn.isFolder       = true;
+            btn.folderName     = name;
+            btn.folderChildren = std::move(children);
+            btn.folderCover    = cover;
+            btn.title          = name;
+            // Default folder icon, or a child app's icon when a cover is set.
+            HICON coverIcon = cover.empty() ? nullptr : appIconCache_.TryGet(cover, iconSz);
+            btn.icon           = coverIcon ? coverIcon : folderIcon_;
+        } else {
+            btn.exePath = entry;
+            btn.title   = ExeBaseName(entry);
+            btn.icon    = appIconCache_.TryGet(entry, iconSz);
+        }
         newPinned.push_back(std::move(btn));
     }
     pinnedButtons_ = std::move(newPinned);
@@ -1455,10 +1487,11 @@ bool TaskbarWindow::DragReorderTo(POINT pt)
 
 void TaskbarWindow::PersistPinnedOrder()
 {
-    // New display order of exe paths.
+    // New display order, keyed by each button's exact pin-list string (a path for
+    // apps, the encoded token for folders) so both reorder by stable identity.
     std::vector<std::wstring> newOrder;
     newOrder.reserve(pinnedButtons_.size());
-    for (const auto& b : pinnedButtons_) newOrder.push_back(b.exePath);
+    for (const auto& b : pinnedButtons_) newOrder.push_back(b.pinToken);
 
     auto rankOf = [&](const std::wstring& p) -> int {
         for (int i = 0; std::cmp_less(i, newOrder.size()); ++i)
@@ -1488,6 +1521,306 @@ void TaskbarWindow::PersistPinnedOrder()
         reorderList(settings_.pinnedExePaths);
     }
     SaveSettings(settings_);
+}
+
+// ─── Pinned folders ──────────────────────────────────────────────────────────
+
+std::vector<std::vector<std::wstring>*> TaskbarWindow::ActivePinLists(Settings& s) const
+{
+    std::vector<std::vector<std::wstring>*> lists;
+    if (s.pinnedAppsPerMonitor && settings_.position == TaskbarPosition::Floating) {
+        // Floating bars show a merged view over every monitor's list.
+        for (auto& [mon, vec] : s.pinnedExePathsPerMonitor) lists.push_back(&vec);
+    } else if (s.pinnedAppsPerMonitor && !monitorDeviceName_.empty()) {
+        lists.push_back(&s.pinnedExePathsPerMonitor[monitorDeviceName_]);
+    } else {
+        lists.push_back(&s.pinnedExePaths);
+    }
+    return lists;
+}
+
+int TaskbarWindow::HitTestFolderTarget(POINT pt, int draggedIdx) const
+{
+    // Only an app may be dropped into a folder (no folder-in-folder nesting).
+    if (!IsPinnedIdx(draggedIdx) || pinnedButtons_[draggedIdx].isFolder)
+        return -1;
+    int idx = HitTestButton(pt);
+    if (idx < 0 || idx == draggedIdx) return -1;
+    if (!IsPinnedIdx(idx) || !pinnedButtons_[idx].isFolder) return -1;
+    return idx;
+}
+
+void TaskbarWindow::CreatePinnedFolder(POINT /*ptScreen*/)
+{
+    std::wstring name = L"New folder";
+    if (!InputDialog::Show(hwnd_, L"New pinned folder", L"Folder name:", name))
+        return;
+    name = pinfolder::SanitizeName(name);
+    if (name.empty()) return;
+
+    Settings updated = settings_;
+    // Add to the list backing this taskbar's view (current monitor when per-monitor).
+    std::vector<std::wstring>* target =
+        (updated.pinnedAppsPerMonitor && !monitorDeviceName_.empty())
+            ? &updated.pinnedExePathsPerMonitor[monitorDeviceName_]
+            : &updated.pinnedExePaths;
+    target->push_back(pinfolder::MakeFolderToken(name, {}));
+
+    ApplySettings(updated);
+    App::Instance().PropagateSettings(settings_, this);
+}
+
+void TaskbarWindow::MoveAppIntoFolder(int appIdx, int folderIdx)
+{
+    if (!IsPinnedIdx(appIdx) || !IsPinnedIdx(folderIdx)) return;
+    if (pinnedButtons_[appIdx].isFolder || !pinnedButtons_[folderIdx].isFolder) return;
+    const std::wstring appPath     = pinnedButtons_[appIdx].exePath;
+    const std::wstring folderToken = pinnedButtons_[folderIdx].pinToken;
+    if (appPath.empty()) return;
+
+    Settings updated = settings_;
+    for (auto* vec : ActivePinLists(updated)) {
+        // Drop the standalone app entry.
+        vec->erase(std::remove_if(vec->begin(), vec->end(),
+            [&](const std::wstring& p) {
+                return !pinfolder::IsFolderToken(p) &&
+                       _wcsicmp(p.c_str(), appPath.c_str()) == 0;
+            }), vec->end());
+        // Append it into the target folder token (dedupe; preserve cover).
+        for (auto& entry : *vec) {
+            if (_wcsicmp(entry.c_str(), folderToken.c_str()) != 0) continue;
+            std::wstring fname, fcover; std::vector<std::wstring> kids;
+            pinfolder::ParseFolderToken(entry, fname, kids, fcover);
+            bool dup = std::any_of(kids.begin(), kids.end(),
+                [&](const std::wstring& c){ return _wcsicmp(c.c_str(), appPath.c_str()) == 0; });
+            if (!dup) kids.push_back(appPath);
+            entry = pinfolder::MakeFolderToken(fname, kids, fcover);
+        }
+    }
+    ApplySettings(updated);
+    App::Instance().PropagateSettings(settings_, this);
+}
+
+void TaskbarWindow::DeletePinnedFolder(int folderIdx, bool keepChildren)
+{
+    if (!IsPinnedIdx(folderIdx) || !pinnedButtons_[folderIdx].isFolder) return;
+    const std::wstring folderToken = pinnedButtons_[folderIdx].pinToken;
+
+    Settings updated = settings_;
+    for (auto* vec : ActivePinLists(updated)) {
+        for (size_t i = 0; i < vec->size(); ++i) {
+            if (_wcsicmp((*vec)[i].c_str(), folderToken.c_str()) != 0) continue;
+            std::wstring fname; std::vector<std::wstring> kids;
+            pinfolder::ParseFolderToken((*vec)[i], fname, kids);
+            auto it = vec->erase(vec->begin() + i);  // remove the folder
+            if (keepChildren && !kids.empty())
+                vec->insert(it, kids.begin(), kids.end());  // splice apps back at its spot
+            break;  // the token is unique within a list
+        }
+    }
+    ApplySettings(updated);
+    App::Instance().PropagateSettings(settings_, this);
+}
+
+void TaskbarWindow::RemoveAppFromFolder(const std::wstring& folderToken, const std::wstring& appPath)
+{
+    Settings updated = settings_;
+    for (auto* vec : ActivePinLists(updated)) {
+        for (size_t i = 0; i < vec->size(); ++i) {
+            if (_wcsicmp((*vec)[i].c_str(), folderToken.c_str()) != 0) continue;
+            std::wstring fname, fcover; std::vector<std::wstring> kids;
+            pinfolder::ParseFolderToken((*vec)[i], fname, kids, fcover);
+            bool removed = false;
+            kids.erase(std::remove_if(kids.begin(), kids.end(),
+                [&](const std::wstring& c) {
+                    if (_wcsicmp(c.c_str(), appPath.c_str()) == 0) { removed = true; return true; }
+                    return false;
+                }), kids.end());
+            // If the app leaving was the folder's cover, fall back to the default icon.
+            if (_wcsicmp(fcover.c_str(), appPath.c_str()) == 0) fcover.clear();
+            (*vec)[i] = pinfolder::MakeFolderToken(fname, kids, fcover);
+            if (removed)  // re-pin the app at top level, right after its folder
+                vec->insert(vec->begin() + i + 1, appPath);
+            break;
+        }
+    }
+    ApplySettings(updated);
+    App::Instance().PropagateSettings(settings_, this);
+}
+
+void TaskbarWindow::SetFolderCover(const std::wstring& folderToken, const std::wstring& appPath)
+{
+    if (appPath.empty()) return;
+    Settings updated = settings_;
+    for (auto* vec : ActivePinLists(updated)) {
+        for (auto& entry : *vec) {
+            if (_wcsicmp(entry.c_str(), folderToken.c_str()) != 0) continue;
+            std::wstring fname, fcover; std::vector<std::wstring> kids;
+            pinfolder::ParseFolderToken(entry, fname, kids, fcover);
+            entry = pinfolder::MakeFolderToken(fname, kids, appPath);
+            break;
+        }
+    }
+    ApplySettings(updated);
+    App::Instance().PropagateSettings(settings_, this);
+}
+
+void TaskbarWindow::ResetFolderIcon(int folderIdx)
+{
+    if (!IsPinnedIdx(folderIdx) || !pinnedButtons_[folderIdx].isFolder) return;
+    const std::wstring folderToken = pinnedButtons_[folderIdx].pinToken;
+    Settings updated = settings_;
+    for (auto* vec : ActivePinLists(updated)) {
+        for (auto& entry : *vec) {
+            if (_wcsicmp(entry.c_str(), folderToken.c_str()) != 0) continue;
+            std::wstring fname, fcover; std::vector<std::wstring> kids;
+            pinfolder::ParseFolderToken(entry, fname, kids, fcover);
+            entry = pinfolder::MakeFolderToken(fname, kids);  // drop the cover
+            break;
+        }
+    }
+    ApplySettings(updated);
+    App::Instance().PropagateSettings(settings_, this);
+}
+
+void TaskbarWindow::ShowFolderMenu(int combinedIdx, POINT ptScreen)
+{
+    if (!IsPinnedIdx(combinedIdx) || !pinnedButtons_[combinedIdx].isFolder) return;
+    const std::wstring folderName = pinnedButtons_[combinedIdx].folderName;
+    const bool hasCover = !pinnedButtons_[combinedIdx].folderCover.empty();
+
+    std::vector<MenuItem> items;
+    items.push_back({ L"Open",                 IDM_OPEN_FOLDER,        false, false, false, false });
+    items.push_back({ L"Rename folder...",     IDM_RENAME_FOLDER,      false, false, false, false });
+    if (hasCover)
+        items.push_back({ L"Reset icon",       IDM_RESET_FOLDER_ICON,  false, false, false, false });
+    items.push_back({ L"New pinned folder...", IDM_NEW_PINNED_FOLDER,  false, false, false, false });
+    items.push_back({ L"",                     0,                      true,  false, false, false });
+    items.push_back({ L"Delete folder",        IDM_DELETE_FOLDER,      false, false, false, false });
+
+    UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
+
+    switch (id) {
+    case IDM_OPEN_FOLDER:
+        ShowFolderPopup(combinedIdx);
+        break;
+
+    case IDM_NEW_PINNED_FOLDER:
+        CreatePinnedFolder(ptScreen);
+        break;
+
+    case IDM_RESET_FOLDER_ICON:
+        ResetFolderIcon(combinedIdx);
+        break;
+
+    case IDM_RENAME_FOLDER: {
+        if (!IsPinnedIdx(combinedIdx) || !pinnedButtons_[combinedIdx].isFolder) break;
+        const std::wstring oldToken = pinnedButtons_[combinedIdx].pinToken;
+        std::vector<std::wstring> kids = pinnedButtons_[combinedIdx].folderChildren;
+        const std::wstring cover = pinnedButtons_[combinedIdx].folderCover;
+        std::wstring newName = pinnedButtons_[combinedIdx].folderName;
+        if (!InputDialog::Show(hwnd_, L"Rename folder", L"Folder name:", newName)) break;
+        newName = pinfolder::SanitizeName(newName);
+        if (newName.empty()) break;
+        const std::wstring newToken = pinfolder::MakeFolderToken(newName, kids, cover);
+        Settings updated = settings_;
+        for (auto* vec : ActivePinLists(updated))
+            for (auto& e : *vec)
+                if (_wcsicmp(e.c_str(), oldToken.c_str()) == 0) e = newToken;
+        ApplySettings(updated);
+        App::Instance().PropagateSettings(settings_, this);
+        break;
+    }
+
+    case IDM_DELETE_FOLDER: {
+        // Confirm + let the user choose what happens to the contained apps.
+        constexpr int kMoveOut = 1001, kDeleteAll = 1002;
+        const TASKDIALOG_BUTTON btns[] = {
+            { kMoveOut,   L"Move items out of the folder\nKeep the apps pinned to the taskbar." },
+            { kDeleteAll, L"Delete the items too\nUnpin the apps from the taskbar." },
+        };
+        const std::wstring instr = L"Delete the folder “" + folderName + L"”?";
+        TASKDIALOGCONFIG cfg = {};
+        cfg.cbSize             = sizeof(cfg);
+        cfg.hwndParent         = hwnd_;
+        cfg.hInstance          = hInst_;
+        cfg.dwFlags            = TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION |
+                                 TDF_POSITION_RELATIVE_TO_WINDOW;
+        cfg.dwCommonButtons    = TDCBF_CANCEL_BUTTON;
+        cfg.pszWindowTitle     = L"Delete pinned folder";
+        cfg.pszMainInstruction = instr.c_str();
+        cfg.pButtons           = btns;
+        cfg.cButtons           = ARRAYSIZE(btns);
+        int pressed = 0;
+        if (SUCCEEDED(TaskDialogIndirect(&cfg, &pressed, nullptr, nullptr))) {
+            if (pressed == kMoveOut)        DeletePinnedFolder(combinedIdx, /*keepChildren=*/true);
+            else if (pressed == kDeleteAll) DeletePinnedFolder(combinedIdx, /*keepChildren=*/false);
+        }
+        break;
+    }
+    default: break;
+    }
+}
+
+void TaskbarWindow::ShowFolderPopup(int combinedIdx)
+{
+    if (!IsPinnedIdx(combinedIdx) || !pinnedButtons_[combinedIdx].isFolder) return;
+    if (menuOpen_) return;
+
+    // Snapshot folder data + anchor before the nested message loop (the pinned list
+    // can change underneath us, e.g. via "Move out of folder").
+    const TaskButton& fbtn = pinnedButtons_[combinedIdx];
+    const std::wstring folderToken = fbtn.pinToken;
+    const std::wstring folderName  = fbtn.folderName;
+    const std::vector<std::wstring> children = fbtn.folderChildren;
+
+    RECT r = fbtn.rect;
+    POINT tl = { r.left, r.top }, br = { r.right, r.bottom };
+    ClientToScreen(hwnd_, &tl);
+    ClientToScreen(hwnd_, &br);
+    RECT anchorScreen = { tl.x, tl.y, br.x, br.y };
+
+    // Build leaf nodes for the grid: prefer a friendly name/icon from the scanned
+    // app list, else fall back to the exe base name + icon cache.
+    int iconSz = Scale(48, dpi_);
+    std::vector<AppTreeNode> nodes;
+    nodes.reserve(children.size());
+    for (const auto& path : children) {
+        AppTreeNode leaf;
+        leaf.isFolder = false;
+        leaf.exePath  = path;
+        leaf.iconPath = path;
+        const AppEntry* match = nullptr;
+        for (const auto& e : appEntries_) {
+            if (_wcsicmp(e.exePath.c_str(),  path.c_str()) == 0 ||
+                _wcsicmp(e.iconPath.c_str(), path.c_str()) == 0) { match = &e; break; }
+        }
+        if (match) {
+            leaf.name = match->name;
+            leaf.icon = match->icon ? match->icon : appIconCache_.TryGet(path, iconSz);
+        } else {
+            leaf.name = ExeBaseName(path);
+            leaf.icon = appIconCache_.TryGet(path, iconSz);
+        }
+        nodes.push_back(std::move(leaf));
+    }
+
+    menuOpen_ = true;
+    AppMenuWindow::ShowFolder(
+        hwnd_, anchorScreen, settings_.position, folderName, std::move(nodes),
+        settings_, colors_, dpi_, monitorDeviceName_,
+        [this](const Settings& s) {
+            ApplySettings(s);
+            App::Instance().PropagateSettings(s, this);
+        },
+        [this, folderToken](const std::wstring& appPath) {
+            RemoveAppFromFolder(folderToken, appPath);
+        },
+        [this, folderToken](const std::wstring& appPath) {
+            SetFolderCover(folderToken, appPath);
+        });
+    menuOpen_ = false;
+    menuLastClosedTick_ = GetTickCount();
 }
 
 bool TaskbarWindow::HitTestStartButton(POINT pt) const
@@ -1560,7 +1893,11 @@ void TaskbarWindow::ActivateButton(int combinedIdx)
     if (combinedIdx < 0 || combinedIdx >= TotalCount()) return;
 
     if (IsPinnedIdx(combinedIdx)) {
-        // Pinned button: always spawn a new window
+        // Pinned folder: open its grid popup. Pinned app: always spawn a new window.
+        if (pinnedButtons_[combinedIdx].isFolder) {
+            ShowFolderPopup(combinedIdx);
+            return;
+        }
         const TaskButton& btn = pinnedButtons_[combinedIdx];
         if (!btn.exePath.empty())
             LaunchApp(btn.exePath.c_str());
@@ -1628,6 +1965,12 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
     if (combinedIdx < 0 || combinedIdx >= TotalCount()) return;
 
     if (IsPinnedIdx(combinedIdx)) {
+        // Folders get their own menu (Delete / Rename / New folder).
+        if (pinnedButtons_[combinedIdx].isFolder) {
+            ShowFolderMenu(combinedIdx, ptScreen);
+            return;
+        }
+
         // --- Pinned button menu ---
         const std::wstring exePath = pinnedButtons_[combinedIdx].exePath;
         HWND runningHwnd = FindHwndByExePath(exePath);
@@ -1653,6 +1996,8 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
         items.push_back({ L"",                   0,                   true,  false, false, false });
         items.push_back({ L"Unpin from taskbar", IDM_PIN_UNPIN,       false, true,  false, false });
         items.push_back({ L"Close window",       IDM_CLOSE_WINDOW,    false, false, !runningHwnd, false });
+        items.push_back({ L"",                   0,                   true,  false, false, false });
+        items.push_back({ L"New pinned folder...", IDM_NEW_PINNED_FOLDER, false, false, false, false });
 
         UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
 
@@ -1673,6 +2018,10 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
         case IDM_OPEN_NEW_WINDOW:
             if (!exePath.empty())
                 LaunchApp(exePath.c_str());
+            break;
+
+        case IDM_NEW_PINNED_FOLDER:
+            CreatePinnedFolder(ptScreen);
             break;
 
         case IDM_PIN_UNPIN: {
@@ -1830,6 +2179,8 @@ void TaskbarWindow::ShowButtonMenu(int combinedIdx, POINT ptScreen)
 void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
 {
     std::vector<MenuItem> items = {
+        { L"New pinned folder...", IDM_NEW_PINNED_FOLDER, false, false, false },
+        { L"",                    0,                     true,  false, false },
         { L"Run...",              IDM_RUN_DIALOG,        false, false, false },
         { L"Task Manager",        IDM_TASK_MANAGER,      false, false, false },
         { L"Power options...",    IDM_POWER_OPTIONS,     false, false, false },
@@ -1847,6 +2198,10 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
     UINT id = PopupMenu::Show(hwnd_, ptScreen, std::move(items), colors_, dpi_);
 
     switch (id) {
+    case IDM_NEW_PINNED_FOLDER:
+        CreatePinnedFolder(ptScreen);
+        break;
+
     case IDM_RUN_DIALOG:
         ShowRunDialog(hwnd_);
         break;
@@ -1890,7 +2245,7 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
 
     case IDM_REBUILD_ICON_CACHE:
         for (auto& e : appEntries_) e.icon = nullptr;
-        for (auto& btn : pinnedButtons_) btn.icon = nullptr;
+        for (auto& btn : pinnedButtons_) if (!btn.isFolder) btn.icon = nullptr;
         appIconCache_.Clear();
         StartIconLoadThread();
         break;
@@ -2135,13 +2490,22 @@ void TaskbarWindow::StartIconLoadThread()
     for (const auto& e : appEntries_) {
         paths.push_back(e.iconPath.empty() ? e.exePath : e.iconPath);
     }
-    // Also include pinned exe paths (may not be in the scanned app list)
-    for (const auto& p : *pinnedPaths) {
-        bool alreadyIn = false;
+    // Also include pinned exe paths (may not be in the scanned app list). Folder
+    // tokens aren't files — load icons for their children instead so the folder
+    // popup's grid has them.
+    auto addPath = [&](const std::wstring& p) {
         for (const auto& ex : paths)
-            if (_wcsicmp(ex.c_str(), p.c_str()) == 0) { alreadyIn = true; break; }
-        if (!alreadyIn)
-            paths.push_back(p);
+            if (_wcsicmp(ex.c_str(), p.c_str()) == 0) return;
+        paths.push_back(p);
+    };
+    for (const auto& p : *pinnedPaths) {
+        if (pinfolder::IsFolderToken(p)) {
+            std::wstring fname; std::vector<std::wstring> kids;
+            pinfolder::ParseFolderToken(p, fname, kids);
+            for (const auto& c : kids) addPath(c);
+        } else {
+            addPath(p);
+        }
     }
     WPARAM wp = MAKEWPARAM(static_cast<WORD>(sizePx), static_cast<WORD>(gen));
     SpawnTracked([hwnd, wp, paths = std::move(paths)]() {
@@ -2482,7 +2846,9 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
         renderer_.Paint(hdc, client.right, client.bottom,
                         allButtons,
-                        hoveredIdx_,
+                        // While dragging an app over a folder, highlight that folder
+                        // as the drop target (reuses the hover highlight).
+                        (dropFolderIdx_ >= 0 ? dropFolderIdx_ : hoveredIdx_),
                         drag_.State() == DragState::Pressed  ? drag_.DragIndex() : -1,
                         drag_.State() == DragState::Dragging ? drag_.DragIndex() : -1,
                         ghostPt,
@@ -2640,10 +3006,18 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             POINT screenPt = pt;
             ClientToScreen(hwnd, &screenPt);
             drag_.OnMouseMove(screenPt);
-            // Live reorder: once past the drag threshold, slide neighbours aside so the
-            // gap follows the cursor and the button lands exactly where it's shown.
-            if (drag_.State() == DragState::Dragging)
-                DragReorderTo(pt);
+            if (drag_.State() == DragState::Dragging) {
+                // If an app is dragged over a folder, mark that folder as the drop
+                // target and suppress reorder (so the row doesn't shuffle). Otherwise
+                // live-reorder: slide neighbours aside so the gap follows the cursor.
+                int folderTarget = HitTestFolderTarget(pt, drag_.DragIndex());
+                if (folderTarget >= 0) {
+                    dropFolderIdx_ = folderTarget;
+                } else {
+                    dropFolderIdx_ = -1;
+                    DragReorderTo(pt);
+                }
+            }
             InvalidateRect(hwnd, nullptr, FALSE);
         }
 
@@ -2798,12 +3172,17 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         }
 
         if (wasDragging) {
-            // The reorder already happened live during WM_MOUSEMOVE; on drop we only
-            // persist. `origIdx` is the dragged button's final (post-live-move) slot,
-            // so its zone tells us whether the pinned order needs saving.
-            if (IsPinnedIdx(origIdx))
+            if (dropFolderIdx_ >= 0 && IsPinnedIdx(origIdx) &&
+                !pinnedButtons_[origIdx].isFolder) {
+                // Dropped an app onto a folder → move it inside (rebuilds + saves).
+                MoveAppIntoFolder(origIdx, dropFolderIdx_);
+            } else if (IsPinnedIdx(origIdx)) {
+                // The reorder already happened live during WM_MOUSEMOVE; on drop we
+                // only persist. `origIdx` is the dragged button's final slot.
                 PersistPinnedOrder();
+            }
             // Task-zone order is in-memory only (running windows) — nothing to save.
+            dropFolderIdx_ = -1;
         }
 
         drag_.OnButtonUp();
@@ -2841,6 +3220,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_CAPTURECHANGED:
         drag_.OnCaptureChanged();
+        dropFolderIdx_ = -1;
         trayDragStart_ = -1;
         trayDragging_  = false;
         InvalidateRect(hwnd, nullptr, FALSE);
@@ -3046,8 +3426,18 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                     const std::wstring& p = e.iconPath.empty() ? e.exePath : e.iconPath;
                     e.icon = appIconCache_.TryGet(p, iconSz);
                 }
-                for (auto& btn : pinnedButtons_)
-                    btn.icon = appIconCache_.TryGet(btn.exePath, iconSz);
+                for (auto& btn : pinnedButtons_) {
+                    if (btn.isFolder) {
+                        // Folders with a cover follow that child's icon; others
+                        // keep the stock folder icon.
+                        if (!btn.folderCover.empty()) {
+                            HICON ic = appIconCache_.TryGet(btn.folderCover, iconSz);
+                            if (ic) btn.icon = ic;
+                        }
+                    } else {
+                        btn.icon = appIconCache_.TryGet(btn.exePath, iconSz);
+                    }
+                }
                 InvalidateRect(hwnd_, nullptr, FALSE);
             }
         } else {
@@ -3094,7 +3484,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         LayoutButtons();
         // Reload icons at the new DPI scale so they stay crisp.
         for (auto& e : appEntries_) e.icon = nullptr;
-        for (auto& btn : pinnedButtons_) btn.icon = nullptr;
+        for (auto& btn : pinnedButtons_) if (!btn.isFolder) btn.icon = nullptr;
         appIconCache_.Clear();
         StartIconLoadThread();
         tracker_.SetIconSize(Scale(settings_.appButtonIconSize, dpi_));
@@ -3184,7 +3574,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             return 0;
         case IDM_REBUILD_ICON_CACHE:
             for (auto& e : appEntries_) e.icon = nullptr;
-            for (auto& btn : pinnedButtons_) btn.icon = nullptr;
+            for (auto& btn : pinnedButtons_) if (!btn.isFolder) btn.icon = nullptr;
             appIconCache_.Clear();
             StartIconLoadThread();
             return 0;
@@ -3239,6 +3629,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         trayIcons_.clear();
         for (auto& e : hiddenTrayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
         hiddenTrayIcons_.clear();
+        if (folderIcon_) { DestroyIcon(folderIcon_); folderIcon_ = nullptr; }
         tracker_.Shutdown();
         appBar_.Unregister();
         PostQuitMessage(0);

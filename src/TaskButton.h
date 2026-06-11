@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <string>
+#include <vector>
 #include "Theme.h"
 #include "Dpi.h"
 #include "Settings.h"
@@ -41,6 +42,18 @@ struct TaskButton {
     bool         isPinned   = false;
     bool         isActive   = false;
     bool         iconOnly   = false;  // draw only icon, centered (no text)
+
+    // Pinned folders: a folder is a pinned button that groups other pinned apps
+    // (see PinnedFolder.h). When isFolder is true, exePath is empty; folderName /
+    // folderChildren hold the contents and icon is the stock folder icon.
+    bool                      isFolder = false;
+    std::wstring              folderName;
+    std::vector<std::wstring> folderChildren;  // child app paths
+    std::wstring              folderCover;      // child path whose icon overrides the folder icon (empty = default)
+    // Exact pin-list string this button was built from (app: the path; folder:
+    // the encoded token). Identity used for order-persistence and move operations.
+    std::wstring              pinToken;
+
     int          iconDrawSz = 16;     // logical icon draw size in px
     HMONITOR     lastKnownMonitor = nullptr;  // monitor while non-minimized; reused when minimized
     POINT        minTarget = { 0x7FFFFFFF, 0x7FFFFFFF };  // last ptMinPosition we wrote (sentinel = none)

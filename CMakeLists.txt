@@ -35,6 +35,10 @@ if(MSVC AND ENABLE_MSVC_ANALYZE)
     add_compile_options(/analyze)
 endif()
 
+# Last-resort crash reporter: on an unhandled fault, append a symbolized stack
+# trace to winzoo-crash.txt next to the exe. Disable with -DWINZOO_CRASH_HANDLER=OFF.
+option(WINZOO_CRASH_HANDLER "Build the unhandled-exception crash reporter" ON)
+
 configure_file(
     ${CMAKE_SOURCE_DIR}/res/winzoo_embed.rc.in
     ${CMAKE_BINARY_DIR}/winzoo_embed.rc
@@ -63,6 +67,7 @@ set(SOURCES
     src/DragController.cpp
     src/PopupMenu.cpp
     src/SettingsDialog.cpp
+    src/InputDialog.cpp
     src/Registry.cpp
     src/AppBar.cpp
     src/Renderer.cpp
@@ -82,6 +87,10 @@ set(SOURCES
     ${CMAKE_BINARY_DIR}/winzoo_embed.rc
 )
 
+if(WINZOO_CRASH_HANDLER)
+    list(APPEND SOURCES src/CrashHandler.cpp)
+endif()
+
 add_subdirectory(src/winzoo_com)
 
 add_executable(winzoo WIN32 ${SOURCES})
@@ -90,6 +99,18 @@ target_include_directories(winzoo PRIVATE src res ${CMAKE_BINARY_DIR})
 target_link_libraries(winzoo PRIVATE
     user32 gdi32 shell32 comctl32 advapi32 shlwapi dwmapi uxtheme comdlg32 ole32 uuid psapi propsys wlanapi
 )
+
+if(WINZOO_CRASH_HANDLER)
+    target_compile_definitions(winzoo PRIVATE WINZOO_CRASH_HANDLER)
+    target_link_libraries(winzoo PRIVATE dbghelp)
+    # Emit a .pdb even for Release so the crash-report stack trace carries real
+    # function names + source lines (without it, frames show only module+offset).
+    # /OPT:REF,ICF undo the optimization /DEBUG would otherwise disable.
+    if(MSVC)
+        target_compile_options(winzoo PRIVATE $<$<CONFIG:Release>:/Zi>)
+        target_link_options(winzoo PRIVATE $<$<CONFIG:Release>:/DEBUG /OPT:REF /OPT:ICF>)
+    endif()
+endif()
 
 set_target_properties(winzoo PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"

@@ -21,7 +21,7 @@ struct Settings { // NOLINT(bugprone-exception-escape) — default ctor can thro
     TaskbarMonitorMode taskbarMonitorMode        = TaskbarMonitorMode::AllMonitors;
     bool               showAppMenuOnAllMonitors  = true;
     bool               showCurrentMonitorAppsOnly = true;
-    int             maxButtonWidth    = 200;
+    int             maxButtonWidth    = 180;
     int             minButtonWidth    = 48;
     int             appButtonIconSize = 48;
     bool            middleClickClose  = true;

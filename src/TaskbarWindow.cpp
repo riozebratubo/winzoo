@@ -1365,7 +1365,17 @@ void TaskbarWindow::UpdateMinimizeTargets()
         // Only windows with a laid-out button on THIS bar, and only while non-minimized
         // (so we set the target before the next minimize; touching an already-minimized
         // window's placement risks a visible jump/restore).
-        if (!btn.hwnd || IsRectEmpty(&btn.rect) || IsIconic(btn.hwnd))
+        //
+        // Skip SNAPPED (arranged) windows: GetWindowPlacement reports showCmd ==
+        // SW_SHOWNORMAL with rcNormalPosition holding the *floating* restore rect, so the
+        // SetWindowPlacement below — even though it only means to set ptMinPosition — yanks
+        // the window out of its snapped position and back to the floating rect (un-snapped,
+        // with gaps). LayoutButtons runs on every window open/close, so without this guard
+        // any tracked snapped window gets un-snapped whenever the button row reflows. Same
+        // rationale as the minimize path in ActivateButton; the minimize animation isn't
+        // aimed for snapped windows anyway, so there's nothing lost by not setting a target.
+        if (!btn.hwnd || IsRectEmpty(&btn.rect) || IsIconic(btn.hwnd) ||
+            IsWindowArranged(btn.hwnd))
             continue;
 
         bool owns = perMonitor

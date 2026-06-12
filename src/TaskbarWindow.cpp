@@ -3594,6 +3594,20 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         HDC hdc = GetDC(hwnd_);
         renderer_.Resize(client.right, client.bottom, hdc);
         ReleaseDC(hwnd_, hdc);
+
+        // A topology change invalidates HMONITOR handles. We re-bind this bar's own
+        // hMonitor_ by stable device name above, but each task button still caches the
+        // PRE-change handle of its window's monitor in lastKnownMonitor. The monitor
+        // filter compares wmon == hMonitor_, and for a minimized window we deliberately
+        // never take a fresh live read (its off-screen rect is garbage) — so that stale
+        // handle would fail the compare and hide every minimized window whose monitor's
+        // handle changed across the drop/reconnect (only the non-minimized buttons would
+        // survive a sleep/wake until winzoo is restarted). Drop the caches so the filter
+        // re-derives against the new topology: a live read while on-screen, or the
+        // restore rect (GetWindowPlacement) while minimized.
+        for (auto& btn : tracker_.MutableButtons())
+            btn.lastKnownMonitor = nullptr;
+
         LayoutButtons();
         return 0;
     }

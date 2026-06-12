@@ -213,6 +213,16 @@ void PopupMenu::Paint(HDC hdc, int w, int h)
 
 int PopupMenu::HitTestItem(POINT ptClient) const
 {
+    // The menu holds mouse capture, so coordinates can fall outside the client area
+    // (e.g. clicking beside the menu). Reject anything outside the client rect before
+    // mapping to a row — checking only Y would let a click left/right of the menu, or
+    // just above it (negative Y truncates to row 0), select an item.
+    RECT rc;
+    if (!GetClientRect(hwnd_, &rc)) return -1;
+    if (ptClient.x < rc.left || ptClient.x >= rc.right ||
+        ptClient.y < rc.top  || ptClient.y >= rc.bottom)
+        return -1;
+
     int itemH = ItemHeight();
     int idx   = ptClient.y / itemH;
     if (idx < 0 || std::cmp_greater_equal(idx, items_.size())) return -1;

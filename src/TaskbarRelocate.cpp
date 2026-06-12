@@ -210,6 +210,11 @@ bool RelocateExplorerTaskbarToMatch(TaskbarPosition position)
     RegCloseKey(hKey);
 
     // Explorer reads StuckRects3 only at shell startup, so it must restart to apply.
+    return RestartExplorer();
+}
+
+bool RestartExplorer()
+{
     HWND tray = FindExplorerTray();
     if (!tray) return false;
 

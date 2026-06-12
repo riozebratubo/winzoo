@@ -5,6 +5,7 @@
 #include <commdlg.h>
 #include <uxtheme.h>
 #include "Registry.h"
+#include "ExplorerRibbon.h"
 #include "resource.h"
 
 static constexpr const wchar_t* kPositions[] = {
@@ -545,6 +546,34 @@ static void SetupVisualTab(HWND hwndDlg, DlgData* data, int panelW, int panelH)
     (void)hColorBtn;
     y += rowH + mgn;
 
+    // Checkbox: "Restore Windows 10 File Explorer ribbon" — StartAllBack-style toggle that
+    // reverts folder windows to the Windows 10 ribbon via an HKCU CLSID redirect (see
+    // ExplorerRibbon). The live registry is the source of truth, so it is initialized from
+    // ExplorerRibbon::IsEnabled() and applied (with an Explorer restart) on OK — it is not
+    // stored in winzoo Settings.
+    {
+        int chk2H = px(13);
+        HWND hRibbon = CreateWindowExW(0, L"BUTTON", L"Restore Windows 10 File Explorer ribbon",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+            mgn, y, panelW - 2*mgn, chk2H,
+            hPanel,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_CHECK_WIN10_RIBBON)),
+            hInst, nullptr);
+        if (hFont && hRibbon) SendMessageW(hRibbon, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), FALSE);
+        SetWindowTheme(hRibbon, L"", L"");
+        y += chk2H + px(2);
+
+        int capH = px(24);
+        HWND hCap = CreateWindowExW(0, L"STATIC",
+            L"Restarts Explorer to apply. Removes File Explorer tabs and may stop "
+            L"working after a Windows update.",
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            mgn + px(14), y, panelW - 2*mgn - px(14), capH,
+            hPanel, nullptr, hInst, nullptr);
+        if (hFont && hCap) SendMessageW(hCap, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), FALSE);
+        y += capH + px(8);
+    }
+
     // Set initial control states
     data->selectedTheme = static_cast<int>(data->settings->theme);
     CheckDlgButton(hPanel, IDC_CHECK_CUSTOM_TASKBAR_COLOR,
@@ -553,6 +582,9 @@ static void SetupVisualTab(HWND hwndDlg, DlgData* data, int panelW, int panelH)
                  data->settings->useCustomTaskbarColor ? TRUE : FALSE);
     SetCustomThemeControlsEnabled(hPanel,
                  data->settings->theme == ThemePreset::Custom);
+    // Reflect the actual OS state (not a Settings flag).
+    CheckDlgButton(hPanel, IDC_CHECK_WIN10_RIBBON,
+                   ExplorerRibbon::IsEnabled() ? BST_CHECKED : BST_UNCHECKED);
 
     // Set up scroll info based on content height
     SCROLLINFO si = {};
@@ -610,6 +642,10 @@ static void ApplySettingsToControls(HWND hwnd, DlgData* data)
         SetCustomThemeControlsEnabled(hVis, s.theme == ThemePreset::Custom);
         InvalidateRect(GetDlgItem(hVis, IDC_BTN_CUSTOM_THEME_BG),     nullptr, FALSE);
         InvalidateRect(GetDlgItem(hVis, IDC_BTN_CUSTOM_THEME_ACCENT), nullptr, FALSE);
+        // Not a Settings value — mirror the live OS state so "Reset to defaults" leaves the
+        // File Explorer ribbon untouched and the checkbox keeps showing reality.
+        CheckDlgButton(hVis, IDC_CHECK_WIN10_RIBBON,
+                       ExplorerRibbon::IsEnabled() ? BST_CHECKED : BST_UNCHECKED);
     }
 
     // System Tray tab
@@ -1798,6 +1834,26 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
                 data->settings->appMenuClassicShowRun         = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_RUN)      == BST_CHECKED;
                 data->settings->appMenuClassicShowShutDown    = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_CLASSIC_SHUTDOWN) == BST_CHECKED;
                 data->settings->appMenuPinnedPerMonitor       = IsDlgButtonChecked(hAm, IDC_CHECK_APPMENU_PINNED_PER_MONITOR) == BST_CHECKED;
+            }
+
+            // Windows 10 File Explorer ribbon — applied directly to the OS (HKCU CLSID
+            // redirect), not stored in Settings. Only act, and only restart Explorer, when
+            // the user actually changed the toggle.
+            if (hVis) {
+                bool wantRibbon = IsDlgButtonChecked(hVis, IDC_CHECK_WIN10_RIBBON) == BST_CHECKED;
+                if (wantRibbon != ExplorerRibbon::IsEnabled()) {
+                    int r = MessageBoxW(hwnd,
+                        wantRibbon
+                          ? L"This restores the Windows 10 File Explorer ribbon and restarts "
+                            L"Windows Explorer now.\n\nFile Explorer tabs will be unavailable "
+                            L"while this is on, and it may stop working after a Windows update.\n\n"
+                            L"Continue?"
+                          : L"This restores the default Windows 11 File Explorer and restarts "
+                            L"Windows Explorer now.\n\nContinue?",
+                        L"Restart Windows Explorer?", MB_OKCANCEL | MB_ICONWARNING);
+                    if (r == IDOK)
+                        ExplorerRibbon::Apply(wantRibbon);
+                }
             }
 
             EndDialog(hwnd, IDOK);

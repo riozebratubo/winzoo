@@ -235,6 +235,9 @@
 #define IDC_CHECK_CUSTOM_TASKBAR_COLOR      1200
 #define IDC_BTN_CUSTOM_TASKBAR_COLOR        1201
 
+// Visual tab — restore Windows 10 File Explorer ribbon (StartAllBack-style)
+#define IDC_CHECK_WIN10_RIBBON              1331
+
 // Visual tab — "Custom" theme base color pickers (shown when the Custom theme is selected)
 #define IDC_LBL_CUSTOM_THEME_BG             1327
 #define IDC_BTN_CUSTOM_THEME_BG             1328

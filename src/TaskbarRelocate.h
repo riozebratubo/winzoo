@@ -16,6 +16,14 @@
 // was relocated/restarted.
 bool RelocateExplorerTaskbarToMatch(TaskbarPosition position);
 
+// Gracefully restart explorer.exe (the shell): post the hidden "exit Explorer" command so
+// it closes cleanly without auto-restarting, wait for the old process to exit, then relaunch
+// the shell ourselves if the system didn't. Used whenever a change requires Explorer to
+// re-read configuration at startup — the taskbar docked edge (above) or the File Explorer
+// ribbon CLSID redirect (ExplorerRibbon). Best-effort; returns true if a restart was driven,
+// false if no tray was found or the old shell refused to exit (then nothing is changed).
+bool RestartExplorer();
+
 // SW_HIDE on Shell_TrayWnd hides the window but leaves Explorer's taskbar registered
 // as an appbar, so the shell keeps reserving its strip of the work area — windows
 // behave as if a taskbar is still there, and the leftover appbar keeps reasserting its

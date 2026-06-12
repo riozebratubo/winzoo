@@ -137,6 +137,31 @@ static std::pair<std::wstring, HKL> GetCurrentInputLanguage()
     return {};
 }
 
+// Live, ground-truth session lock state — queried fresh, never cached. The WTS_SESSION_
+// LOCK/UNLOCK window messages we cache in sessionLocked_ are not reliably paired across a
+// sleep/wake cycle (an UNLOCK can be dropped or coalesced while the message pump is frozen
+// during suspend), which would otherwise leave the reconcile sweep frozen forever and the
+// task buttons permanently empty after logon. Polling this each tick lets a missed UNLOCK
+// self-heal. Sets *ok=false when the query is unavailable so the caller keeps its cached
+// value rather than guessing. true = locked, false = unlocked.
+static bool QuerySessionLocked(bool& ok)
+{
+    ok = false;
+    WTSINFOEXW* info = nullptr;
+    DWORD bytes = 0;
+    bool locked = false;
+    if (WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION,
+                                    WTSSessionInfoEx,
+                                    reinterpret_cast<LPWSTR*>(&info), &bytes)
+        && info && bytes >= sizeof(WTSINFOEXW) && info->Level == 1) {
+        // SessionFlags: WTS_SESSIONSTATE_LOCK (0) / WTS_SESSIONSTATE_UNLOCK (1) on Win10/11.
+        ok     = true;
+        locked = (info->Data.WTSInfoExLevel1.SessionFlags == WTS_SESSIONSTATE_LOCK);
+    }
+    if (info) WTSFreeMemory(info);
+    return locked;
+}
+
 static constexpr wchar_t kClassName[] = L"WinzooTaskbar";
 
 bool TaskbarWindow::RegisterWndClass(HINSTANCE hInst)
@@ -3325,6 +3350,16 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
     case WM_TIMER:
         if (wParam == kTimerActiveWindow) {
+            // Re-derive the lock state from ground truth every tick. The cached WTS_SESSION_
+            // LOCK/UNLOCK events aren't reliably paired across sleep/wake, so an UNLOCK can be
+            // lost and leave sessionLocked_ stuck true — which froze this sweep forever and
+            // left the taskbar with no app buttons after logon until winzoo was restarted.
+            // The live query overrides the cached flag (and only when it actually succeeds),
+            // so a missed unlock self-heals here within one tick.
+            bool lockQueryOk = false;
+            bool liveLocked  = QuerySessionLocked(lockQueryOk);
+            if (lockQueryOk) sessionLocked_ = liveLocked;
+
             // While locked, every default-desktop window is cloaked and fails ShouldTrack();
             // reconciling now would drop all the buttons. Skip the sweep until unlock, which
             // re-seeds from a clean state (see WM_WTSSESSION_CHANGE).

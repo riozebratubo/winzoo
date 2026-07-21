@@ -88,3 +88,8 @@ If you liked this software and would like to support its development, you can bu
 [Paypal donation](https://www.paypal.com/donate/?business=NUHKNZCBCPCLQ&no_recurring=0&currency_code=USD)
 
 ![Paypal qrcode](donations/paypal_qrcode.png)
+
+## Check out my other projects
+
+- [qt6appskeleton](https://github.com/riozebratubo/qt6appskeleton): a cross-platform Qt6 app skeleton with sqlite persistence and settings
+- [Tilecopy](https://github.com/riozebratubo/tilecopy): a windows local delta file copy tool that supports folders and raw drives

@@ -21,6 +21,7 @@
 #include "SystemStatus.h"
 #include "TrayIconProvider.h"
 #include "TaskbarProxy.h"
+#include "AppFolderWatcher.h"
 #include <vector>
 
 class TaskbarWindow {
@@ -118,6 +119,25 @@ private:
     void ComputeClockFontSizes();
     int  EffectiveThicknessPx() const;
 
+    // ── Event-driven upkeep (replaces the old 250ms/1s/2s polling timers) ────
+    // Filtered global window events pushed by WinEventNotifier (UI thread).
+    void OnWinEvent(DWORD event, HWND hwnd);
+    // Coalesce bursts of window events into one reconcile pass.
+    void ArmEventFlush(UINT delayMs = kTimerEventFlushMs);
+    // Lock-state re-derive + tracker reconcile + snapped-window refit.
+    void RunReconcilePass();
+    // Re-assert winzoo's ownership of the shell surfaces Explorer fights for.
+    void RunWatchdogPass();
+    // Run the watchdog once a second for a few ticks after a trigger event
+    // (Explorer's counter-moves can trail the event by seconds), then stop.
+    void ArmWatchdogSettle();
+    // Refresh the language indicator (HSHELL_LANGUAGE / foreground / heartbeat).
+    void UpdateInputLanguage();
+    // Arm the clock repaint for its next needed tick: every second when the
+    // format shows seconds, otherwise once at the next minute boundary.
+    void ScheduleClockTimer();
+    void InvalidateClock();   // repaint only the clock area
+
     // Combined-index helpers (0..P-1 = pinned, P..P+T-1 = task)
     int             TotalCount()        const;
     bool            IsPinnedIdx(int i)  const;
@@ -148,8 +168,9 @@ private:
         std::shared_ptr<std::atomic<bool>> done;
     };
     std::vector<AsyncWorker>       asyncWorkers_;
+    AppFolderWatcher appsWatcher_;       // Start Menu change → WM_APP_APPS_CHANGED
     std::wstring    monitorDeviceName_;
-    std::wstring    currentLangText_;    // e.g. "EN-US" — updated by kTimerActiveWindow
+    std::wstring    currentLangText_;    // e.g. "EN-US" — updated by UpdateInputLanguage()
     std::wstring    clockFitTimeFmt_;
     std::wstring    clockFitDateFmt_;
     HKL             currentHkl_      = nullptr;
@@ -186,6 +207,10 @@ private:
     UINT            appBarCallbackMsg_ = 0;
     UINT            progressRelayMsg_  = 0;
     UINT            statusUpdateMsg_   = 0;  // "WinzooStatusUpdate" from the status poller thread
+    UINT            explorerGoneMsg_   = 0;  // "WinzooExplorerGone" from TaskbarProxy's process wait
+    HPOWERNOTIFY    powerNotifyAcDc_    = nullptr;
+    HPOWERNOTIFY    powerNotifyBattery_ = nullptr;
+    int             watchdogSettleTicks_ = 0;  // remaining kTimerWatchdogSettle firings
     DWORD           menuLastClosedTick_= 0;
     int             hoveredTrayIdx_ = -1;
     int             trayDragStart_  = -1;  // index pressed
@@ -209,33 +234,48 @@ private:
     bool            trayDragging_   = false;
     bool            shutdownPending_= false;
     bool            trayPushActive_ = false;  // first WinzooTray push received → stop scraping
+    bool            eventFlushArmed_= false;  // kTimerEventFlush pending (don't re-arm)
     // True while the session is locked. While locked, the default desktop's windows are
     // cloaked/hidden by the system, so they fail ShouldTrack() and the reconcile sweep would
     // cull every button — so we freeze the sweep while locked and re-seed on unlock so the
     // buttons survive a lock/sleep cycle. Seeded by the WTS_SESSION_LOCK/UNLOCK events for
-    // immediacy, but re-derived from a live WTS query each timer tick (QuerySessionLocked)
-    // because those events aren't reliably paired across sleep/wake — a lost UNLOCK would
-    // otherwise freeze the sweep forever and leave the taskbar empty until winzoo restarts.
+    // immediacy, but re-derived from a live WTS query on every reconcile pass
+    // (QuerySessionLocked) because those events aren't reliably paired across sleep/wake —
+    // a lost UNLOCK would otherwise freeze the sweep forever and leave the taskbar empty
+    // until winzoo restarts.
     bool            sessionLocked_  = false;
 
     // Generation counters to discard stale background-thread results
     unsigned        scanGen_        = 0;
     unsigned        iconGen_        = 0;
 
-    static constexpr UINT_PTR kTimerActiveWindow = 1;
-    static constexpr UINT_PTR kTimerAppScanFirst = 2;
-    static constexpr UINT_PTR kTimerAppScan      = 3;
-    static constexpr UINT_PTR kTimerStatus       = 4;
-    static constexpr UINT_PTR kTimerTray         = 5;
-    static constexpr UINT_PTR kTimerTrayFirst    = 6;  // one-shot: first tray scrape off the WM_CREATE path
-    static constexpr UINT     kTimerIntervalMs   = 250;
-    static constexpr UINT     kTimerAppScanMs    = 30000;
-    static constexpr UINT     kTimerStatusMs     = 1000;
-    static constexpr UINT     kTimerTrayMs       = 2000;
+    // Steady-state work is event-driven (WinEvent hooks, shell hook, change
+    // notifications); the remaining timers are debounces, finite settle bursts,
+    // and slow self-heal safety nets for missed events.
+    static constexpr UINT_PTR kTimerHeartbeat       = 1;   // slow catch-all sweep
+    static constexpr UINT_PTR kTimerAppScanFirst    = 2;   // one-shot: first app scan
+    static constexpr UINT_PTR kTimerAppScan         = 3;   // rescan safety net (watcher is the trigger)
+    static constexpr UINT_PTR kTimerClock           = 4;   // clock repaint (second/minute cadence)
+    static constexpr UINT_PTR kTimerTray            = 5;   // legacy scrape fallback until first push
+    static constexpr UINT_PTR kTimerTrayFirst       = 6;   // one-shot: first tray scrape off the WM_CREATE path
+    static constexpr UINT_PTR kTimerEventFlush      = 7;   // one-shot: debounced reconcile
+    static constexpr UINT_PTR kTimerWatchdogSettle  = 8;   // finite re-assert burst
+    static constexpr UINT_PTR kTimerAppScanDebounce = 9;   // one-shot: Start Menu change → rescan
+    static constexpr UINT_PTR kTimerProgressClear   = 10;  // one-shot: repaint past progress auto-clear
+    static constexpr UINT     kTimerHeartbeatMs       = 15000;
+    static constexpr UINT     kTimerAppScanMs         = 600000;
+    static constexpr UINT     kTimerTrayMs            = 2000;
+    static constexpr UINT     kTimerEventFlushMs      = 150;
+    static constexpr UINT     kTimerStaleFollowUpMs   = 400;   // re-run reconcile while grace pending
+    static constexpr UINT     kTimerWatchdogMs        = 1000;
+    static constexpr int      kWatchdogSettleTicks    = 5;
+    static constexpr UINT     kTimerAppScanDebounceMs = 2000;
+    static constexpr UINT     kTimerProgressClearMs   = 5500;  // > TaskButton's 5s kProgressTimeout
 
     // Custom WM_APP messages posted by background threads
-    static constexpr UINT WM_APP_SCAN_DONE  = WM_APP + 1;
-    static constexpr UINT WM_APP_ICONS_DONE = WM_APP + 2;
-    static constexpr UINT WM_APP_SHOW_MENU  = WM_APP + 3;
-    static constexpr UINT WM_APP_WIN_ICON   = WM_APP + 4;  // IconCache worker → resolved window icon
+    static constexpr UINT WM_APP_SCAN_DONE    = WM_APP + 1;
+    static constexpr UINT WM_APP_ICONS_DONE   = WM_APP + 2;
+    static constexpr UINT WM_APP_SHOW_MENU    = WM_APP + 3;
+    static constexpr UINT WM_APP_WIN_ICON     = WM_APP + 4;  // IconCache worker → resolved window icon
+    static constexpr UINT WM_APP_APPS_CHANGED = WM_APP + 5;  // AppFolderWatcher → Start Menu changed
 };

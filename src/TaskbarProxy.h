@@ -32,13 +32,24 @@ public:
 private:
     static LRESULT CALLBACK ProxyWndProc(HWND, UINT, WPARAM, LPARAM);
 
+    // Threadpool wait on the hooked Explorer's process handle: the moment that
+    // Explorer exits, post the WinzooExplorerGone registered message to
+    // winzooHwnd_ so the taskbar drives its watchdog pass immediately instead
+    // of discovering the restart on a slow poll.
+    void WatchExplorerProcess(DWORD pid);
+    void CancelExplorerWatch();
+    static void CALLBACK ExplorerExitCallback(PVOID ctx, BOOLEAN timedOut);
+
     HWND         winzooHwnd_      = nullptr;
     HWND         proxyHwnd_      = nullptr;
     HWND         explorerTray_   = nullptr;
     UINT         relayMsg_       = 0;
+    UINT         explorerGoneMsg_ = 0;
     bool         registered_     = false;
     bool         updatingPosition_ = false;
     HMODULE      hHookDll_       = nullptr;
     DWORD        hookedExplorerPid_ = 0;   // pid of the Explorer we currently hook (0 = none)
+    HANDLE       explorerProc_   = nullptr;
+    HANDLE       explorerWait_   = nullptr;
     std::wstring dllPath_;
 };

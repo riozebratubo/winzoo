@@ -1,4 +1,5 @@
 #include "WindowTracker.h"
+#include "WinEventNotifier.h"   // EVENT_OBJECT_CLOAKED/UNCLOAKED fallback defines
 #include <dwmapi.h>
 #include <utility>
 
@@ -138,8 +139,66 @@ void WindowTracker::RemoveWindow(HWND hwnd)
 
     if (iconCache_) iconCache_->Evict(hwnd);
     buttons_.erase(buttons_.begin() + idx);
-    staleTicks_.erase(hwnd);
+    staleSince_.erase(hwnd);
     if (onChange_) onChange_();
+}
+
+bool WindowTracker::OnWinEvent(DWORD event, HWND hwnd)
+{
+    if (!hwnd) return false;
+
+    switch (event) {
+    case EVENT_SYSTEM_FOREGROUND: {
+        // Mirror UpdateActiveWindow()'s guard: only apply when the new
+        // foreground window is tracked. Untracked companion windows (WinUI3
+        // input sink, ApplicationFrameWindow inner frame) often take foreground
+        // right after the shell hook already pointed isActive at the correct
+        // button — don't clobber that.
+        if (FindByHwnd(hwnd) < 0) return false;
+        bool changed = false;
+        for (auto& b : buttons_) {
+            bool was = b.isActive;
+            b.isActive = (b.hwnd == hwnd);
+            if (b.isActive != was) changed = true;
+        }
+        if (changed && onChange_) onChange_();
+        return false;
+    }
+
+    case EVENT_OBJECT_DESTROY:
+        if (FindByHwnd(hwnd) < 0) return false;
+        // Like HSHELL_WINDOWDESTROYED: remove synchronously only when the
+        // window is truly gone. DESTROY also fires around a live window's
+        // minimize/restore animation; Reconcile()'s grace period handles those.
+        if (!IsWindow(hwnd)) { RemoveWindow(hwnd); return false; }
+        return true;
+
+    case EVENT_OBJECT_SHOW:
+    case EVENT_OBJECT_UNCLOAKED:
+        if (FindByHwnd(hwnd) < 0) {
+            if (ShouldTrack(hwnd)) AddWindow(hwnd);
+            return false;
+        }
+        return true;   // tracked window re-shown/uncloaked — clear its grace state
+
+    case EVENT_OBJECT_NAMECHANGE:
+        if (FindByHwnd(hwnd) >= 0) { RefreshTitle(hwnd); return false; }
+        // The "created with no title yet" case (e.g. a new Firefox window): its
+        // create notification failed ShouldTrack() and the title arrives now.
+        if (ShouldTrack(hwnd)) AddWindow(hwnd);
+        return false;
+
+    case EVENT_OBJECT_HIDE:
+    case EVENT_OBJECT_CLOAKED:
+    case EVENT_SYSTEM_MINIMIZESTART:
+    case EVENT_SYSTEM_MINIMIZEEND:
+        // Possible state/visibility change of a tracked window: let the
+        // debounced Reconcile() decide (with its removal grace period).
+        return FindByHwnd(hwnd) >= 0;
+
+    default:
+        return false;
+    }
 }
 
 void WindowTracker::UpdateActiveWindow()
@@ -258,9 +317,11 @@ void WindowTracker::OnShellMessage(WPARAM wParam, LPARAM lParam)
     }
 }
 
-void WindowTracker::Reconcile()
+bool WindowTracker::Reconcile()
 {
-    bool changed = false;
+    bool changed      = false;
+    bool pendingGrace = false;
+    const ULONGLONG now = GetTickCount64();
 
     // 1. Add any currently trackable top-level window we don't have a button for.
     //    Catches windows whose HSHELL_WINDOWCREATED arrived before they had a title
@@ -277,31 +338,37 @@ void WindowTracker::Reconcile()
     }, reinterpret_cast<LPARAM>(&ctx));
 
     // 2. Drop buttons whose window is gone, or has stayed non-trackable (hidden to
-    //    tray, moved to another virtual desktop, etc.) for kStaleThreshold consecutive
-    //    ticks. Minimized windows are explicitly preserved: a minimized window fails
-    //    ShouldTrack() (off-screen / degenerate rect, possible cloaking), but it must
-    //    keep its taskbar button — that exact case was removing buttons mid-minimize
-    //    and re-adding them on restore, which is what produced the disappear/flicker.
+    //    tray, moved to another virtual desktop, etc.) for kStaleGraceMs. Minimized
+    //    windows are explicitly preserved: a minimized window fails ShouldTrack()
+    //    (off-screen / degenerate rect, possible cloaking), but it must keep its
+    //    taskbar button — that exact case was removing buttons mid-minimize and
+    //    re-adding them on restore, which is what produced the disappear/flicker.
     for (int i = static_cast<int>(buttons_.size()) - 1; i >= 0; --i) {
         HWND h = buttons_[i].hwnd;
         bool drop = false;
         if (!IsWindow(h)) {
             drop = true;                         // truly gone — remove immediately
         } else if (IsIconic(h)) {
-            staleTicks_.erase(h);                // minimized — always keep its button
+            staleSince_.erase(h);                // minimized — always keep its button
         } else if (!ShouldTrack(h)) {
-            if (++staleTicks_[h] >= kStaleThreshold)
+            auto it = staleSince_.find(h);
+            if (it == staleSince_.end())
+                it = staleSince_.emplace(h, now).first;
+            if (now - it->second >= kStaleGraceMs)
                 drop = true;                     // non-trackable long enough — remove
+            else
+                pendingGrace = true;             // undecided — caller re-runs us soon
         } else {
-            staleTicks_.erase(h);                // healthy again — reset its grace count
+            staleSince_.erase(h);                // healthy again — reset its grace clock
         }
         if (drop) {
             if (iconCache_) iconCache_->Evict(h);
             buttons_.erase(buttons_.begin() + i);
-            staleTicks_.erase(h);
+            staleSince_.erase(h);
             changed = true;
         }
     }
 
     if (changed && onChange_) onChange_();
+    return pendingGrace;
 }

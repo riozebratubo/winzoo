@@ -30,6 +30,7 @@ LRESULT CALLBACK TaskbarProxy::ProxyWndProc(HWND hwnd, UINT msg, WPARAM wParam, 
 bool TaskbarProxy::Install(HWND winzooHwnd) {
     relayMsg_    = RegisterWindowMessageW(L"WinzooProgress");
     if (!relayMsg_) return false;
+    explorerGoneMsg_ = RegisterWindowMessageW(L"WinzooExplorerGone");
     winzooHwnd_  = winzooHwnd;
 
     // --- Extract embedded DLL to a per-launch unique path under %LOCALAPPDATA% ---
@@ -170,6 +171,7 @@ bool TaskbarProxy::EnsureExplorerHook() {
 
     fnInstall(explorerTray);
     hookedExplorerPid_ = explorerPid;
+    WatchExplorerProcess(explorerPid);
 
     // Re-broadcast so apps repopulate now that the hook is live.
     UINT taskbarCreatedMsg = RegisterWindowMessageW(L"TaskbarCreated");
@@ -177,6 +179,39 @@ bool TaskbarProxy::EnsureExplorerHook() {
         PostMessageW(HWND_BROADCAST, taskbarCreatedMsg, 0, 0);
 
     return true;
+}
+
+void TaskbarProxy::WatchExplorerProcess(DWORD pid) {
+    CancelExplorerWatch();
+    explorerProc_ = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    if (!explorerProc_) return;
+    if (!RegisterWaitForSingleObject(&explorerWait_, explorerProc_,
+                                     ExplorerExitCallback, this,
+                                     INFINITE, WT_EXECUTEONLYONCE)) {
+        explorerWait_ = nullptr;
+        CloseHandle(explorerProc_);
+        explorerProc_ = nullptr;
+    }
+}
+
+void TaskbarProxy::CancelExplorerWatch() {
+    // Blocking unregister so the callback can't touch this object afterwards.
+    if (explorerWait_) {
+        UnregisterWaitEx(explorerWait_, INVALID_HANDLE_VALUE);
+        explorerWait_ = nullptr;
+    }
+    if (explorerProc_) {
+        CloseHandle(explorerProc_);
+        explorerProc_ = nullptr;
+    }
+}
+
+VOID CALLBACK TaskbarProxy::ExplorerExitCallback(PVOID ctx, BOOLEAN /*timedOut*/) {
+    // Threadpool thread — only post. The receiver re-hooks (EnsureExplorerHook
+    // is retried from its watchdog until the new Explorer's tray exists).
+    auto* self = static_cast<TaskbarProxy*>(ctx);
+    if (self->winzooHwnd_ && self->explorerGoneMsg_)
+        PostMessageW(self->winzooHwnd_, self->explorerGoneMsg_, 0, 0);
 }
 
 void TaskbarProxy::UpdatePosition(RECT rc) {
@@ -219,6 +254,7 @@ void TaskbarProxy::UpdatePosition(RECT rc) {
 }
 
 void TaskbarProxy::Uninstall() {
+    CancelExplorerWatch();
     if (hHookDll_) {
         using FnUninstall = void (__stdcall *)();
         auto fnUninstall = reinterpret_cast<FnUninstall>(

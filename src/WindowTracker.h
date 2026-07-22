@@ -14,6 +14,11 @@ public:
     void Shutdown();
 
     void OnShellMessage(WPARAM wParam, LPARAM lParam);
+    // Push-model input from the global WinEvent hooks (WinEventNotifier).
+    // Handles what it can immediately (add/remove/title/active) and returns
+    // true when the event may need a Reconcile() pass (grace-period removals,
+    // restore-from-minimize repaints) so the owner schedules a debounced sweep.
+    bool OnWinEvent(DWORD event, HWND hwnd);
     void UpdateActiveWindow();
 
     // Pixel size at which window icons are captured. Set this to the on-screen
@@ -27,11 +32,15 @@ public:
     // the window is gone). The icon is owned by IconCache; not copied here.
     void SetIcon(HWND hwnd, HICON icon);
 
-    // Periodic safety net: shell-hook messages are unreliable (windows can be
-    // created without a title yet, or destroy notifications can be missed/spurious).
+    // Safety-net sweep: shell-hook and WinEvent notifications can be missed or
+    // spurious (windows created without a title yet, events dropped under load).
     // Reconcile re-scans top-level windows, adding trackable ones we missed and
-    // dropping buttons whose window no longer exists.
-    void Reconcile();
+    // dropping buttons whose window no longer exists. Runs debounced after
+    // pushed events and on a slow heartbeat — no longer on a fast fixed timer.
+    // Returns true when some window is inside its removal grace period, i.e.
+    // another pass is needed soon to resolve it (there may be no further events
+    // for that window).
+    bool Reconcile();
 
     const std::vector<TaskButton>& Buttons()        const { return buttons_; }
     std::vector<TaskButton>&       MutableButtons()       { return buttons_; }
@@ -54,11 +63,13 @@ private:
     ChangeCallback          onChange_;
     UINT                    shellHookMsg_ = 0;
 
-    // Per-window count of consecutive Reconcile() ticks the window has been alive but
-    // not trackable (and not merely minimized). A button is only dropped once this
-    // crosses kStaleThreshold, so a momentary blip during an animation never removes it.
-    std::unordered_map<HWND, int> staleTicks_;
+    // Per-window tick (GetTickCount64) of when the window was first seen alive but
+    // not trackable (and not merely minimized). A button is only dropped once it has
+    // stayed that way for kStaleGraceMs, so a momentary blip during an animation
+    // never removes it. Time-based (not pass-counted) because Reconcile() now runs
+    // at an irregular, event-driven cadence.
+    std::unordered_map<HWND, ULONGLONG> staleSince_;
 
     int iconSizePx_ = 16;   // capture size; overwritten via SetIconSize() before Seed()
-    static constexpr int kStaleThreshold = 3;   // ~0.75s at the 250ms reconcile cadence
+    static constexpr ULONGLONG kStaleGraceMs = 800;
 };

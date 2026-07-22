@@ -4,7 +4,8 @@
 
 class AppScanner {
 public:
-    // Scans installed applications from Windows Uninstall registry keys.
-    // Returns entries sorted by name, filtered to user-visible apps only.
+    // Walks the per-user and all-users Start Menu Programs folders for .lnk
+    // entries (AppFolderWatcher watches the same roots to trigger rescans).
+    // Returns entries sorted by (folder, name), deduplicated across the roots.
     static std::vector<AppEntry> Scan();
 };

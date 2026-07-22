@@ -64,6 +64,8 @@ set(SOURCES
     src/TaskbarWindow.cpp
     src/TaskButton.cpp
     src/WindowTracker.cpp
+    src/WinEventNotifier.cpp
+    src/AppFolderWatcher.cpp
     src/DragController.cpp
     src/PopupMenu.cpp
     src/SettingsDialog.cpp

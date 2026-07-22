@@ -8,6 +8,7 @@
 #include "JumpList.h"
 #include "TaskbarRelocate.h"
 #include "WinzooTrayIpc.h"
+#include "WinEventNotifier.h"
 #include "PinnedFolder.h"
 #include "InputDialog.h"
 #include "AppTreeNode.h"
@@ -27,6 +28,13 @@
 #include <shlobj.h>
 
 #pragma comment(lib, "wtsapi32.lib")
+
+// Power-setting GUIDs for RegisterPowerSettingNotification, defined locally
+// (winnt.h only declares them under INITGUID, and no import lib carries them).
+static const GUID kGuidAcDcPowerSource =         // GUID_ACDC_POWER_SOURCE
+    { 0x5d3e9a59, 0xe9d5, 0x4b00, { 0xa6, 0xbd, 0xff, 0x34, 0xff, 0x51, 0x65, 0x48 } };
+static const GUID kGuidBatteryPercentRemaining = // GUID_BATTERY_PERCENTAGE_REMAINING
+    { 0xa7ad8041, 0xb45a, 0x4cae, { 0x87, 0xa3, 0xee, 0xcb, 0xb4, 0x68, 0xa9, 0xe1 } };
 
 // Find the live HMONITOR whose device name matches `name` (e.g. "DISPLAY1"). Monitor
 // HANDLES are invalidated whenever the display topology changes (a monitor dropping and
@@ -350,6 +358,7 @@ void TaskbarWindow::ApplySettings(const Settings& s)
     }
 
     LayoutButtons();
+    ScheduleClockTimer();   // clock visibility/format may have changed
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -719,6 +728,9 @@ void TaskbarWindow::OnTrayPush(const WinzooTrayRecord& rec, const wchar_t* tip,
     // so we hand off cleanly to a pure push model (TaskbarCreated re-adds repopulate).
     if (!trayPushActive_) {
         trayPushActive_ = true;
+        // The scrape fallback timer is dead weight from here on; dead-icon
+        // pruning moves to the heartbeat.
+        KillTimer(hwnd_, kTimerTray);
         for (auto& e : trayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
         trayIcons_.clear();
         for (auto& e : hiddenTrayIcons_) if (e.hIcon) { DestroyIcon(e.hIcon); e.hIcon = nullptr; }
@@ -2586,10 +2598,167 @@ void TaskbarWindow::StartIconLoadThread()
     });
 }
 
+// ─── Event-driven upkeep (replaces the old 250ms/1s/2s polling timers) ───────
+
+// Filtered global window events pushed by WinEventNotifier (UI thread). Must
+// stay cheap: fires for every top-level show/hide/destroy/title change
+// system-wide. Heavy work is deferred to the debounced kTimerEventFlush.
+void TaskbarWindow::OnWinEvent(DWORD event, HWND hwnd)
+{
+    if (shutdownPending_) return;
+
+    // Explorer re-showed one of its taskbars (Win11 does this on display/work-
+    // area changes) — re-hide it now instead of within the old 1s poll. Our own
+    // proxy Shell_TrayWnd never lands here (WINEVENT_SKIPOWNPROCESS).
+    if (event == EVENT_OBJECT_SHOW && isPrimary_) {
+        wchar_t cls[32] = {};
+        GetClassNameW(hwnd, cls, _countof(cls));
+        if (wcscmp(cls, L"Shell_TrayWnd") == 0 ||
+            wcscmp(cls, L"Shell_SecondaryTrayWnd") == 0) {
+            RunWatchdogPass();
+            ArmWatchdogSettle();
+            return;
+        }
+    }
+
+    if (event == EVENT_SYSTEM_FOREGROUND)
+        UpdateInputLanguage();   // keyboard layout is per-window
+
+    if (event == EVENT_SYSTEM_MOVESIZEEND) {
+        // A finished drag can leave a snapped window against a stale work area;
+        // the flush pass refits it.
+        ArmEventFlush();
+        return;
+    }
+
+    if (tracker_.OnWinEvent(event, hwnd))
+        ArmEventFlush();
+}
+
+void TaskbarWindow::ArmEventFlush(UINT delayMs)
+{
+    // Once armed, later events don't push the deadline back, so a sustained
+    // event storm can't starve the flush.
+    if (eventFlushArmed_) return;
+    eventFlushArmed_ = true;
+    SetTimer(hwnd_, kTimerEventFlush, delayMs, nullptr);
+}
+
+// One debounced pass over everything the old 250ms tick did unconditionally.
+void TaskbarWindow::RunReconcilePass()
+{
+    // Re-derive the lock state from ground truth. The cached WTS_SESSION_LOCK/
+    // UNLOCK events aren't reliably paired across sleep/wake, so an UNLOCK can
+    // be lost and leave sessionLocked_ stuck true — which would freeze the
+    // sweep and leave the taskbar with no app buttons until winzoo restarts.
+    // The live query overrides the cached flag (only when it actually
+    // succeeds), so a missed unlock self-heals on the next event or heartbeat.
+    bool lockQueryOk = false;
+    bool liveLocked  = QuerySessionLocked(lockQueryOk);
+    if (lockQueryOk) sessionLocked_ = liveLocked;
+
+    // While locked, every default-desktop window is cloaked and fails
+    // ShouldTrack(); reconciling now would drop all the buttons. Skip until
+    // unlock, which re-seeds from a clean state (see WM_WTSSESSION_CHANGE).
+    if (!sessionLocked_) {
+        // A window inside its removal grace period needs a follow-up pass to
+        // resolve (there may be no further events for it) — schedule one.
+        if (tracker_.Reconcile())
+            ArmEventFlush(kTimerStaleFollowUpMs);
+        tracker_.UpdateActiveWindow();
+    }
+    // Snapped windows are laid out against a stale work area and stop short of
+    // the bar; pull them down to the corrected edge. Cheap and guarded — only
+    // resizes a window that actually fell short on our reserved edge.
+    if (settings_.position != TaskbarPosition::Floating)
+        appBar_.RefitArrangedWindows();
+}
+
+// Re-assert winzoo's ownership of the shell surfaces Explorer keeps fighting
+// for. Every step is idempotent/cheap when nothing drifted. Runs off events
+// (WM_SETTINGCHANGE, WM_DISPLAYCHANGE, TaskbarCreated, Explorer exit, a
+// re-shown Shell_TrayWnd) plus the heartbeat — no longer once a second.
+void TaskbarWindow::RunWatchdogPass()
+{
+    if (isPrimary_) {
+        // Windows 11 re-shows Explorer's taskbars (especially the secondary-
+        // monitor ones) on display/work-area changes, and SW_HIDE at startup
+        // doesn't stick. One bar drives this; the sweep covers all monitors.
+        HideExplorerTaskbars();
+        // Explorer re-asserts its hidden taskbar's work-area reservation on
+        // monitors with no winzoo bar; only the primary sweep covers them all.
+        ReclaimUnoccupiedWorkAreas();
+        // Re-hooks a restarted Explorer (pid change); cheap when already hooked.
+        proxy_.EnsureExplorerHook();
+        // DWM aims minimize animations at Explorer's hidden Shell_TrayWnd rect;
+        // a fresh Explorer re-docks it to its own edge, so re-assert ours.
+        RECT prc;
+        GetWindowRect(hwnd_, &prc);
+        proxy_.UpdatePosition(prc);
+    }
+    // Re-assert this monitor's work-area reservation in case the shell
+    // re-stacked its own taskbar strip under ours. SetPosition is idempotent,
+    // so this only re-corrects the work area when it drifted.
+    if (settings_.position != TaskbarPosition::Floating)
+        appBar_.SetPosition(settings_.position, EffectiveThicknessPx());
+}
+
+void TaskbarWindow::ArmWatchdogSettle()
+{
+    watchdogSettleTicks_ = kWatchdogSettleTicks;
+    SetTimer(hwnd_, kTimerWatchdogSettle, kTimerWatchdogMs, nullptr);
+}
+
+void TaskbarWindow::UpdateInputLanguage()
+{
+    if (!settings_.showLangIndicator) return;
+    auto [newText, newHkl] = GetCurrentInputLanguage();
+    if (newText != currentLangText_) {
+        currentLangText_ = newText;
+        currentHkl_      = newHkl;
+        LayoutButtons();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    } else {
+        currentHkl_ = newHkl;
+    }
+}
+
+void TaskbarWindow::ScheduleClockTimer()
+{
+    if (!settings_.showClock) {
+        KillTimer(hwnd_, kTimerClock);
+        return;
+    }
+    UINT delay;
+    if (settings_.clockTimeFormat.find(L"$ss") != std::wstring::npos) {
+        delay = 1000;
+    } else {
+        // No seconds shown — one tick at the next minute boundary suffices.
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        delay = (60u - st.wSecond) * 1000u - st.wMilliseconds + 50u;
+        if (delay < 250) delay = 250;
+    }
+    SetTimer(hwnd_, kTimerClock, delay, nullptr);
+}
+
+void TaskbarWindow::InvalidateClock()
+{
+    // Only the clock area — the old per-second tick repainted the whole bar.
+    if (!settings_.showClock || IsRectEmpty(&clockRect_)) return;
+    InvalidateRect(hwnd_, &clockRect_, FALSE);
+}
+
 LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     // Dynamic message registration checks
     if (shellHookMsg_ && uMsg == shellHookMsg_) {
+        if ((wParam & 0x7FFF) == HSHELL_LANGUAGE) {
+            // Input language changed (or focus moved to a window with another
+            // layout) — replaces the old 250ms language poll.
+            UpdateInputLanguage();
+            return 0;
+        }
         tracker_.OnShellMessage(wParam, lParam);
         InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
@@ -2606,6 +2775,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 btn.progress.percent          = percent;
                 btn.progress.lastProgressTick = (state != kTBPF_NOPROGRESS) ? GetTickCount() : 0;
                 InvalidateRect(hwnd, nullptr, FALSE);
+                // The bar auto-clears 5s after the last update (TaskButton's
+                // kProgressTimeout) but only visibly on a repaint; with the
+                // idle 1s tick gone, arm one final repaint past that deadline.
+                SetTimer(hwnd_, kTimerProgressClear, kTimerProgressClearMs, nullptr);
                 break;
             }
         }
@@ -2636,6 +2809,20 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             // The freshly recreated Explorer taskbars re-reserved their strips; reclaim the
             // work area on any monitor winzoo has no bar on. One bar drives the global sweep.
             ReclaimUnoccupiedWorkAreas();
+        }
+        // Explorer keeps re-asserting for a few seconds after a restart —
+        // drive the watchdog through that window, then go quiet again.
+        ArmWatchdogSettle();
+        return 0;
+    }
+    if (explorerGoneMsg_ && uMsg == explorerGoneMsg_) {
+        // The hooked Explorer process exited (posted by TaskbarProxy's process
+        // wait). The new instance will broadcast TaskbarCreated when its tray
+        // exists, but drive the watchdog meanwhile: hide ghost taskbars,
+        // reclaim work areas, and re-hook as soon as the new tray appears.
+        if (isPrimary_) {
+            RunWatchdogPass();
+            ArmWatchdogSettle();
         }
         return 0;
     }
@@ -2757,9 +2944,31 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (!pinnedButtons_.empty())
             StartIconLoadThread();
         LayoutButtons();
-        SetTimer(hwnd, kTimerActiveWindow, kTimerIntervalMs, nullptr);
+
+        // Push model for window changes: global out-of-context WinEvent hooks
+        // replace the old fixed 250ms EnumWindows sweep. The shell hook above
+        // stays as a second event source; Reconcile() now runs debounced off
+        // these events plus the slow heartbeat safety net.
+        WinEventNotifier::Register(this, [this](const WinEventInfo& e) {
+            OnWinEvent(e.event, e.hwnd);
+        });
+        // Start Menu changes trigger the app rescan (kTimerAppScan is only a
+        // slow safety net now).
+        appsWatcher_.Start(hwnd, WM_APP_APPS_CHANGED);
+        explorerGoneMsg_ = RegisterWindowMessageW(L"WinzooExplorerGone");
+        // Battery/AC changes arrive as WM_POWERBROADCAST; forward them to the
+        // status poller. One bar (the primary) is enough — the poller updates
+        // every bar.
+        if (isPrimary_) {
+            powerNotifyAcDc_    = RegisterPowerSettingNotification(
+                hwnd, &kGuidAcDcPowerSource, DEVICE_NOTIFY_WINDOW_HANDLE);
+            powerNotifyBattery_ = RegisterPowerSettingNotification(
+                hwnd, &kGuidBatteryPercentRemaining, DEVICE_NOTIFY_WINDOW_HANDLE);
+        }
+
+        SetTimer(hwnd, kTimerHeartbeat, kTimerHeartbeatMs, nullptr);
         SetTimer(hwnd, kTimerAppScanFirst, 500, nullptr);
-        SetTimer(hwnd, kTimerStatus, kTimerStatusMs, nullptr);
+        ScheduleClockTimer();
         SetTimer(hwnd, kTimerTray, kTimerTrayMs, nullptr);
         // Status data comes from the background poller (started in App::Init) —
         // polling here would block first paint on cold NLM/WLAN/MMDevice COM
@@ -3349,39 +3558,34 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     }
 
     case WM_TIMER:
-        if (wParam == kTimerActiveWindow) {
-            // Re-derive the lock state from ground truth every tick. The cached WTS_SESSION_
-            // LOCK/UNLOCK events aren't reliably paired across sleep/wake, so an UNLOCK can be
-            // lost and leave sessionLocked_ stuck true — which froze this sweep forever and
-            // left the taskbar with no app buttons after logon until winzoo was restarted.
-            // The live query overrides the cached flag (and only when it actually succeeds),
-            // so a missed unlock self-heals here within one tick.
-            bool lockQueryOk = false;
-            bool liveLocked  = QuerySessionLocked(lockQueryOk);
-            if (lockQueryOk) sessionLocked_ = liveLocked;
-
-            // While locked, every default-desktop window is cloaked and fails ShouldTrack();
-            // reconciling now would drop all the buttons. Skip the sweep until unlock, which
-            // re-seeds from a clean state (see WM_WTSSESSION_CHANGE).
-            if (!sessionLocked_)
-                tracker_.Reconcile();
-            tracker_.UpdateActiveWindow();
-            // Snapped windows are laid out against a stale work area and stop short of the
-            // bar; pull them down to the corrected edge. Cheap and guarded — only resizes a
-            // window that actually fell short on our reserved edge.
-            if (settings_.position != TaskbarPosition::Floating)
-                appBar_.RefitArrangedWindows();
-            if (settings_.showLangIndicator) {
-                auto [newText, newHkl] = GetCurrentInputLanguage();
-                if (newText != currentLangText_) {
-                    currentLangText_ = newText;
-                    currentHkl_      = newHkl;
-                    LayoutButtons();
-                } else {
-                    currentHkl_ = newHkl;
-                }
-            }
+        if (wParam == kTimerHeartbeat) {
+            // Slow self-heal sweep. All steady-state work is event-driven now
+            // (WinEvent hooks, shell hook, WM_SETTINGCHANGE, change/push
+            // notifications); this tick only recovers from missed events —
+            // WinEvents dropped under load, a lost WTS unlock across
+            // sleep/wake, Explorer re-asserting without a catchable signal, a
+            // tray owner that crashed without NIM_DELETE.
+            RunReconcilePass();
+            UpdateInputLanguage();
+            RunWatchdogPass();
+            if (trayPushActive_) PruneDeadTrayIcons();
+            EnsureNetworkTrayIcon();
             InvalidateRect(hwnd, nullptr, FALSE);
+        } else if (wParam == kTimerEventFlush) {
+            // Debounced response to pushed window events.
+            KillTimer(hwnd, kTimerEventFlush);
+            eventFlushArmed_ = false;
+            RunReconcilePass();
+            InvalidateRect(hwnd, nullptr, FALSE);
+        } else if (wParam == kTimerClock) {
+            InvalidateClock();
+            ScheduleClockTimer();   // re-arm: next second or next minute boundary
+        } else if (wParam == kTimerWatchdogSettle) {
+            // Finite re-assert burst after a display/work-area/Explorer change;
+            // Explorer's counter-moves can trail the trigger by seconds.
+            RunWatchdogPass();
+            if (--watchdogSettleTicks_ <= 0)
+                KillTimer(hwnd, kTimerWatchdogSettle);
         } else if (wParam == kTimerAppScanFirst) {
             KillTimer(hwnd, kTimerAppScanFirst);
             StartScanThread(true);
@@ -3392,48 +3596,25 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             EnsureNetworkTrayIcon();
         } else if (wParam == kTimerAppScan) {
             StartScanThread(false);
-        } else if (wParam == kTimerStatus) {
-            // Safety net: Windows 11 re-shows Explorer's taskbars (especially the
-            // secondary-monitor ones) on display/work-area changes, and SW_HIDE at
-            // startup doesn't stick. Re-hide any that reappeared. One bar drives this so
-            // the monitors aren't swept redundantly; the sweep itself covers all of them.
-            if (isPrimary_) HideExplorerTaskbars();
-            // Re-reclaim the work area on monitors with no winzoo bar — Explorer re-asserts
-            // its hidden taskbar's reservation on display/work-area changes, and only the
-            // primary sweep covers all monitors at once. No-op when every monitor is occupied.
-            if (isPrimary_) ReclaimUnoccupiedWorkAreas();
-            // Ensure the injected Explorer hook is installed. The initial install at
-            // startup races Explorer's restart (Winzoo relocates+restarts it), and the
-            // TaskbarCreated broadcast can land before our window exists — so poll here.
-            // EnsureExplorerHook is cheap when already hooked and also re-hooks a
-            // restarted Explorer (pid change), so this doubles as restart recovery.
-            if (isPrimary_) proxy_.EnsureExplorerHook();
-            // Re-assert Explorer's hidden Shell_TrayWnd onto winzoo's rect every tick.
-            // DWM reads that window's screen rect to aim the minimize animation; a fresh
-            // Explorer (after our restart) re-docks its tray to its own edge AFTER our
-            // one-time move, so without this every window animates to the wrong edge.
-            if (isPrimary_) {
-                RECT prc; GetWindowRect(hwnd_, &prc);
-                proxy_.UpdatePosition(prc);
-            }
-            // Re-assert this monitor's work-area reservation in case the shell re-stacked
-            // its own taskbar strip under ours. SetPosition is now idempotent for the
-            // appbar/window itself, so this only re-corrects the work area when it drifted.
-            if (settings_.position != TaskbarPosition::Floating)
-                appBar_.SetPosition(settings_.position, EffectiveThicknessPx());
-            // Status data arrives via WinzooStatusUpdate from the poller thread;
-            // this tick only drives the clock repaint now.
-            InvalidateRect(hwnd, nullptr, FALSE);
+        } else if (wParam == kTimerAppScanDebounce) {
+            // Start Menu change notifications settled — rescan once.
+            KillTimer(hwnd, kTimerAppScanDebounce);
+            StartScanThread(false);
         } else if (wParam == kTimerTray) {
-            // Push model (winzoo_com.dll) is authoritative once active — just prune
-            // icons whose owner crashed without sending NIM_DELETE. Until the first
-            // push arrives, fall back to the legacy cross-process scrape so the tray
+            // Legacy cross-process scrape — fallback only until the first
+            // winzoo_com.dll push arrives (OnTrayPush kills this timer; the
+            // heartbeat prunes dead icons from then on). Kept so the tray
             // still works if injection failed on this build.
-            if (trayPushActive_)
-                PruneDeadTrayIcons();
-            else
+            if (trayPushActive_) {
+                KillTimer(hwnd, kTimerTray);
+            } else {
                 RefreshTrayIcons();
-            EnsureNetworkTrayIcon();  // keep the synthetic Win11 network icon present/pinned
+                EnsureNetworkTrayIcon();
+            }
+        } else if (wParam == kTimerProgressClear) {
+            // One repaint past the progress bar's 5s auto-clear deadline.
+            KillTimer(hwnd, kTimerProgressClear);
+            InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
 
@@ -3609,6 +3790,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             btn.lastKnownMonitor = nullptr;
 
         LayoutButtons();
+        // Explorer re-shows taskbars and re-reserves work areas for several
+        // seconds after a topology change; drive the watchdog through it and
+        // refit snapped windows against the new work areas.
+        ArmEventFlush();
+        ArmWatchdogSettle();
         return 0;
     }
 
@@ -3653,28 +3839,82 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         }
         break;
 
+    case WM_SETTINGCHANGE:
+        // A work-area change we didn't initiate (all winzoo writes are silent —
+        // no SPIF_SENDCHANGE anywhere in this codebase) means the shell
+        // re-reserved something: refit snapped windows and re-assert ours.
+        if (wParam == SPI_SETWORKAREA) {
+            ArmEventFlush();
+            // Every bar re-asserts its own appbar strip; the primary-only
+            // work inside the pass is gated there.
+            ArmWatchdogSettle();
+        }
+        break;   // let DefWindowProc see it too
+
+    case WM_TIMECHANGE:
+        // System clock changed — repaint now and re-aim the minute-boundary timer.
+        InvalidateClock();
+        ScheduleClockTimer();
+        return 0;
+
+    case WM_POWERBROADCAST:
+        if (wParam == PBT_APMRESUMEAUTOMATIC || wParam == PBT_APMRESUMESUSPEND) {
+            // Wake from sleep: WTS lock/unlock events may have been coalesced
+            // away and the clock timer fired late — re-derive everything now.
+            ArmEventFlush();
+            ArmWatchdogSettle();
+            ScheduleClockTimer();
+            RequestSystemStatusRefresh();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        } else if (wParam == PBT_APMPOWERSTATUSCHANGE || wParam == PBT_POWERSETTINGCHANGE) {
+            // AC/DC flip or battery-percent change — take a fresh status snapshot.
+            RequestSystemStatusRefresh();
+        }
+        return TRUE;
+
+    case WM_APP_APPS_CHANGED:
+        // Start Menu contents changed (AppFolderWatcher). Installers touch many
+        // files in a burst — debounce, then rescan once it quiets down.
+        SetTimer(hwnd_, kTimerAppScanDebounce, kTimerAppScanDebounceMs, nullptr);
+        return 0;
+
     case WM_WTSSESSION_CHANGE:
         if (wParam == WTS_SESSION_LOCK) {
             sessionLocked_ = true;
         } else if (wParam == WTS_SESSION_UNLOCK) {
             sessionLocked_ = false;
             // Re-seed immediately: windows are uncloaked again, so this re-adds any button
-            // that was missed and resets the stale-tick counters, rather than waiting for
-            // the next sweep. LayoutButtons + repaint happen via the tracker's change cb.
-            tracker_.Reconcile();
+            // that was missed and resets the grace clocks, rather than waiting for the
+            // next sweep. LayoutButtons + repaint happen via the tracker's change cb.
+            if (tracker_.Reconcile())
+                ArmEventFlush(kTimerStaleFollowUpMs);
             tracker_.UpdateActiveWindow();
         }
         return 0;
 
     case WM_DESTROY:
         shutdownPending_ = true;
+        WinEventNotifier::Unregister(this);
+        appsWatcher_.Stop();
+        if (powerNotifyAcDc_) {
+            UnregisterPowerSettingNotification(powerNotifyAcDc_);
+            powerNotifyAcDc_ = nullptr;
+        }
+        if (powerNotifyBattery_) {
+            UnregisterPowerSettingNotification(powerNotifyBattery_);
+            powerNotifyBattery_ = nullptr;
+        }
         WTSUnRegisterSessionNotification(hwnd);
-        KillTimer(hwnd, kTimerActiveWindow);
+        KillTimer(hwnd, kTimerHeartbeat);
         KillTimer(hwnd, kTimerAppScanFirst);
         KillTimer(hwnd, kTimerAppScan);
-        KillTimer(hwnd, kTimerStatus);
+        KillTimer(hwnd, kTimerClock);
         KillTimer(hwnd, kTimerTray);
         KillTimer(hwnd, kTimerTrayFirst);
+        KillTimer(hwnd, kTimerEventFlush);
+        KillTimer(hwnd, kTimerWatchdogSettle);
+        KillTimer(hwnd, kTimerAppScanDebounce);
+        KillTimer(hwnd, kTimerProgressClear);
         // Join the icon workers first so no further WM_APP_WIN_ICON is posted.
         iconCache_.Stop();
         // Join the app-scan / icon-load workers too. The window is still alive here

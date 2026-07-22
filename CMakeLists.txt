@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(winzoo VERSION 0.4.2 LANGUAGES CXX)
+project(winzoo VERSION 0.4.5 LANGUAGES CXX)
 
 # Version is sourced from the project(... VERSION ...) line above. project()
 # only populates three components, so default the 4th (tweak) to 0 and build a

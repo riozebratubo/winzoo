@@ -262,6 +262,7 @@ private:
     static constexpr UINT_PTR kTimerWatchdogSettle  = 8;   // finite re-assert burst
     static constexpr UINT_PTR kTimerAppScanDebounce = 9;   // one-shot: Start Menu change → rescan
     static constexpr UINT_PTR kTimerProgressClear   = 10;  // one-shot: repaint past progress auto-clear
+    static constexpr UINT_PTR kTimerTrayReregister  = 11;  // one-shot: re-broadcast TaskbarCreated once the hook is live
     static constexpr UINT     kTimerHeartbeatMs       = 15000;
     static constexpr UINT     kTimerAppScanMs         = 600000;
     static constexpr UINT     kTimerTrayMs            = 2000;
@@ -270,6 +271,7 @@ private:
     static constexpr UINT     kTimerWatchdogMs        = 1000;
     static constexpr int      kWatchdogSettleTicks    = 5;
     static constexpr UINT     kTimerAppScanDebounceMs = 2000;
+    static constexpr UINT     kTimerTrayReregisterMs  = 1500;  // delay before the tray re-registration re-broadcast
     static constexpr UINT     kTimerProgressClearMs   = 5500;  // > TaskButton's 5s kProgressTimeout
 
     // Custom WM_APP messages posted by background threads

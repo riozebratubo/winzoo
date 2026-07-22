@@ -2695,6 +2695,12 @@ void TaskbarWindow::RunWatchdogPass()
         RECT prc;
         GetWindowRect(hwnd_, &prc);
         proxy_.UpdatePosition(prc);
+        // Keep the bar Z-above our own proxy Shell_TrayWnd (same rect, topmost). The
+        // proxy never re-asserts topmost after Install, so one lift here per pass is
+        // enough to correct any slip and can't start a fight. Pure z-order change —
+        // no move/size/activate, so no repaint or flicker.
+        SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
     // Re-assert this monitor's work-area reservation in case the shell
     // re-stacked its own taskbar strip under ours. SetPosition is idempotent,
@@ -2785,6 +2791,22 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         return 0;
     }
     if (taskbarCreatedMsg_ && uMsg == taskbarCreatedMsg_) {
+        // Our own EnsureExplorerHook broadcasts TaskbarCreated after installing the
+        // Explorer hook (so apps re-register their tray icons) — including on every
+        // normal startup. Explorer did NOT restart then: the appbar and hook are
+        // healthy, and the full teardown below (Unregister/Register, forced
+        // SetWindowPos, 5s settle burst) visibly bounced maximized windows right
+        // after launch. So we skip the teardown — but we must NOT do nothing: the
+        // proxy Shell_TrayWnd is created topmost during this bar's WM_CREATE and
+        // ends up Z-ABOVE the bar. The teardown's SetWindowPos(HWND_TOPMOST) used to
+        // lift the bar back on top; without it the (unpainted) proxy occludes the
+        // bar and eats its clicks — the bar looks frozen/"hung". Re-assert just the
+        // bar's Z-order (cheap, no move/size, no flicker) to sit above the proxy.
+        if (TaskbarProxy::RecentSelfTaskbarCreated()) {
+            SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            return 0;
+        }
         // A restarted Explorer re-creates its taskbars on every monitor (primary and
         // secondary) and re-registers their appbars. Re-hide them all so they don't
         // reappear over winzoo's bars or steal the work area.
@@ -3594,6 +3616,20 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             // One-shot first scrape. Skip if the push model already took over.
             if (!trayPushActive_) RefreshTrayIcons();
             EnsureNetworkTrayIcon();
+        } else if (wParam == kTimerTrayReregister) {
+            KillTimer(hwnd, kTimerTrayReregister);
+            // Speed up tray population after the startup Explorer restart: relaunch
+            // ourselves DE-ELEVATED (medium IL, via Explorer) to broadcast
+            // TaskbarCreated. Only a medium-IL broadcast makes tray apps re-register
+            // promptly; from here the stragglers re-register at once instead of
+            // trickling in over ~30s. Mark it self-initiated first so our own bar
+            // treats the echo as benign (no teardown/flicker); see main.cpp for the
+            // helper side.
+            proxy_.MarkSelfBroadcastPending();
+            wchar_t exe[MAX_PATH] = {};
+            if (GetModuleFileNameW(nullptr, exe, MAX_PATH))
+                ShellExecuteUser(hwnd, L"open", exe, L"--rebroadcast-tray",
+                                 nullptr, SW_HIDE);
         } else if (wParam == kTimerAppScan) {
             StartScanThread(false);
         } else if (wParam == kTimerAppScanDebounce) {
@@ -3911,6 +3947,7 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         KillTimer(hwnd, kTimerClock);
         KillTimer(hwnd, kTimerTray);
         KillTimer(hwnd, kTimerTrayFirst);
+        KillTimer(hwnd, kTimerTrayReregister);
         KillTimer(hwnd, kTimerEventFlush);
         KillTimer(hwnd, kTimerWatchdogSettle);
         KillTimer(hwnd, kTimerAppScanDebounce);

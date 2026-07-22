@@ -6,6 +6,14 @@ static constexpr wchar_t kInProcKey[] =
 static constexpr wchar_t kClsidKey[] =
     L"Software\\Classes\\CLSID\\{56FDF344-FD6D-11d0-958A-006097C9A090}";
 
+DWORD TaskbarProxy::selfBroadcastTick_ = 0;
+
+bool TaskbarProxy::RecentSelfTaskbarCreated() {
+    // 3s covers winzoo's own EnsureExplorerHook broadcast round trip; the tick is
+    // cleared outright when Explorer dies, so this can't mask a real restart.
+    return selfBroadcastTick_ && GetTickCount() - selfBroadcastTick_ <= 3000;
+}
+
 // ---------------------------------------------------------------------------
 
 LRESULT CALLBACK TaskbarProxy::ProxyWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -101,8 +109,13 @@ bool TaskbarProxy::Install(HWND winzooHwnd) {
     wc.hInstance     = GetModuleHandleW(nullptr);
     wc.lpszClassName = L"Shell_TrayWnd";
     if (RegisterClassExW(&wc) || GetLastError() == ERROR_CLASS_ALREADY_EXISTS) {
+        // WS_EX_TRANSPARENT = click-through. The proxy exists only so shell32's
+        // progress code finds a "Shell_TrayWnd" (a sent message, unaffected by this)
+        // and so apps can query the tray rect; it has no interactive UI and must
+        // never swallow a mouse click meant for winzoo's bar, which shares its rect
+        // and (barring a Z-order slip) sits just above it.
         proxyHwnd_ = CreateWindowExW(
-            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
             L"Shell_TrayWnd", nullptr, WS_POPUP,
             0, 0, 0, 0, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
         if (proxyHwnd_) {
@@ -173,10 +186,14 @@ bool TaskbarProxy::EnsureExplorerHook() {
     hookedExplorerPid_ = explorerPid;
     WatchExplorerProcess(explorerPid);
 
-    // Re-broadcast so apps repopulate now that the hook is live.
+    // Re-broadcast so apps repopulate now that the hook is live. Mark it as ours
+    // first: winzoo's own TaskbarCreated handler must not mistake this broadcast
+    // for an Explorer restart and tear down / re-register its appbars.
     UINT taskbarCreatedMsg = RegisterWindowMessageW(L"TaskbarCreated");
-    if (taskbarCreatedMsg)
+    if (taskbarCreatedMsg) {
+        selfBroadcastTick_ = GetTickCount();
         PostMessageW(HWND_BROADCAST, taskbarCreatedMsg, 0, 0);
+    }
 
     return true;
 }
@@ -207,6 +224,9 @@ void TaskbarProxy::CancelExplorerWatch() {
 }
 
 VOID CALLBACK TaskbarProxy::ExplorerExitCallback(PVOID ctx, BOOLEAN /*timedOut*/) {
+    // Explorer is gone: whatever TaskbarCreated arrives next is the real thing
+    // (the new shell announcing itself), never an echo of our own broadcast.
+    selfBroadcastTick_ = 0;
     // Threadpool thread — only post. The receiver re-hooks (EnsureExplorerHook
     // is retried from its watchdog until the new Explorer's tray exists).
     auto* self = static_cast<TaskbarProxy*>(ctx);
@@ -218,7 +238,13 @@ void TaskbarProxy::UpdatePosition(RECT rc) {
     if (updatingPosition_) return;
     updatingPosition_ = true;
 
-    if (proxyHwnd_)
+    // Net-change guards throughout: this runs from every watchdog pass (heartbeat
+    // plus the 1s settle burst). Re-issuing SetWindowPos on Explorer's tray when
+    // nothing moved nudges Explorer into counter-asserting its appbar state, which
+    // the next pass then corrects — during the startup settle window that loop was
+    // visible as maximized windows flickering once a second.
+    RECT cur = {};
+    if (proxyHwnd_ && GetWindowRect(proxyHwnd_, &cur) && !EqualRect(&cur, &rc))
         SetWindowPos(proxyHwnd_, nullptr,
                      rc.left, rc.top,
                      rc.right - rc.left, rc.bottom - rc.top,
@@ -243,7 +269,7 @@ void TaskbarProxy::UpdatePosition(RECT rc) {
             if (pid != GetCurrentProcessId()) { explorerTray_ = h; break; }
         }
     }
-    if (explorerTray_) {
+    if (explorerTray_ && GetWindowRect(explorerTray_, &cur) && !EqualRect(&cur, &rc)) {
         SetWindowPos(explorerTray_, nullptr,
                      rc.left, rc.top,
                      rc.right - rc.left, rc.bottom - rc.top,

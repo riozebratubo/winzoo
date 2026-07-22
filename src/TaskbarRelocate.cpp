@@ -110,7 +110,15 @@ void HideExplorerTaskbars()
         GetWindowThreadProcessId(h, &pid);
         if (pid == myPid) continue;
         if (IsWindowVisible(h)) {
-            ShowWindow(h, SW_HIDE);
+            // Async hide: ShowWindow(SW_HIDE) on a cross-process window is a
+            // synchronous send with no timeout. During the startup tray storm
+            // Explorer's tray thread can stall for seconds (each intercepted
+            // Shell_NotifyIcon is relayed to winzoo with a bounded wait), and
+            // winzoo's UI thread must never block on it — that mutual wait is
+            // what wedged winzoo. The hide lands as soon as Explorer drains.
+            SetWindowPos(h, nullptr, 0, 0, 0, 0,
+                         SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                         SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
             RemoveShellAppBarReservation(h);
         }
     }
@@ -121,7 +129,10 @@ void HideExplorerTaskbars()
     for (HWND h = FindWindowExW(nullptr, nullptr, L"Shell_SecondaryTrayWnd", nullptr); h;
          h = FindWindowExW(nullptr, h, L"Shell_SecondaryTrayWnd", nullptr)) {
         if (IsWindowVisible(h)) {
-            ShowWindow(h, SW_HIDE);
+            // Async hide — same no-blocking rule as above.
+            SetWindowPos(h, nullptr, 0, 0, 0, 0,
+                         SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                         SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
             RemoveShellAppBarReservation(h);
         }
     }
@@ -182,6 +193,14 @@ bool RelocateExplorerTaskbarToMatch(TaskbarPosition position)
     BYTE wantEdge = 0;
     if (!EdgeByteForPosition(position, wantEdge))
         return false;  // floating — nothing to relocate
+
+    // MANDATORY on Win11 even though the edge write can't move the bottom-only taskbar:
+    // the Explorer RESTART this triggers is the ONLY thing that repopulates winzoo's tray.
+    // A fresh Explorer broadcasts TaskbarCreated so apps re-register via Shell_NotifyIcon
+    // for winzoo_com's hook to capture. Every restart-free alternative was tried and FAILED
+    // to fill the tray (elevated broadcast, in-Explorer hook broadcast, and a de-elevated
+    // helper broadcast — all left it empty). Do NOT skip this on Win11. See the
+    // tray-injection notes.
 
     HKEY hKey = nullptr;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, kStuckKey, 0,

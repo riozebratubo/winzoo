@@ -330,6 +330,18 @@ static void RelayTrayRecord(const SHELLTRAYDATA* st, SIZE_T cbData) {
     HWND winzoo = FindWindowW(L"WinzooTaskbar", nullptr);
     while (winzoo) {
         DWORD_PTR res = 0;
+        // SMTO_BLOCK is REQUIRED for WM_COPYDATA: the receiver reads cds.lpData
+        // (our buf) during its synchronous handling, and blocking keeps this relay
+        // from being reentered mid-marshal by the next intercepted Shell_NotifyIcon
+        // during the TaskbarCreated re-registration storm — which is exactly when a
+        // burst of icons arrives. This mirrors how shell32 itself delivers tray
+        // registrations. (An earlier build dropped SMTO_BLOCK to break a suspected
+        // winzoo<->Explorer deadlock; a live dump later showed the real "hang" was
+        // proxy Z-order occlusion, not a deadlock, and dropping the flag lost tray
+        // icons. winzoo also no longer makes unbounded synchronous calls into this
+        // thread — taskbars hide async, the ITrayNotify probe is bounded — so there
+        // is nothing here to deadlock against.) SMTO_ABORTIFHUNG + 300ms bounds a
+        // genuinely wedged winzoo.
         SendMessageTimeoutW(winzoo, WM_COPYDATA, 0,
                             reinterpret_cast<LPARAM>(&cds),
                             SMTO_ABORTIFHUNG | SMTO_BLOCK, 300, &res);

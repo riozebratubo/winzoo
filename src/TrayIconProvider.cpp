@@ -228,9 +228,10 @@ static std::wstring GetButtonTooltip(HANDLE hProc, HWND hToolbar, int idx, LPVOI
 // `hToolbar` must be a valid ToolbarWindow32 HWND.
 // `hParentForCapture` is the top-level window to show/hide if needed for PrintWindow.
 // `skipHidden`: if true, skip buttons with TBSTATE_HIDDEN.
+// `allowCapture`: permit the PrintWindow capture fallback (see EnsureCapture below).
 static void EnumerateToolbarButtons(HWND hToolbar, HWND hParentForCapture,
                                     int iconSizePx, bool fallbackExeIcon,
-                                    bool skipHidden,
+                                    bool skipHidden, bool allowCapture,
                                     std::vector<TrayIconEntry>& result)
 {
     DWORD_PTR btnCountResult = 0;
@@ -268,10 +269,18 @@ static void EnumerateToolbarButtons(HWND hToolbar, HWND hParentForCapture,
         return;
     }
 
-    // Capture the toolbar via PrintWindow to extract icons from its rendering.
+    // PrintWindow capture of the toolbar, done lazily. Capturing a hidden parent
+    // (Explorer's taskbar, the overflow flyout) requires briefly showing it, and
+    // even alpha-0 layered that makes Explorer reassert its appbar — the work
+    // area shrinks and maximized windows visibly flicker. Only pay that cost once
+    // some button still has no icon after the cheaper probes below.
     int capW = 0, capH = 0;
     BYTE* capPixels = nullptr;
-    {
+    bool captureTried = false;
+    auto EnsureCapture = [&]() {
+        if (captureTried || !allowCapture) return;
+        captureTried = true;
+
         bool wasHidden = hParentForCapture && !IsWindowVisible(hParentForCapture);
         if (wasHidden) {
             SetWindowLongPtrW(hParentForCapture, GWL_EXSTYLE,
@@ -288,7 +297,7 @@ static void EnumerateToolbarButtons(HWND hToolbar, HWND hParentForCapture,
             SetWindowLongPtrW(hParentForCapture, GWL_EXSTYLE,
                 GetWindowLongPtrW(hParentForCapture, GWL_EXSTYLE) & ~WS_EX_LAYERED);
         }
-    }
+    };
 
     for (int i = 0; i < nButtons; ++i) {
         // Ask Explorer to write the TBBUTTON into shared memory.
@@ -357,24 +366,28 @@ static void EnumerateToolbarButtons(HWND hToolbar, HWND hParentForCapture,
             }
         }
 
-        // 2. Extract from PrintWindow capture of the toolbar.
-        if (!entry.hIcon && capPixels) {
-            DWORD_PTR rectResult = 0;
-            SendMessageTimeoutW(hToolbar, TB_GETITEMRECT, static_cast<WPARAM>(i),
-                                reinterpret_cast<LPARAM>(pShared),
-                                SMTO_ABORTIFHUNG, 500, &rectResult);
-            RECT btnRect = {};
-            if (ReadRemote(hProc, pShared, &btnRect, sizeof(btnRect))) {
-                int iconCx = iconSizePx > 0 ? iconSizePx : 16;
-                int iconCy = iconCx;
-                entry.hIcon = ExtractIconFromCapture(capPixels, capW, capH,
-                                                    btnRect, iconCx, iconCy);
-            }
-        }
-
-        // 3. Imagelist (may work if Explorer shares the imagelist handle).
+        // 2. Imagelist (may work if Explorer shares the imagelist handle).
         if (!entry.hIcon && hIml && btn.iBitmap >= 0)
             entry.hIcon = ImageList_GetIcon(hIml, btn.iBitmap, ILD_TRANSPARENT);
+
+        // 3. Extract from a PrintWindow capture of the toolbar (lazy: may briefly
+        //    show the hidden parent — see EnsureCapture above).
+        if (!entry.hIcon) {
+            EnsureCapture();
+            if (capPixels) {
+                DWORD_PTR rectResult = 0;
+                SendMessageTimeoutW(hToolbar, TB_GETITEMRECT, static_cast<WPARAM>(i),
+                                    reinterpret_cast<LPARAM>(pShared),
+                                    SMTO_ABORTIFHUNG, 500, &rectResult);
+                RECT btnRect = {};
+                if (ReadRemote(hProc, pShared, &btnRect, sizeof(btnRect))) {
+                    int iconCx = iconSizePx > 0 ? iconSizePx : 16;
+                    int iconCy = iconCx;
+                    entry.hIcon = ExtractIconFromCapture(capPixels, capW, capH,
+                                                        btnRect, iconCx, iconCy);
+                }
+            }
+        }
 
         // 4. Extract icon from the owner's exe file (optional setting).
         if (!entry.hIcon && fallbackExeIcon && !exeFullPath.empty()) {
@@ -456,10 +469,33 @@ public:
     }
 };
 
+// Bounded responsiveness probe of Explorer's tray thread. The ITrayNotify COM
+// activation below is a synchronous out-of-process call with NO timeout: made
+// against an Explorer that is still initializing (or wedged), it blocks winzoo's
+// UI thread indefinitely — that is exactly the post-restart hang. WM_NULL with a
+// short SendMessageTimeout answers "is that thread pumping?" without risk.
+static bool ExplorerTrayResponsive(DWORD timeoutMs)
+{
+    DWORD myPid = GetCurrentProcessId();
+    for (HWND h = FindWindowW(L"Shell_TrayWnd", nullptr); h;
+         h = FindWindowExW(nullptr, h, L"Shell_TrayWnd", nullptr)) {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(h, &pid);
+        if (!pid || pid == myPid) continue;
+        DWORD_PTR res = 0;
+        return SendMessageTimeoutW(h, WM_NULL, 0, 0,
+                                   SMTO_ABORTIFHUNG, timeoutMs, &res) != 0;
+    }
+    return false;   // no Explorer tray at all — nothing to enumerate from
+}
+
 // Try to enumerate tray icons via ITrayNotify.
 // Returns an empty vector on any failure; caller falls back to toolbar approach.
 static std::vector<TrayIconEntry> EnumerateTrayIconsViaCOM()
 {
+    if (!ExplorerTrayResponsive(300))
+        return {};
+
     ITrayNotify* pTN = nullptr;
     if (FAILED(CoCreateInstance(CLSID_TrayNotify, nullptr,
                                 CLSCTX_LOCAL_SERVER,
@@ -558,7 +594,8 @@ static void EnrichCallbackMsgs(HWND hToolbar,
 // Build the full toolbar-based icon list (both main toolbar and overflow).
 static std::vector<TrayIconEntry> EnumerateViaToolbar(int iconSizePx,
                                                       bool fallbackExeIcon,
-                                                      bool includeOverflow)
+                                                      bool includeOverflow,
+                                                      bool allowCapture)
 {
     // Find Explorer's Shell_TrayWnd — skip our own proxy which has the same class name.
     DWORD myPid = GetCurrentProcessId();
@@ -585,7 +622,7 @@ static std::vector<TrayIconEntry> EnumerateViaToolbar(int iconSizePx,
 
     std::vector<TrayIconEntry> result;
     EnumerateToolbarButtons(hToolbar, hTray, iconSizePx, fallbackExeIcon,
-                            /*skipHidden=*/!includeOverflow, result);
+                            /*skipHidden=*/!includeOverflow, allowCapture, result);
 
     if (includeOverflow) {
         HWND hOverflow = FindWindowW(L"NotifyIconOverflowWindow", nullptr);
@@ -595,7 +632,7 @@ static std::vector<TrayIconEntry> EnumerateViaToolbar(int iconSizePx,
             if (hOverflowToolbar)
                 EnumerateToolbarButtons(hOverflowToolbar, hOverflow,
                                         iconSizePx, fallbackExeIcon,
-                                        /*skipHidden=*/true, result);
+                                        /*skipHidden=*/true, allowCapture, result);
         }
     }
     return result;
@@ -611,7 +648,12 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIc
 
     // Always run the toolbar too — it provides uCallbackMsg (absent from
     // NOTIFYITEM) and acts as a safety net for any icon ITrayNotify misses.
-    auto tbResult = EnumerateViaToolbar(iconSizePx, fallbackExeIcon, includeOverflow);
+    // The PrintWindow capture fallback is only allowed when COM failed outright:
+    // when COM succeeded, toolbar entries are mere supplements whose icons the
+    // caller resolves via WM_GETICON / exe-icon fallbacks — not worth flashing
+    // Explorer's hidden taskbar (and flickering the work area) for.
+    auto tbResult = EnumerateViaToolbar(iconSizePx, fallbackExeIcon, includeOverflow,
+                                        /*allowCapture=*/result.empty());
 
     if (result.empty()) return tbResult;  // COM unavailable — use toolbar only.
 

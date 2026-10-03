@@ -7,6 +7,7 @@
 #include "LaunchHelper.h"
 #include "JumpList.h"
 #include "TaskbarRelocate.h"
+#include "PathUtil.h"
 #include "WinzooTrayIpc.h"
 #include "WinEventNotifier.h"
 #include "PinnedFolder.h"
@@ -530,22 +531,11 @@ static HICON IconFromBGRA(const BYTE* bits, int w, int h)
 // matching the orderKey scheme used by the legacy enumerator.
 static void ExeInfoFromHwnd(HWND hWnd, std::wstring& exePath, std::wstring& exeName)
 {
-    exePath.clear();
+    exePath = GetWindowProcessPath(hWnd);
     exeName.clear();
-    if (!hWnd) return;
-    DWORD pid = 0;
-    GetWindowThreadProcessId(hWnd, &pid);
-    if (!pid) return;
-    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!hProc) return;
-    wchar_t path[MAX_PATH] = {};
-    DWORD sz = MAX_PATH;
-    if (QueryFullProcessImageNameW(hProc, 0, path, &sz)) {
-        exePath = path;
-        const wchar_t* slash = wcsrchr(path, L'\\');
-        exeName = slash ? slash + 1 : path;
-    }
-    CloseHandle(hProc);
+    if (exePath.empty()) return;
+    size_t slash = exePath.rfind(L'\\');
+    exeName = (slash != std::wstring::npos) ? exePath.substr(slash + 1) : exePath;
 }
 
 // Forward a mouse notification to a tray icon's owner window.
@@ -687,7 +677,7 @@ void TaskbarWindow::RefreshTrayIcons()
         newKeys.reserve(unknown.size());
         for (const auto& e : unknown) newKeys.push_back(e.orderKey);
         order.insert(order.begin(), newKeys.begin(), newKeys.end());
-        SaveSettings(settings_);
+        ArmTrayOrderSave();
     }
 
     // Merge: new icons first, then known icons in order.
@@ -844,7 +834,7 @@ void TaskbarWindow::OnTrayPush(const WinzooTrayRecord& rec, const wchar_t* tip,
         auto& order = settings_.trayIconOrder;
         if (std::find(order.begin(), order.end(), moved.orderKey) == order.end()) {
             order.insert(order.begin(), moved.orderKey);
-            SaveSettings(settings_);
+            ArmTrayOrderSave();
         }
         InsertTrayIconOrdered(std::move(moved));
         LayoutButtons();
@@ -929,11 +919,23 @@ void TaskbarWindow::OnTrayPush(const WinzooTrayRecord& rec, const wchar_t* tip,
     auto& order = settings_.trayIconOrder;
     if (std::find(order.begin(), order.end(), e.orderKey) == order.end()) {
         order.insert(order.begin(), e.orderKey);
-        SaveSettings(settings_);
+        ArmTrayOrderSave();
     }
     InsertTrayIconOrdered(std::move(e));
     LayoutButtons();
     InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+// Debounced persist for settings_.trayIconOrder. SaveSettings rewrites every
+// value under HKCU\Software\Winzoo; during the post-restart re-registration
+// storm dozens of brand-new tray keys can arrive within a second or two, and
+// doing a full write per icon was pure registry churn. One trailing write
+// after the burst settles captures the same final order (flushed at destroy
+// if still pending).
+void TaskbarWindow::ArmTrayOrderSave()
+{
+    trayOrderSavePending_ = true;
+    SetTimer(hwnd_, kTimerTrayOrderSave, kTimerTrayOrderSaveMs, nullptr);
 }
 
 // Insert a tray entry into trayIcons_ at the position dictated by settings_.trayIconOrder.
@@ -1411,8 +1413,10 @@ void TaskbarWindow::UpdateMinimizeTargets()
         // any tracked snapped window gets un-snapped whenever the button row reflows. Same
         // rationale as the minimize path in ActivateButton; the minimize animation isn't
         // aimed for snapped windows anyway, so there's nothing lost by not setting a target.
+        // (IsHungAppWindow: SetWindowPlacement is a synchronous cross-process
+        // call — a hung target would block winzoo's UI thread until it recovers.)
         if (!btn.hwnd || IsRectEmpty(&btn.rect) || IsIconic(btn.hwnd) ||
-            IsWindowArranged(btn.hwnd))
+            IsWindowArranged(btn.hwnd) || IsHungAppWindow(btn.hwnd))
             continue;
 
         bool owns = perMonitor
@@ -1985,7 +1989,10 @@ void TaskbarWindow::ActivateButton(int combinedIdx)
         // restore rect, so SetWindowPlacement would yank the window out of its
         // snapped position before minimizing — it comes back floating. Preserving
         // the snap is worth more than aiming the minimize animation precisely.
-        if (!IsRectEmpty(&btn.rect) && !IsWindowArranged(btn.hwnd)) {
+        // IsHungAppWindow: SetWindowPlacement is a synchronous cross-process
+        // call — a hung target would block winzoo's UI thread until it recovers.
+        if (!IsRectEmpty(&btn.rect) && !IsWindowArranged(btn.hwnd) &&
+            !IsHungAppWindow(btn.hwnd)) {
             POINT origin = {};
             ClientToScreen(hwnd_, &origin);
             WINDOWPLACEMENT wp = {};
@@ -2298,7 +2305,10 @@ void TaskbarWindow::ShowBackgroundMenu(POINT ptScreen)
 
     case IDM_REBUILD_ICON_CACHE:
         for (auto& e : appEntries_) e.icon = nullptr;
-        for (auto& btn : pinnedButtons_) if (!btn.isFolder) btn.icon = nullptr;
+        // Folder buttons may hold a cache-owned cover icon; reset them to the
+        // (separately owned) stock folder icon so the cache Clear() below can't
+        // leave a dangling HICON being drawn. App buttons go blank until reload.
+        for (auto& btn : pinnedButtons_) btn.icon = btn.isFolder ? folderIcon_ : nullptr;
         appIconCache_.Clear();
         StartIconLoadThread();
         break;
@@ -2689,7 +2699,10 @@ void TaskbarWindow::RunWatchdogPass()
         // monitors with no winzoo bar; only the primary sweep covers them all.
         ReclaimUnoccupiedWorkAreas();
         // Re-hooks a restarted Explorer (pid change); cheap when already hooked.
-        proxy_.EnsureExplorerHook();
+        // On a fresh hook, schedule the de-elevated TaskbarCreated re-broadcast
+        // so the re-registering tray fills at once (see kTimerTrayReregister).
+        if (proxy_.EnsureExplorerHook())
+            SetTimer(hwnd_, kTimerTrayReregister, kTimerTrayReregisterMs, nullptr);
         // DWM aims minimize animations at Explorer's hidden Shell_TrayWnd rect;
         // a fresh Explorer re-docks it to its own edge, so re-assert ours.
         RECT prc;
@@ -2745,7 +2758,11 @@ void TaskbarWindow::ScheduleClockTimer()
         delay = (60u - st.wSecond) * 1000u - st.wMilliseconds + 50u;
         if (delay < 250) delay = 250;
     }
-    SetTimer(hwnd_, kTimerClock, delay, nullptr);
+    // Coalescable: a slightly late clock repaint is imperceptible, and the
+    // tolerance lets the kernel batch the wakeup with others (saves power).
+    // Kept tight enough that a seconds display never visibly stutters.
+    SetCoalescableTimer(hwnd_, kTimerClock, delay, nullptr,
+                        delay == 1000 ? 100 : 250);
 }
 
 void TaskbarWindow::InvalidateClock()
@@ -2826,8 +2843,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             proxy_.UpdatePosition(rc);
             // Explorer just (re)created its taskbars — this is the reliable moment to
             // (re)install the injected hook, since the initial install at startup can
-            // race Explorer's restart and find no Shell_TrayWnd.
-            proxy_.EnsureExplorerHook();
+            // race Explorer's restart and find no Shell_TrayWnd. A fresh hook means
+            // the tray is empty until apps re-register, so schedule the one-shot
+            // de-elevated TaskbarCreated re-broadcast that makes them do so at once.
+            if (proxy_.EnsureExplorerHook())
+                SetTimer(hwnd_, kTimerTrayReregister, kTimerTrayReregisterMs, nullptr);
             // The freshly recreated Explorer taskbars re-reserved their strips; reclaim the
             // work area on any monitor winzoo has no bar on. One bar drives the global sweep.
             ReclaimUnoccupiedWorkAreas();
@@ -2835,6 +2855,15 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         // Explorer keeps re-asserting for a few seconds after a restart —
         // drive the watchdog through that window, then go quiet again.
         ArmWatchdogSettle();
+        return 0;
+    }
+    if (selfBroadcastMsg_ && uMsg == selfBroadcastMsg_) {
+        // The --rebroadcast-tray helper is about to broadcast TaskbarCreated;
+        // re-stamp the self tick NOW so the echo is answered with the cheap
+        // Z-order re-assert instead of a full appbar teardown, no matter how
+        // late the helper fired (a stale launch-time tick is what made the
+        // helper harmful when it was first tried).
+        proxy_.MarkSelfBroadcastPending();
         return 0;
     }
     if (explorerGoneMsg_ && uMsg == explorerGoneMsg_) {
@@ -2879,6 +2908,20 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         auto* cds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
         if (cds && cds->dwData == kWinzooTrayMagic && cds->lpData &&
             cds->cbData >= kWinzooTrayRecordMinSize) {
+            // Sender sanity check: the injected DLL stamps wParam with the hooked
+            // Shell_TrayWnd, so require the sending window to belong to that
+            // Explorer instance. Window messages carry no authenticated sender
+            // (wParam is itself sender-controlled), so this is hardening against
+            // naive/accidental senders rather than real authentication — but an
+            // elevated process should not act on tray records (render icons,
+            // forward clicks via PostMessage/SetForegroundWindow) from just any
+            // process that discovered the wire format.
+            DWORD senderPid = 0;
+            if (HWND sender = reinterpret_cast<HWND>(wParam))
+                GetWindowThreadProcessId(sender, &senderPid);
+            if (!senderPid || senderPid != TaskbarProxy::HookedExplorerPid())
+                return TRUE;
+
             const BYTE* base = static_cast<const BYTE*>(cds->lpData);
             WinzooTrayRecord rec = {};  // zero-init ensures dwState/dwStateMask=0 if absent
 
@@ -2925,6 +2968,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             ChangeWindowMessageFilterEx(hwnd, mProg, MSGFLT_ALLOW, nullptr);
         if (UINT mTc = RegisterWindowMessageW(L"TaskbarCreated"))
             ChangeWindowMessageFilterEx(hwnd, mTc, MSGFLT_ALLOW, nullptr);
+        // Fire-time self-stamp from the de-elevated --rebroadcast-tray helper
+        // (medium IL → needs the filter opened too); see main.cpp.
+        selfBroadcastMsg_ = RegisterWindowMessageW(L"WinzooSelfBroadcast");
+        if (selfBroadcastMsg_)
+            ChangeWindowMessageFilterEx(hwnd, selfBroadcastMsg_, MSGFLT_ALLOW, nullptr);
 
         if (settings_.position != TaskbarPosition::Floating)
             appBar_.Register(hwnd_, settings_.position, EffectiveThicknessPx());
@@ -2988,7 +3036,9 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 hwnd, &kGuidBatteryPercentRemaining, DEVICE_NOTIFY_WINDOW_HANDLE);
         }
 
-        SetTimer(hwnd, kTimerHeartbeat, kTimerHeartbeatMs, nullptr);
+        // Coalescable: the heartbeat is a slow self-heal sweep, so give the
+        // kernel a 1s window to batch its wakeup with others (saves power).
+        SetCoalescableTimer(hwnd, kTimerHeartbeat, kTimerHeartbeatMs, nullptr, 1000);
         SetTimer(hwnd, kTimerAppScanFirst, 500, nullptr);
         ScheduleClockTimer();
         SetTimer(hwnd, kTimerTray, kTimerTrayMs, nullptr);
@@ -3015,8 +3065,17 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
         // Register relay message on all windows; install proxy (COM registration) on primary only.
         progressRelayMsg_ = RegisterWindowMessageW(L"WinzooProgress");
-        if (isPrimary_)
+        if (isPrimary_) {
             proxy_.Install(hwnd_);
+            // If the Explorer hook went live during Install (no startup Explorer
+            // restart in flight), schedule the one-shot de-elevated TaskbarCreated
+            // re-broadcast now; otherwise the TaskbarCreated handler arms it once
+            // EnsureExplorerHook succeeds against the new Explorer. Only a
+            // medium-IL broadcast makes tray apps re-register promptly (see
+            // main.cpp) — without it the tray trickles in over ~30s.
+            if (TaskbarProxy::HookedExplorerPid())
+                SetTimer(hwnd, kTimerTrayReregister, kTimerTrayReregisterMs, nullptr);
+        }
 
         return 0;
     }
@@ -3626,10 +3685,18 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             // treats the echo as benign (no teardown/flicker); see main.cpp for the
             // helper side.
             proxy_.MarkSelfBroadcastPending();
-            wchar_t exe[MAX_PATH] = {};
-            if (GetModuleFileNameW(nullptr, exe, MAX_PATH))
-                ShellExecuteUser(hwnd, L"open", exe, L"--rebroadcast-tray",
-                                 nullptr, SW_HIDE);
+            std::wstring exe = GetOwnExePath();
+            if (!exe.empty()) {
+                // Launch the helper via Explorer's duplicated token: a direct
+                // kernel-side launch that cannot stall on Explorer's cold
+                // automation object (the ~18s ShellExecuteUser stall that made
+                // this helper harmful when it was first tried). The helper also
+                // re-stamps the self tick at fire time (see main.cpp), so even
+                // a late fire can never be mistaken for an Explorer restart.
+                if (!LaunchDeElevatedExe(exe.c_str(), L"--rebroadcast-tray", SW_HIDE))
+                    ShellExecuteUser(hwnd, L"open", exe.c_str(), L"--rebroadcast-tray",
+                                     nullptr, SW_HIDE);
+            }
         } else if (wParam == kTimerAppScan) {
             StartScanThread(false);
         } else if (wParam == kTimerAppScanDebounce) {
@@ -3651,6 +3718,11 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             // One repaint past the progress bar's 5s auto-clear deadline.
             KillTimer(hwnd, kTimerProgressClear);
             InvalidateRect(hwnd, nullptr, FALSE);
+        } else if (wParam == kTimerTrayOrderSave) {
+            // Debounced persist of settings_.trayIconOrder (see ArmTrayOrderSave).
+            KillTimer(hwnd, kTimerTrayOrderSave);
+            trayOrderSavePending_ = false;
+            SaveSettings(settings_);
         }
         return 0;
 
@@ -3752,7 +3824,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         LayoutButtons();
         // Reload icons at the new DPI scale so they stay crisp.
         for (auto& e : appEntries_) e.icon = nullptr;
-        for (auto& btn : pinnedButtons_) if (!btn.isFolder) btn.icon = nullptr;
+        // Folder buttons may hold a cache-owned cover icon; reset them to the
+        // (separately owned) stock folder icon so the cache Clear() below can't
+        // leave a dangling HICON being drawn. App buttons go blank until reload.
+        for (auto& btn : pinnedButtons_) btn.icon = btn.isFolder ? folderIcon_ : nullptr;
         appIconCache_.Clear();
         StartIconLoadThread();
         tracker_.SetIconSize(Scale(settings_.appButtonIconSize, dpi_));
@@ -3861,7 +3936,10 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             return 0;
         case IDM_REBUILD_ICON_CACHE:
             for (auto& e : appEntries_) e.icon = nullptr;
-            for (auto& btn : pinnedButtons_) if (!btn.isFolder) btn.icon = nullptr;
+            // Folder buttons may hold a cache-owned cover icon; reset them to the
+            // (separately owned) stock folder icon so the cache Clear() below can't
+            // leave a dangling HICON being drawn. App buttons go blank until reload.
+            for (auto& btn : pinnedButtons_) btn.icon = btn.isFolder ? folderIcon_ : nullptr;
             appIconCache_.Clear();
             StartIconLoadThread();
             return 0;
@@ -3952,6 +4030,12 @@ LRESULT TaskbarWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         KillTimer(hwnd, kTimerWatchdogSettle);
         KillTimer(hwnd, kTimerAppScanDebounce);
         KillTimer(hwnd, kTimerProgressClear);
+        KillTimer(hwnd, kTimerTrayOrderSave);
+        // Flush a pending debounced tray-order save so the latest order isn't lost.
+        if (trayOrderSavePending_) {
+            trayOrderSavePending_ = false;
+            SaveSettings(settings_);
+        }
         // Join the icon workers first so no further WM_APP_WIN_ICON is posted.
         iconCache_.Stop();
         // Join the app-scan / icon-load workers too. The window is still alive here

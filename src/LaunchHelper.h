@@ -30,6 +30,13 @@ void LaunchOrActivateOnMonitor(HWND hwndCaller, HMONITOR hMon,
 bool ShellExecuteUser(HWND hwnd, const wchar_t* verb, const wchar_t* file,
                       const wchar_t* params, const wchar_t* dir, int nShow);
 
+// Launches a plain .exe at Explorer's (medium) integrity level via its
+// duplicated token (CreateProcessWithTokenW) — a direct kernel-side launch
+// that, unlike ShellExecuteUser, cannot stall on Explorer's cold automation
+// object. Returns false for non-exe targets or when any token step fails
+// (caller falls back to ShellExecuteUser).
+bool LaunchDeElevatedExe(const wchar_t* exe, const wchar_t* args, int nShow);
+
 // Shows the Windows "Run" dialog via Explorer's IShellDispatch::FileRun. Routing
 // through Explorer (medium integrity) means the dialog — and whatever it launches
 // — runs at the user's integrity level instead of inheriting winzoo's admin

@@ -1,5 +1,6 @@
 #include "TrayIconProvider.h"
 #include "TrayNotifyProvider.h"
+#include "PathUtil.h"
 #include <commctrl.h>
 #include <psapi.h>
 #include <shellapi.h>
@@ -327,23 +328,8 @@ static void EnumerateToolbarButtons(HWND hToolbar, HWND hParentForCapture,
             }
         }
 
-        // Exe path of the icon's owner process.
-        std::wstring exeFullPath;
-        if (entry.hWnd) {
-            DWORD ownerPid = 0;
-            GetWindowThreadProcessId(entry.hWnd, &ownerPid);
-            if (ownerPid) {
-                HANDLE hOwner = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,
-                                            FALSE, ownerPid);
-                if (hOwner) {
-                    wchar_t path[MAX_PATH] = {};
-                    DWORD sz = MAX_PATH;
-                    if (QueryFullProcessImageNameW(hOwner, 0, path, &sz))
-                        exeFullPath = path;
-                    CloseHandle(hOwner);
-                }
-            }
-        }
+        // Exe path of the icon's owner process (long-path-safe).
+        std::wstring exeFullPath = GetWindowProcessPath(entry.hWnd);
         if (!exeFullPath.empty()) {
             entry.exePath = exeFullPath;
             auto slash = exeFullPath.rfind(L'\\');
@@ -432,22 +418,8 @@ public:
         e.hIcon = item->hIcon ? CopyIcon(item->hIcon) : nullptr;
         if (item->pszTip)     e.tooltip = item->pszTip;
         if (item->pszExeName) e.exeName = item->pszExeName;
-        // Derive exePath for exe-icon fallback.
-        if (item->hWnd) {
-            DWORD pid = 0;
-            GetWindowThreadProcessId(item->hWnd, &pid);
-            if (pid) {
-                HANDLE hOwner = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,
-                                            FALSE, pid);
-                if (hOwner) {
-                    wchar_t path[MAX_PATH] = {};
-                    DWORD sz = MAX_PATH;
-                    if (QueryFullProcessImageNameW(hOwner, 0, path, &sz))
-                        e.exePath = path;
-                    CloseHandle(hOwner);
-                }
-            }
-        }
+        // Derive exePath for exe-icon fallback (long-path-safe).
+        e.exePath = GetWindowProcessPath(item->hWnd);
         e.orderKey = e.exeName + L"|" + std::to_wstring(e.uID);
         out_.push_back(std::move(e));
         return S_OK;
@@ -516,7 +488,13 @@ static std::vector<TrayIconEntry> EnumerateTrayIconsViaCOM()
     cb->Release();
     pTN->Release();
 
-    if (FAILED(hr) || result.empty()) return {};
+    if (FAILED(hr) || result.empty()) {
+        // RegisterCallback can fail after having delivered some notifications;
+        // those entries hold CopyIcon'd handles that must not leak.
+        for (auto& e : result)
+            if (e.hIcon) DestroyIcon(e.hIcon);
+        return {};
+    }
     return result;
 }
 
@@ -642,8 +620,10 @@ std::vector<TrayIconEntry> EnumerateTrayIcons(int iconSizePx, bool fallbackExeIc
                                               bool includeOverflow)
 {
     // Lead with ITrayNotify (COM): delivers hIcon directly from Explorer with no
-    // TRAYDATA probing, and now covers all registrations (IsWindow guard removed,
-    // Refresh() added) including system icons like Bluetooth and Eject Hardware.
+    // TRAYDATA probing, and covers all registrations (no IsWindow filtering)
+    // including system icons like Bluetooth and Eject Hardware. RegisterCallback
+    // alone delivers the full snapshot; Refresh() is deliberately never called —
+    // it faults on some Windows 11 builds (see EnumerateTrayIconsViaCOM).
     auto result = EnumerateTrayIconsViaCOM();
 
     // Always run the toolbar too — it provides uCallbackMsg (absent from

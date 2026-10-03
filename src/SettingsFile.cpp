@@ -1,4 +1,5 @@
 #include "SettingsFile.h"
+#include "PathUtil.h"
 #include <windows.h>
 #include <cstring>
 #include <map>
@@ -286,11 +287,13 @@ static bool ParseStringArrayMap(const std::string& json, size_t pos,
 
 std::wstring GetSettingsFilePath()
 {
-    wchar_t exePath[MAX_PATH] = {};
-    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    wchar_t* last = wcsrchr(exePath, L'\\');
-    if (last) *(last + 1) = L'\0';
-    return std::wstring(exePath) + L"winzoo-settings.json";
+    std::wstring exePath = GetOwnExePath();   // long-path-safe
+    size_t slash = exePath.rfind(L'\\');
+    if (slash != std::wstring::npos)
+        exePath.resize(slash + 1);
+    else
+        exePath.clear();
+    return exePath + L"winzoo-settings.json";
 }
 
 bool ExportSettingsToFile(const Settings& s)

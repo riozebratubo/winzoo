@@ -1,5 +1,6 @@
 #include "WindowTracker.h"
 #include "WinEventNotifier.h"   // EVENT_OBJECT_CLOAKED/UNCLOAKED fallback defines
+#include "PathUtil.h"
 #include <dwmapi.h>
 #include <utility>
 
@@ -106,22 +107,10 @@ bool WindowTracker::AddWindowInternal(HWND hwnd)
     if (FindByHwnd(hwnd) >= 0) return false;
 
     TaskButton btn;
-    btn.hwnd  = hwnd;
-    btn.title = GetWindowTitle(hwnd);
-    btn.icon  = iconCache_ ? iconCache_->GetIcon(hwnd, iconSizePx_) : nullptr;
-
-    DWORD pid = 0;
-    GetWindowThreadProcessId(hwnd, &pid);
-    if (pid) {
-        HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-        if (hProc) {
-            wchar_t path[MAX_PATH] = {};
-            DWORD size = MAX_PATH;
-            if (QueryFullProcessImageNameW(hProc, 0, path, &size))
-                btn.exePath = path;
-            CloseHandle(hProc);
-        }
-    }
+    btn.hwnd    = hwnd;
+    btn.title   = GetWindowTitle(hwnd);
+    btn.icon    = iconCache_ ? iconCache_->GetIcon(hwnd, iconSizePx_) : nullptr;
+    btn.exePath = GetWindowProcessPath(hwnd);   // long-path-safe
 
     buttons_.push_back(btn);
     return true;

@@ -274,7 +274,10 @@ void AppBar::OnCallback(WPARAM wParam, LPARAM lParam)
                 if (fgMon == myMon)
                     ShowWindow(hwnd_, SW_HIDE);
             } else {
-                ShowWindow(hwnd_, SW_SHOW);
+                // SW_SHOWNA: re-show without activating — SW_SHOW could steal
+                // focus from whatever the user switched to as the fullscreen
+                // app exited.
+                ShowWindow(hwnd_, SW_SHOWNA);
             }
         }
         break;

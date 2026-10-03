@@ -6,6 +6,7 @@
 #include "Dpi.h"
 #include "resource.h"
 #include <windowsx.h>
+#include <commctrl.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shlwapi.h>
@@ -614,33 +615,34 @@ void AppMenuWindow::ApplyFilter()
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-// Subclass proc for the search EDIT control — forwards navigation keys to the menu.
-// Uses window properties to avoid private-member access from a static function:
-//   GWLP_USERDATA  — original WNDPROC
-//   "WinzooMenu"   — AppMenuWindow* (set once at creation, never changes)
-//   "WinzooMEF"    — non-null when user explicitly clicked the box (MEF = menu explicit focus)
-static LRESULT CALLBACK SearchEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+// Subclass proc for the search EDIT control — forwards navigation keys to the
+// menu. Installed with comctl32's SetWindowSubclass, which composes safely with
+// other subclassers and needs no GWLP_WNDPROC/GWLP_USERDATA juggling. One window
+// property remains:
+//   "WinzooMEF" — non-null when the user explicitly clicked the box
+//                 (MEF = menu explicit focus); removed on WM_NCDESTROY.
+static LRESULT CALLBACK SearchEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam,
+                                               LPARAM lParam, UINT_PTR idSubclass,
+                                               DWORD_PTR /*refData*/)
 {
-    WNDPROC origProc = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-    if (!origProc) return DefWindowProcW(hwnd, uMsg, wParam, lParam);
-
     HWND hParent = GetParent(hwnd);
 
-    if (uMsg == WM_LBUTTONDOWN) {
+    switch (uMsg) {
+    case WM_LBUTTONDOWN:
         // User explicitly clicked the search box — record that it owns input focus.
         SetPropW(hwnd, L"WinzooMEF", reinterpret_cast<HANDLE>(1ULL));
-        // Fall through to default handling.
-    }
+        break;  // fall through to default handling
 
-    if (uMsg == WM_KILLFOCUS) {
+    case WM_KILLFOCUS: {
         RemovePropW(hwnd, L"WinzooMEF");
         HWND hNewFocus = reinterpret_cast<HWND>(wParam);
         // If focus is leaving to something other than our parent menu, close.
         if (hNewFocus != hParent)
             SendMessageW(hParent, WM_KILLFOCUS, wParam, lParam);
+        break;
     }
 
-    if (uMsg == WM_KEYDOWN) {
+    case WM_KEYDOWN: {
         bool explicitlyFocused = GetPropW(hwnd, L"WinzooMEF") != nullptr;
         switch (wParam) {
         case VK_ESCAPE:
@@ -662,9 +664,19 @@ static LRESULT CALLBACK SearchEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wPar
             break;
         default: break;
         }
+        break;
     }
 
-    return CallWindowProcW(origProc, hwnd, uMsg, wParam, lParam);
+    case WM_NCDESTROY:
+        // Last call for this window: drop the focus-state prop and detach.
+        RemovePropW(hwnd, L"WinzooMEF");
+        RemoveWindowSubclass(hwnd, SearchEditSubclassProc, idSubclass);
+        break;
+
+    default: break;
+    }
+
+    return DefSubclassProc(hwnd, uMsg, wParam, lParam);
 }
 
 // ---------- painting ----------
@@ -1769,15 +1781,9 @@ LRESULT AppMenuWindow::HandleMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 SendMessageW(searchEdit_, EM_SETCUEBANNER, TRUE,
                              reinterpret_cast<LPARAM>(cue));
 
-                // Subclass to forward navigation keys to the menu
-                WNDPROC origProc = reinterpret_cast<WNDPROC>(
-                    SetWindowLongPtrW(searchEdit_, GWLP_WNDPROC,
-                                     reinterpret_cast<LONG_PTR>(SearchEditSubclassProc)));
-                SetWindowLongPtrW(searchEdit_, GWLP_USERDATA,
-                                 reinterpret_cast<LONG_PTR>(origProc));
-                // Store this pointer so the static subclass proc can reach us.
-                SetPropW(searchEdit_, L"WinzooMenu",
-                         static_cast<HANDLE>(static_cast<void*>(this)));
+                // Subclass to forward navigation keys to the menu (comctl32
+                // subclassing; detaches itself on WM_NCDESTROY).
+                SetWindowSubclass(searchEdit_, SearchEditSubclassProc, 0, 0);
             }
         }
         return 0;

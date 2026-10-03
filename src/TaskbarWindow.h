@@ -111,6 +111,9 @@ private:
     void InsertTrayIconOrdered(TrayIconEntry&& e);
     HICON TrayIconFromOwner(HWND owner);
     void PruneDeadTrayIcons();
+    // Debounced persist of settings_.trayIconOrder (one SaveSettings after a
+    // burst of new tray registrations instead of one full write per icon).
+    void ArmTrayOrderSave();
     // Win11's network icon is XAML-only (uncapturable) — synthesize one from live state
     // and keep it pinned to the trailing end of the captured tray row.
     bool ShowNetInTrayRow() const;
@@ -208,6 +211,7 @@ private:
     UINT            progressRelayMsg_  = 0;
     UINT            statusUpdateMsg_   = 0;  // "WinzooStatusUpdate" from the status poller thread
     UINT            explorerGoneMsg_   = 0;  // "WinzooExplorerGone" from TaskbarProxy's process wait
+    UINT            selfBroadcastMsg_  = 0;  // "WinzooSelfBroadcast" from the --rebroadcast-tray helper
     HPOWERNOTIFY    powerNotifyAcDc_    = nullptr;
     HPOWERNOTIFY    powerNotifyBattery_ = nullptr;
     int             watchdogSettleTicks_ = 0;  // remaining kTimerWatchdogSettle firings
@@ -235,6 +239,7 @@ private:
     bool            shutdownPending_= false;
     bool            trayPushActive_ = false;  // first WinzooTray push received → stop scraping
     bool            eventFlushArmed_= false;  // kTimerEventFlush pending (don't re-arm)
+    bool            trayOrderSavePending_ = false;  // kTimerTrayOrderSave armed; flushed at destroy
     // True while the session is locked. While locked, the default desktop's windows are
     // cloaked/hidden by the system, so they fail ShouldTrack() and the reconcile sweep would
     // cull every button — so we freeze the sweep while locked and re-seed on unlock so the
@@ -263,6 +268,7 @@ private:
     static constexpr UINT_PTR kTimerAppScanDebounce = 9;   // one-shot: Start Menu change → rescan
     static constexpr UINT_PTR kTimerProgressClear   = 10;  // one-shot: repaint past progress auto-clear
     static constexpr UINT_PTR kTimerTrayReregister  = 11;  // one-shot: re-broadcast TaskbarCreated once the hook is live
+    static constexpr UINT_PTR kTimerTrayOrderSave   = 12;  // one-shot: debounced trayIconOrder persist
     static constexpr UINT     kTimerHeartbeatMs       = 15000;
     static constexpr UINT     kTimerAppScanMs         = 600000;
     static constexpr UINT     kTimerTrayMs            = 2000;
@@ -273,6 +279,7 @@ private:
     static constexpr UINT     kTimerAppScanDebounceMs = 2000;
     static constexpr UINT     kTimerTrayReregisterMs  = 1500;  // delay before the tray re-registration re-broadcast
     static constexpr UINT     kTimerProgressClearMs   = 5500;  // > TaskButton's 5s kProgressTimeout
+    static constexpr UINT     kTimerTrayOrderSaveMs   = 1000;  // coalesce tray-order saves across a registration burst
 
     // Custom WM_APP messages posted by background threads
     static constexpr UINT WM_APP_SCAN_DONE    = WM_APP + 1;

@@ -54,10 +54,16 @@ HICON AppIconCache::LoadStatic(const std::wstring& iconPath, int sizePx)
 
     if (path.empty()) return nullptr;
 
-    // Expand environment strings
-    wchar_t expanded[MAX_PATH * 2] = {};
-    if (!ExpandEnvironmentStringsW(path.c_str(), expanded, MAX_PATH * 2))
+    // Expand environment strings, dynamically sized — pinned paths are
+    // user-controlled and the manifest declares longPathAware, so a fixed
+    // buffer could silently truncate.
+    DWORD need = ExpandEnvironmentStringsW(path.c_str(), nullptr, 0);
+    if (!need) return nullptr;
+    std::wstring expandedStr(need, L'\0');
+    if (!ExpandEnvironmentStringsW(path.c_str(), expandedStr.data(), need))
         return nullptr;
+    expandedStr.resize(wcslen(expandedStr.c_str()));
+    const wchar_t* expanded = expandedStr.c_str();
 
     // For default icons (no explicit resource index), use IShellItemImageFactory —
     // the same API the Windows shell uses. It renders from the best available icon

@@ -11,7 +11,6 @@
 // [WinzooTrayRecord][tooltip wchars (no null)][icon BGRA, top-down w*h*4].
 
 #include <windows.h>
-#include <stdarg.h>
 
 // COPYDATASTRUCT.dwData magic identifying a winzoo tray record. ('WZTR')
 constexpr ULONG_PTR kWinzooTrayMagic = 0x575A5452;
@@ -20,36 +19,6 @@ constexpr ULONG_PTR kWinzooTrayMagic = 0x575A5452;
 constexpr UINT kNIF_ICON   = 0x00000002;
 constexpr UINT kNIF_STATE  = 0x00000008;
 constexpr UINT kNIS_HIDDEN = 0x00000001;
-
-// ---------------------------------------------------------------------------
-// Diagnostic logging (temporary). Both winzoo.exe and the injected DLL append
-// to %TEMP%\winzoo_tray.log so we can see the cross-process tray data flow.
-// ---------------------------------------------------------------------------
-inline void WinzooTrayLog(const char* tag, const char* fmt, ...) {
-    wchar_t path[MAX_PATH] = {};
-    DWORD n = GetTempPathW(MAX_PATH, path);
-    if (!n) return;
-    lstrcatW(path, L"winzoo_tray.log");
-
-    char body[480] = {};
-    va_list ap;
-    va_start(ap, fmt);
-    wvsprintfA(body, fmt, ap);
-    va_end(ap);
-
-    char line[512] = {};
-    int len = wsprintfA(line, "[%s pid=%lu] %s\r\n", tag,
-                        GetCurrentProcessId(), body);
-
-    HANDLE h = CreateFileW(path, FILE_APPEND_DATA,
-                           FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return;
-    SetFilePointer(h, 0, nullptr, FILE_END);
-    DWORD w = 0;
-    WriteFile(h, line, static_cast<DWORD>(len), &w, nullptr);
-    CloseHandle(h);
-}
 
 #pragma pack(push, 4)
 // Minimum record size for backward compat: receivers should accept records at

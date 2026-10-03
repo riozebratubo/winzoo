@@ -1,4 +1,5 @@
 #include "LaunchHelper.h"
+#include "PathUtil.h"
 #include <shellapi.h>
 #include <psapi.h>
 #include <shlobj.h>
@@ -39,6 +40,27 @@ static bool IsProcessElevated()
     return elevated;
 }
 
+// Bounded responsiveness probe of Explorer's tray thread, mirroring the one the
+// tray enumerator uses: the ShellWindows activation below is a synchronous
+// out-of-process COM call with NO timeout, so made against a hung or
+// mid-restart Explorer it would block winzoo's UI thread indefinitely (every
+// pinned-app click, Run dialog, jump-list launch). WM_NULL with a short
+// SendMessageTimeout answers "is that thread pumping?" without that risk.
+static bool ExplorerResponsive(DWORD timeoutMs)
+{
+    DWORD myPid = GetCurrentProcessId();
+    for (HWND h = FindWindowW(L"Shell_TrayWnd", nullptr); h;
+         h = FindWindowExW(nullptr, h, L"Shell_TrayWnd", nullptr)) {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(h, &pid);
+        if (!pid || pid == myPid) continue;   // skip winzoo's own proxy
+        DWORD_PTR res = 0;
+        return SendMessageTimeoutW(h, WM_NULL, 0, 0,
+                                   SMTO_ABORTIFHUNG, timeoutMs, &res) != 0;
+    }
+    return false;   // no Explorer tray — the automation object won't be reachable either
+}
+
 // Obtain Explorer's own IShellDispatch2 automation object by walking the desktop
 // shell view (ShellWindows → desktop browser → shell view → background folder →
 // Application). Because this object lives in explorer.exe (medium integrity),
@@ -48,6 +70,12 @@ static bool IsProcessElevated()
 // the Explorer automation object is unavailable.
 IShellDispatch2* GetExplorerShellDispatch()
 {
+    // Never make the unbounded COM call below against an unresponsive Explorer:
+    // callers sit on the UI thread, and the caller's fallback (a direct,
+    // elevated launch) beats freezing the whole bar.
+    if (!ExplorerResponsive(300))
+        return nullptr;
+
     IShellWindows* psw = nullptr;
     if (FAILED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER,
                                 IID_PPV_ARGS(&psw))))
@@ -152,6 +180,115 @@ void ShowRunDialog(HWND hwnd)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// De-elevated launch via Explorer's token (CreateProcessWithTokenW).
+//
+// For plain .exe targets, duplicating Explorer's (medium-IL) token both
+// de-elevates the child AND returns a real process handle — unlike the
+// IShellDispatch2 route, which launches fire-and-forget and leaves window
+// tracking guessing by snapshot diff (which could grab an unrelated window the
+// user opened during the poll). Non-exe targets (ms-settings: URIs, .cpl,
+// .msc, .lnk) need ShellExecute semantics and keep using the dispatch object.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// CreateProcessWithTokenW needs SeImpersonatePrivilege; it is present in an
+// elevated admin token but may start disabled. Enable it once, best-effort.
+static bool EnableImpersonatePrivilege()
+{
+    static bool tried = false, ok = false;
+    if (tried) return ok;
+    tried = true;
+    HANDLE hTok = nullptr;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hTok)) {
+        TOKEN_PRIVILEGES tp = {};
+        tp.PrivilegeCount = 1;
+        tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+        if (LookupPrivilegeValueW(nullptr, SE_IMPERSONATE_NAME, &tp.Privileges[0].Luid)) {
+            AdjustTokenPrivileges(hTok, FALSE, &tp, 0, nullptr, nullptr);
+            ok = (GetLastError() == ERROR_SUCCESS);  // ERROR_NOT_ALL_ASSIGNED = not held
+        }
+        CloseHandle(hTok);
+    }
+    return ok;
+}
+
+// PID of the Explorer that owns the real Shell_TrayWnd (0 if none).
+static DWORD FindExplorerPid()
+{
+    DWORD myPid = GetCurrentProcessId();
+    for (HWND h = FindWindowW(L"Shell_TrayWnd", nullptr); h;
+         h = FindWindowExW(nullptr, h, L"Shell_TrayWnd", nullptr)) {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(h, &pid);
+        if (pid && pid != myPid) return pid;
+    }
+    return 0;
+}
+
+// Launch `exe` at Explorer's integrity level via its duplicated token.
+// Returns true on success with *outProc (caller closes) and *outPid filled.
+// Returns false — caller falls back to the shell-dispatch route — for non-exe
+// targets or when any token step fails.
+static bool LaunchWithExplorerToken(const wchar_t* exe, const wchar_t* args, int nShow,
+                                    HANDLE* outProc, DWORD* outPid)
+{
+    *outProc = nullptr;
+    *outPid  = 0;
+
+    // Only plain executables: shell items (URIs, .cpl, .msc, .lnk) need ShellExecute.
+    size_t len = wcslen(exe);
+    if (len < 4 || _wcsicmp(exe + len - 4, L".exe") != 0)
+        return false;
+
+    DWORD explorerPid = FindExplorerPid();
+    if (!explorerPid || !EnableImpersonatePrivilege())
+        return false;
+
+    HANDLE hExp = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, explorerPid);
+    if (!hExp) return false;
+
+    bool   launched = false;
+    HANDLE hTok     = nullptr;
+    HANDLE hPrimary = nullptr;
+    if (OpenProcessToken(hExp, TOKEN_DUPLICATE, &hTok) &&
+        DuplicateTokenEx(hTok,
+                         TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY |
+                         TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_SESSIONID,
+                         nullptr, SecurityImpersonation, TokenPrimary, &hPrimary)) {
+        // CreateProcessWithTokenW requires a writable command-line buffer.
+        std::wstring cmd = L"\"";
+        cmd += exe;
+        cmd += L"\"";
+        if (args && *args) { cmd += L' '; cmd += args; }
+
+        STARTUPINFOW si = { sizeof(si) };
+        si.dwFlags      = STARTF_USESHOWWINDOW;
+        si.wShowWindow  = static_cast<WORD>(nShow);
+        PROCESS_INFORMATION pi = {};
+        if (CreateProcessWithTokenW(hPrimary, 0, nullptr, cmd.data(),
+                                    0, nullptr, nullptr, &si, &pi)) {
+            CloseHandle(pi.hThread);
+            *outProc = pi.hProcess;
+            *outPid  = pi.dwProcessId;
+            launched = true;
+        }
+    }
+    if (hPrimary) CloseHandle(hPrimary);
+    if (hTok)     CloseHandle(hTok);
+    CloseHandle(hExp);
+    return launched;
+}
+
+bool LaunchDeElevatedExe(const wchar_t* exe, const wchar_t* args, int nShow)
+{
+    HANDLE hProc = nullptr;
+    DWORD  pid   = 0;
+    if (!LaunchWithExplorerToken(exe, args, nShow, &hProc, &pid))
+        return false;
+    if (hProc) CloseHandle(hProc);
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Background thread: wait for the launched app to create its main window,
 // then move it to the target monitor.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,9 +389,12 @@ void LaunchOnMonitor(HINSTANCE /*hInst*/, HMONITOR hMon,
     HANDLE hProc = nullptr;
     DWORD  pid   = 0;
     if (IsProcessElevated()) {
-        // Launch de-elevated via Explorer; no process handle is returned, so the
-        // tracking thread relies on snapshot diff + exe-name matching instead.
-        if (!ShellExecuteViaExplorer(exe, args, nullptr, L"open", nShow)) {
+        // Prefer the Explorer-token route for plain exes: the child de-elevates
+        // AND we get a real process handle, so the tracking thread matches by
+        // PID instead of guessing from the window snapshot. Shell items fall
+        // back to Explorer's dispatch object (handle-less) as before.
+        if (!LaunchWithExplorerToken(exe, args, nShow, &hProc, &pid) &&
+            !ShellExecuteViaExplorer(exe, args, nullptr, L"open", nShow)) {
             // Explorer route unavailable — fall back to a direct (elevated) launch.
             HINSTANCE rc = ShellExecuteW(nullptr, L"open", exe,
                                          (args && *args) ? args : nullptr, nullptr, nShow);
@@ -370,21 +510,11 @@ static bool IsRealAppWindow(HWND h)
 // True if window h's owning process has image filename `exeName` (case-insensitive).
 static bool WindowProcessNameIs(HWND h, const wchar_t* exeName)
 {
-    DWORD pid = 0;
-    GetWindowThreadProcessId(h, &pid);
-    if (!pid) return false;
-
-    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!hProc) return false;
-
-    wchar_t path[MAX_PATH] = {};
-    DWORD sz = MAX_PATH;
-    BOOL ok = QueryFullProcessImageNameW(hProc, 0, path, &sz);
-    CloseHandle(hProc);
-    if (!ok) return false;
-
-    const wchar_t* fname = wcsrchr(path, L'\\');
-    fname = fname ? fname + 1 : path;
+    std::wstring path = GetWindowProcessPath(h);
+    if (path.empty()) return false;
+    size_t slash = path.rfind(L'\\');
+    const wchar_t* fname = (slash != std::wstring::npos)
+                         ? path.c_str() + slash + 1 : path.c_str();
     return _wcsicmp(fname, exeName) == 0;
 }
 

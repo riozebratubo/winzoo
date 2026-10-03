@@ -1,4 +1,6 @@
 #include "IconCache.h"
+#include "PathUtil.h"
+#include <string>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -247,21 +249,14 @@ HICON IconCache::LoadForWindow(HWND hwnd, int sizePx)
     if (winIcon && winSize >= sizePx)
         return winIcon;
 
-    // 2. Resolve the owning executable.
-    wchar_t path[MAX_PATH] = {};
-    DWORD pid = 0;
-    GetWindowThreadProcessId(hwnd, &pid);
-    if (HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
-        DWORD len = MAX_PATH;
-        QueryFullProcessImageNameW(hProc, 0, path, &len);
-        CloseHandle(hProc);
-    }
+    // 2. Resolve the owning executable (long-path-safe).
+    std::wstring path = GetWindowProcessPath(hwnd);
 
     // 3. For ordinary apps, a high-res icon rendered from the exe is the same
     //    artwork at full resolution — prefer it over a small upscaled window icon.
     //    Skipped for the packaged-app host, whose exe icon would be generic.
-    if (*path && !IsPackagedAppHost(path)) {
-        if (HICON hi = LoadHiResExeIcon(path, sizePx)) {
+    if (!path.empty() && !IsPackagedAppHost(path.c_str())) {
+        if (HICON hi = LoadHiResExeIcon(path.c_str(), sizePx)) {
             if (winIcon) DestroyIcon(winIcon);
             return hi;
         }
@@ -272,9 +267,9 @@ HICON IconCache::LoadForWindow(HWND hwnd, int sizePx)
         return winIcon;
 
     // 5. No window icon (e.g. inaccessible process): fall back to ExtractIconEx.
-    if (*path) {
+    if (!path.empty()) {
         HICON lg = nullptr, sm = nullptr;
-        if (ExtractIconExW(path, 0, &lg, &sm, 1) > 0) {
+        if (ExtractIconExW(path.c_str(), 0, &lg, &sm, 1) > 0) {
             HICON icon = (sizePx <= 20) ? (sm ? sm : lg) : (lg ? lg : sm);
             if (icon != lg && lg) DestroyIcon(lg);
             if (icon != sm && sm) DestroyIcon(sm);

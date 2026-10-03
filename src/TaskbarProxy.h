@@ -28,6 +28,12 @@ public:
     // runs in a separate (medium-IL) process and so cannot set this tick itself.
     void MarkSelfBroadcastPending() { selfBroadcastTick_ = GetTickCount(); }
 
+    // PID of the Explorer instance the injected hook is currently attached to
+    // (0 = no hook). Static so every bar — not just the primary that owns the
+    // proxy — can validate that a WM_COPYDATA tray push really came from the
+    // hooked Explorer process.
+    static DWORD HookedExplorerPid() { return hookedExplorerPid_; }
+
     // True while a TaskbarCreated broadcast WE posted may still be in flight
     // (EnsureExplorerHook broadcasts one after installing the hook so apps
     // re-register their tray icons — including on every normal startup). Lets the
@@ -64,10 +70,12 @@ private:
     bool         registered_     = false;
     bool         updatingPosition_ = false;
     HMODULE      hHookDll_       = nullptr;
-    DWORD        hookedExplorerPid_ = 0;   // pid of the Explorer we currently hook (0 = none)
     HANDLE       explorerProc_   = nullptr;
     HANDLE       explorerWait_   = nullptr;
     std::wstring dllPath_;
 
     static DWORD selfBroadcastTick_;   // GetTickCount of our last TaskbarCreated broadcast (0 = none)
+    // pid of the Explorer we currently hook (0 = none). Static — only one proxy
+    // ever exists (primary bar) — so every bar can read it via HookedExplorerPid().
+    static DWORD hookedExplorerPid_;
 };

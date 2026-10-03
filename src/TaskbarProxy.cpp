@@ -1,4 +1,5 @@
 #include "TaskbarProxy.h"
+#include "PathUtil.h"
 #include "resource.h"
 
 static constexpr wchar_t kInProcKey[] =
@@ -6,7 +7,8 @@ static constexpr wchar_t kInProcKey[] =
 static constexpr wchar_t kClsidKey[] =
     L"Software\\Classes\\CLSID\\{56FDF344-FD6D-11d0-958A-006097C9A090}";
 
-DWORD TaskbarProxy::selfBroadcastTick_ = 0;
+DWORD TaskbarProxy::selfBroadcastTick_   = 0;
+DWORD TaskbarProxy::hookedExplorerPid_   = 0;
 
 bool TaskbarProxy::RecentSelfTaskbarCreated() {
     // 3s covers winzoo's own EnsureExplorerHook broadcast round trip; the tick is
@@ -48,13 +50,14 @@ bool TaskbarProxy::Install(HWND winzooHwnd) {
     std::wstring dir;
     {
         wchar_t local[MAX_PATH] = {};
-        if (GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH))
+        DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
+        if (n && n < MAX_PATH)   // 0 = unset; >= MAX_PATH = truncated, buffer invalid
             dir = std::wstring(local) + L"\\winzoo";
         else {  // fallback: next to the exe
-            wchar_t exePath[MAX_PATH] = {};
-            GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-            if (wchar_t* p = wcsrchr(exePath, L'\\')) *p = L'\0';
-            dir = exePath;
+            std::wstring exeDir = GetOwnExePath();
+            size_t slash = exeDir.rfind(L'\\');
+            if (slash != std::wstring::npos) exeDir.resize(slash);
+            dir = std::move(exeDir);
         }
         CreateDirectoryW(dir.c_str(), nullptr);
 
@@ -182,8 +185,11 @@ bool TaskbarProxy::EnsureExplorerHook() {
     if (hookedExplorerPid_ && hookedExplorerPid_ != explorerPid && fnUninstall)
         fnUninstall();
 
-    fnInstall(explorerTray);
+    // Publish the pid BEFORE the hook goes live: the very first relayed push
+    // can arrive as soon as fnInstall returns, and the WM_COPYDATA handler
+    // validates the sender against HookedExplorerPid().
     hookedExplorerPid_ = explorerPid;
+    fnInstall(explorerTray);
     WatchExplorerProcess(explorerPid);
 
     // Re-broadcast so apps repopulate now that the hook is live. Mark it as ours
@@ -297,11 +303,15 @@ void TaskbarProxy::Uninstall() {
     }
     winzooHwnd_ = nullptr;
 
-    if (!registered_) return;
-    RegDeleteTreeW(HKEY_CURRENT_USER, kClsidKey);
-    registered_ = false;
-    relayMsg_   = 0;
+    if (registered_) {
+        RegDeleteTreeW(HKEY_CURRENT_USER, kClsidKey);
+        registered_ = false;
+    }
+    relayMsg_ = 0;
 
+    // Delete the extracted DLL even when the COM registration failed — the file
+    // was written regardless. A copy still mapped into Explorer can't be deleted
+    // here; the next session's startup sweep collects it.
     if (!dllPath_.empty()) {
         DeleteFileW(dllPath_.c_str());
         dllPath_.clear();

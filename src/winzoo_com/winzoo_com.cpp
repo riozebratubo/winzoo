@@ -38,6 +38,26 @@ static HWND  g_cachedCopyDialog = nullptr;
 static DWORD g_lastPollTick = 0;
 static constexpr DWORD kPollIntervalMs = 200;
 
+static HWND FindProgressBarChild(HWND parent) {
+    // Find a progress bar control (msctls_progress32) among children/descendants
+    struct Ctx {
+        HWND result;
+    } ctx{ nullptr };
+
+    EnumChildWindows(parent, [](HWND hwnd, LPARAM lp) -> BOOL {
+        auto* c = reinterpret_cast<Ctx*>(lp);
+        wchar_t cls[64] = {};
+        GetClassNameW(hwnd, cls, 64);
+        if (wcscmp(cls, L"msctls_progress32") == 0) {
+            c->result = hwnd;
+            return FALSE;
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&ctx));
+
+    return ctx.result;
+}
+
 static HWND FindExplorerCopyDialog() {
     // If we have a cached target, verify it's still valid
     if (g_cachedCopyDialog) {
@@ -86,31 +106,17 @@ static HWND FindExplorerCopyDialog() {
         if (wcscmp(cls, L"TopLevelWindowForOverflowXamlIsland") == 0) return TRUE;
         if (wcscmp(cls, L"XamlExplorerHostIslandWindow") == 0) return TRUE;
 
+        // Only a window that actually hosts a progress bar can be the copy
+        // dialog. Without this, any captioned Explorer window (a Properties
+        // sheet, the Run box) could be cached here and block the real copy
+        // dialog from ever being found while it stayed open.
+        if (!FindProgressBarChild(hwnd)) return TRUE;
+
         c->result = hwnd;
         return FALSE;
     }, reinterpret_cast<LPARAM>(&ctx));
 
     g_cachedCopyDialog = ctx.result;
-    return ctx.result;
-}
-
-static HWND FindProgressBarChild(HWND parent) {
-    // Find a progress bar control (msctls_progress32) among children/descendants
-    struct Ctx {
-        HWND result;
-    } ctx{ nullptr };
-
-    EnumChildWindows(parent, [](HWND hwnd, LPARAM lp) -> BOOL {
-        auto* c = reinterpret_cast<Ctx*>(lp);
-        wchar_t cls[64] = {};
-        GetClassNameW(hwnd, cls, 64);
-        if (wcscmp(cls, L"msctls_progress32") == 0) {
-            c->result = hwnd;
-            return FALSE;
-        }
-        return TRUE;
-    }, reinterpret_cast<LPARAM>(&ctx));
-
     return ctx.result;
 }
 
@@ -254,7 +260,10 @@ static bool IconToBGRA(HICON hIcon, std::vector<BYTE>& out, int& w, int& h) {
 }
 
 // Relay one tray record to every WinzooTaskbar window via WM_COPYDATA.
-static void RelayTrayRecord(const SHELLTRAYDATA* st, SIZE_T cbData) {
+// `senderTray` is the hooked Shell_TrayWnd; it is stamped into wParam so the
+// receiver can sanity-check that the push comes from the hooked Explorer
+// process before acting on it.
+static void RelayTrayRecord(HWND senderTray, const SHELLTRAYDATA* st, SIZE_T cbData) {
     // Bound: we need at least through hIcon (end of the fixed head, before szTip).
     constexpr SIZE_T kMinHead = offsetof(SHELLTRAYDATA, nid) + offsetof(WireNID, szTip);
     if (cbData < kMinHead) return;
@@ -342,7 +351,8 @@ static void RelayTrayRecord(const SHELLTRAYDATA* st, SIZE_T cbData) {
         // thread — taskbars hide async, the ITrayNotify probe is bounded — so there
         // is nothing here to deadlock against.) SMTO_ABORTIFHUNG + 300ms bounds a
         // genuinely wedged winzoo.
-        SendMessageTimeoutW(winzoo, WM_COPYDATA, 0,
+        SendMessageTimeoutW(winzoo, WM_COPYDATA,
+                            reinterpret_cast<WPARAM>(senderTray),
                             reinterpret_cast<LPARAM>(&cds),
                             SMTO_ABORTIFHUNG | SMTO_BLOCK, 300, &res);
         winzoo = FindWindowExW(nullptr, winzoo, L"WinzooTaskbar", nullptr);
@@ -513,7 +523,8 @@ static LRESULT CALLBACK ExplorerCallWndProc(int nCode, WPARAM wParam, LPARAM lPa
                 GetClassNameW(cwp->hwnd, cls, 32);
                 if (wcscmp(cls, L"Shell_TrayWnd") == 0) {
                     __try {
-                        RelayTrayRecord(reinterpret_cast<SHELLTRAYDATA*>(cds->lpData),
+                        RelayTrayRecord(cwp->hwnd,
+                                        reinterpret_cast<SHELLTRAYDATA*>(cds->lpData),
                                         cds->cbData);
                     } __except (EXCEPTION_EXECUTE_HANDLER) {
                         // Never destabilize Explorer over a malformed tray blob.

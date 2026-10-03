@@ -112,8 +112,10 @@ void WriteStack(Buf& b, CONTEXT* ctx)
 
     Appendf(b, "\r\nCall stack:\r\n");
 
-    // Storage for the resolved symbol name (lives across the loop).
-    char symBuf[sizeof(SYMBOL_INFO) + MAX_SYM_NAME];
+    // Storage for the resolved symbol name (lives across the loop). Static, not
+    // stack: the handler must survive EXCEPTION_STACK_OVERFLOW, where any large
+    // stack frame would double-fault; g_inHandler serializes access.
+    static char symBuf[sizeof(SYMBOL_INFO) + MAX_SYM_NAME];
 
     for (int i = 0; i < 64; ++i) {
         if (!StackWalk64(machine, proc, thread, &frame, &local, nullptr,
@@ -167,7 +169,10 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep)
     if (InterlockedCompareExchange(&g_inHandler, 1, 0) != 0)
         return EXCEPTION_CONTINUE_SEARCH;
 
-    char buf[32 * 1024];
+    // Static, not stack: on EXCEPTION_STACK_OVERFLOW a 32 KB stack frame would
+    // double-fault in the prolog before anything could be written. The
+    // g_inHandler gate above serializes access.
+    static char buf[32 * 1024];
     Buf b{ buf, sizeof(buf) };
 
     SYSTEMTIME st;
@@ -230,8 +235,19 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep)
         CloseHandle(h);
     }
 
-    // Terminate via the report we just wrote; don't pop the OS crash UI.
-    return EXCEPTION_EXECUTE_HANDLER;
+    // The process is dying without TaskbarProxy::Uninstall(), which would leave
+    // the HKCU CLSID_TaskbarList override pointing at winzoo_com.dll — every app
+    // creating ITaskbarList from then on would get the stub implementation
+    // (progress/thumbnail/overlay features broken system-wide). Remove it here
+    // so a crash degrades to "no winzoo" instead; a relaunch re-registers it.
+    RegDeleteTreeW(HKEY_CURRENT_USER,
+                   L"Software\\Classes\\CLSID\\{56FDF344-FD6D-11d0-958A-006097C9A090}");
+
+    // Hand the exception on to WER rather than swallowing it: only a
+    // WER-processed crash honors RegisterApplicationRestart (App::Init), which
+    // is what relaunches the taskbar automatically after a crash. Modern
+    // Windows reports silently — no crash dialog pops by default.
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 
 } // namespace

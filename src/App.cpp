@@ -5,6 +5,7 @@
 #include "LaunchHelper.h"
 #include "TaskbarRelocate.h"
 #include "SystemStatus.h"
+#include "PathUtil.h"
 #include <objbase.h>
 
 struct MonitorEnumData {
@@ -46,9 +47,9 @@ int App::Run(HINSTANCE hInst, int /*nCmdShow*/)
     Shutdown();
 
     if (restart_) {
-        wchar_t exePath[MAX_PATH] = {};
-        GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-        ShellExecuteW(nullptr, L"open", exePath, nullptr, nullptr, SW_SHOWNORMAL);
+        std::wstring exePath = GetOwnExePath();
+        if (!exePath.empty())
+            ShellExecuteW(nullptr, L"open", exePath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     }
 
     return static_cast<int>(msg.wParam);
@@ -67,6 +68,14 @@ bool App::Init(HINSTANCE hInst)
         if (comInitialized_) CoUninitialize();
         return false;
     }
+
+    // Ask WER to relaunch winzoo after a crash or hang (WER enforces a 60s
+    // minimum uptime, so a crash loop can't spin). A taskbar replacement that
+    // dies and stays dead leaves the desktop with no taskbar at all; this
+    // brings it back automatically. CrashHandler cooperates by passing
+    // unhandled exceptions on to WER instead of swallowing them. Registered
+    // after the single-instance check so a bounced duplicate never registers.
+    RegisterApplicationRestart(nullptr, RESTART_NO_PATCH | RESTART_NO_REBOOT);
 
     settings_ = LoadSettings();
 
